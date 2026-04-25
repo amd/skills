@@ -20,8 +20,6 @@ skills/
 
 When an agent decides a skill is relevant (or you invoke it explicitly), it loads that `SKILL.md` and follows the instructions inside. Descriptions stay in context cheaply; the full body of a skill only loads when the task actually matches.
 
-> If your agent of choice does not yet support the Agent Skills standard, fall back to the consolidated `agents/AGENTS.md` bundle that this repo publishes.
-
 ## Why a skill, not a doc?
 
 Documentation describes an API surface — every flag, every option, neutral by design. A skill encodes the opinionated path: which flags, which container image, which `gfx` target, which environment variables, in what order. It captures the decisions a senior AMD engineer makes without thinking, in a form the agent can apply consistently across teams and repositories.
@@ -68,16 +66,56 @@ Close the loop from trace to fix to ship.
 
 > Skills land incrementally — see [Status](#status) for what is available today.
 
-## How the catalog is organized
+## A federated catalog
 
-Skills are versioned alongside the products they describe. The `cuda-to-hip` skill lives with the HIP project. `rocm-doctor` lives with the ROCm release tree. `ryzen-ai-onnx` ships with Ryzen AI. Each skill stays close to the team and the release cadence that owns it.
+The AMD stack is large and moves fast. ROCm, HIP, MIGraphX, vLLM-AMD, Ryzen AI, the framework integrations — each has its own team, release cadence, and validation matrix. A single monorepo of skills, maintained by one central team, would always be a step behind.
 
-This repository is the **catalog**: a single installable surface that aggregates skills from across the AMD stack and exposes them to coding agents through one set of plugin manifests. Install once, get the full catalog. Skills update with the products they ship with.
+So skills here are **federated**: each skill is owned and versioned by the team that owns the product it describes, and this repository is the **catalog** that brings them together.
+
+```
+                ┌─────────────────────────────────────────────────────┐
+                │                amd/skills (this repo)               │
+                │                                                     │
+                │   skills/         catalog/         .*-plugin/       │
+                │   in-repo skills  pointers         agent manifests  │
+                └──────────────────────┬──────────────────────────────┘
+                                       │  one install
+                                       ▼
+                              your AI coding agent
+                                       ▲
+                                       │  resolves pointers to
+       ┌───────────────────────────────┼────────────────────────────────┐
+       │                               │                                │
+   ROCm/ROCm                       ROCm/HIP                       Ryzen AI repo
+   rocm-doctor/                    cuda-to-hip/                   ryzen-ai-onnx/
+   gfx-target-chooser/             triton-amd-port/               ...
+   ...                             ...
+```
+
+Concretely:
+
+- The `cuda-to-hip` skill lives with the HIP project.
+- `rocm-doctor` lives with the ROCm release tree.
+- `ryzen-ai-onnx` ships with Ryzen AI.
+
+Each skill stays close to the engineers who ship the underlying product, the CI that validates it, and the release tag that pins it.
+
+### What this means for you
+
+- **One install, full coverage.** You add this repository through the plugin flow of your agent and you get the whole AMD catalog — you do not need to track and install skills product by product.
+- **Skills update with the products they describe.** When ROCm cuts a new release, the ROCm team updates the ROCm skills as part of that release. You see the new behavior the next time you pull the catalog.
+- **Skills you can trust.** Each skill is signed off by the team that owns the underlying product, not assembled second-hand by a separate documentation team.
+
+### What this means if you contribute
+
+- **In-repo skills** (Path A below) are best for cross-cutting workflows that do not have a natural product home.
+- **Product-repo skills** (Path B below) are best for skills that should live and version with a specific product. You add the skill folder to your product repo and open a small PR here that registers it in `catalog/` with a pinned tag. CI validates the linked skill against the same rules as in-repo skills, and the central plugin manifests surface it through the same one install.
+
+### Repository layout
 
 ```
 skills/             # Skills authored in this repository
 catalog/            # Manifest pointers to skills that live in product repositories
-agents/             # Aggregated AGENTS.md fallback for agents without skill support
 .cursor-plugin/     # Cursor plugin manifest
 .claude-plugin/     # Claude Code marketplace manifest
 .github/workflows/  # CI for validating skills and manifests
