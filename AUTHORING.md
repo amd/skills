@@ -11,10 +11,10 @@ Skills earn their keep on repeated, opinionated workflows. Before writing one, c
 - **Tool-bounded.** Uses only the tools and data it truly needs. Fewer moving parts means fewer ways to fail.
 - **Deterministic where possible.** Same input should produce a similar output across runs. Lean on scripts for the deterministic parts.
 - **Short execution path.** Few steps, low latency, low token cost. Long workflows belong in a checklist or split skills.
-- **Recoverable failures.** Detects errors and either retries or exits cleanly with a useful message - never leaves the user mid-state.
+- **Recoverable failures.** Detects errors and either retries or exits cleanly with a useful message, and never leaves the user mid-state.
 - **Context-light.** Works from the user's prompt and the skill body. Doesn't require long conversation history or hidden setup.
 
-If the task fails several of these, it is probably documentation, a runbook, or a one-off prompt - not a skill.
+If the task fails several of these, it is probably documentation, a runbook, or a one-off prompt, not a skill.
 
 ## Write the description for the goal, not the mechanics
 
@@ -25,13 +25,13 @@ The `description` is the only part of the skill always loaded into context. The 
 The agent matches descriptions against what the user is trying to *achieve*. Internal mechanics (which library, which container, which API) belong in the body of `SKILL.md`.
 
 ```yaml
-# Good - names the goal and the trigger surface
+# Good: names the goal and the trigger surface
 description: >-
   Port a CUDA kernel to HIP and flag anything that needs manual review.
   Use when the user wants to run CUDA code on AMD GPUs, mentions hipify,
   HIP, ROCm porting, or asks how to convert a .cu file.
 
-# Bad - describes how the skill works internally
+# Bad: describes how the skill works internally
 description: >-
   Runs hipify-perl on .cu files, parses the output, and post-processes
   the result with regex rules.
@@ -41,8 +41,8 @@ description: >-
 
 - **Third person.** The description is injected into the system prompt. Use *"Ports CUDA kernels..."*, not *"I help you port..."* or *"You can use this to..."*.
 - **State WHAT and WHEN.** What the skill produces, and the situations in which the agent should reach for it.
-- **Include the trigger surface.** List the words and phrases a user is likely to say - product names, file extensions, API names, error messages. Missing triggers cause under-triggering.
-- **Add negative triggers when boundaries are easily crossed.** *"Do not use for system-wide installs - see X instead."*
+- **Include the trigger surface.** List the words and phrases a user is likely to say, including product names, file extensions, API names, and error messages. Missing triggers cause under-triggering.
+- **Add negative triggers when boundaries are easily crossed.** *"Do not use for system-wide installs; see X instead."*
 - **Be pushy when the use case is ambiguous.** It is better to err toward being invoked than to be silently skipped.
 - **Stay under ~1024 characters** (the hard cap on Anthropic-compatible runtimes).
 
@@ -75,7 +75,7 @@ Database migrations want low freedom. Code review wants high freedom. Mismatched
 
 ### Use progressive disclosure, one level deep
 
-Link from `SKILL.md` directly to reference files. Do not chain references through intermediate files - agents may only partially read deeply nested content.
+Link from `SKILL.md` directly to reference files. Do not chain references through intermediate files because agents may only partially read deeply nested content.
 
 ```
 skill-name/
@@ -132,7 +132,7 @@ Test the skill the way users will hit it:
 
 1. Run a fresh agent against ~10 prompts that *should* trigger the skill and ~10 that *shouldn't*. The description should route both sets correctly.
 2. Run the skill end-to-end on a real machine. Watch where the agent hesitates, asks unnecessary questions, or goes off-script.
-3. Bring those observations back into the skill - usually as a sharper description, a clearer default, or a missing prerequisite - rather than adding more prose.
+3. Bring those observations back into the skill, usually as a sharper description, a clearer default, or a missing prerequisite, rather than adding more prose.
 
 ## Pre-publish checklist
 
@@ -152,7 +152,7 @@ Test the skill the way users will hit it:
 
 ## Validating locally
 
-The structural rules from this guide - frontmatter shape, name format, description length, and `SKILL.md` body size - are enforced by `scripts/validate_skills.py` and run on every pull request. Run them locally before pushing:
+The structural rules from this guide (frontmatter shape, name format, description length, and `SKILL.md` body size) are enforced by `scripts/validate_skills.py` and run on every pull request. Run them locally before pushing:
 
 ```bash
 ./scripts/check.sh   # validates every skill (same command CI runs)

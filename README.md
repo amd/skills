@@ -8,21 +8,19 @@
 ![Agent Skills](https://img.shields.io/badge/Agent_Skills-Format-7B2D8E)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 
-Production-minded skills for AI coding agents working across the AMD software and hardware stack.
+Give your AI agents the power of AMD's optimized ecosystem.
 
-[**Browse the Skill Catalog ->**](#the-catalog) • [**Authoring Guide ->**](AUTHORING.md)
+[**Browse the Skill Catalog ->**](#the-catalog)
 
 </div>
 
-AMD Skills package the knowledge, scripts, and conventions for working with AMD hardware and software - ROCm, HIP, MIGraphX, ROCm-aware PyTorch and JAX, Instinct GPUs, Ryzen AI, Lemonade, and the broader AMD developer stack - and deliver them in a form AI coding agents can load on demand.
+AMD Skills provide agents with knowledge, scripts, and conventions for working with AMD hardware and software.
 
-When a developer asks an agent to "set up ROCm in this container," "port this CUDA kernel to HIP," "tune this model for an MI300X," or "integrate local AI into my app," the agent pulls in an AMD-authored skill instead of guessing.
-
-Skills in this repository follow the standardized [Agent Skills](https://github.com/anthropics/skills) format and are designed to interoperate with the major coding agents - Cursor, Claude Code, OpenAI Codex, and Gemini CLI.
+Skills in this repository follow the standardized [Agent Skills](https://github.com/anthropics/skills) format and are designed to interoperate with the major coding agents like Cursor, Claude Code, OpenAI Codex, and Gemini CLI.
 
 ## What is a skill?
 
-A skill is a self-contained folder that bundles everything an agent needs to perform a focused task: instructions, helper scripts, prompts, templates, and references. At its core is a `SKILL.md` file with YAML frontmatter - a `name` and a short `description` that tells the agent *when* the skill should activate - followed by the guidance the agent reads while the skill is in use.
+A skill is a self-contained folder that bundles everything an agent needs to perform a focused task: instructions, helper scripts, prompts, templates, and references. At its core is a `SKILL.md` file with YAML frontmatter, a `name`, and a short `description` that tells the agent *when* the skill should activate, followed by the guidance the agent reads while the skill is in use.
 
 ```
 skills/
@@ -36,9 +34,9 @@ When an agent decides a skill is relevant (or you invoke it explicitly), it load
 
 ## Why a skill, not a doc?
 
-Documentation describes an API surface - every flag, every option, neutral by design. A skill encodes the opinionated path: which flags, which container image, which `gfx` target, which environment variables, in what order. It captures the decisions a senior AMD engineer makes without thinking, in a form the agent can apply consistently across teams and repositories.
+Documentation describes an API surface: every flag, every option, neutral by design. A skill encodes the opinionated path: which flags, which container image, which `gfx` target, which environment variables, in what order. It captures the decisions a senior AMD engineer makes without thinking, in a form the agent can apply consistently across teams and repositories.
 
-Skills earn their keep on repeated, opinionated workflows - exactly where the AMD stack lives.
+Skills earn their keep on repeated, opinionated workflows, exactly where the AMD stack lives.
 
 ## The catalog
 
@@ -52,7 +50,7 @@ Diagnose, configure, and tune AMD silicon directly.
 | --- | --- |
 | `rocm-doctor` | Detect driver / kernel / ROCm / framework mismatches and propose fixes. |
 | `gfx-target-chooser` | Pick the right `gfx942` / `gfx90a` / `gfx1100` target and matching compiler flags. |
-| `mi300x-tuner` | Opinionated training and inference tuning for MI300X - TunableOp, FSDP, FlashAttention. |
+| `mi300x-tuner` | Opinionated training and inference tuning for MI300X, including TunableOp, FSDP, and FlashAttention. |
 | `rocm-container-picker` | Map a workload to a known-good `rocm/*` container image. |
 | `ryzen-ai-deploy` | Prepare, quantize, and deploy models to Ryzen AI NPUs across the ONNX, PyTorch, and hybrid CPU/NPU/iGPU paths. |
 
@@ -86,11 +84,11 @@ Close the loop from trace to fix to ship.
 | `migraphx-deploy` | Compile an ONNX model with MIGraphX and benchmark it on a target. |
 | `rocm-ci-template` | Drop-in GitHub Actions for AMD-targeted projects. |
 
-> Skills land incrementally - see [Status](#status) for what is available today.
+> Skills land incrementally; see [Status](#status) for what is available today.
 
 ## A federated catalog
 
-The AMD stack is large and moves fast. ROCm, HIP, MIGraphX, vLLM-AMD, Ryzen AI, the framework integrations - each has its own team, release cadence, and validation matrix. A single monorepo of skills, maintained by one central team, would always be a step behind.
+The AMD stack is large and moves fast. ROCm, HIP, MIGraphX, vLLM-AMD, Ryzen AI, and framework integrations each have their own team, release cadence, and validation matrix. A single monorepo of skills, maintained by one central team, would always be a step behind.
 
 So skills here are **federated**: each skill is owned and versioned by the team that owns the product it describes, and this repository is the **catalog** that brings them together.
 
@@ -122,11 +120,11 @@ Concretely:
 
 Each skill stays close to the engineers who ship the underlying product, the CI that validates it, and the release tag that pins it.
 
-This repo also acts as an **incubator**: a skill can start its life under `skills/` here to iterate quickly, then graduate to its product repo and be re-pointed from `catalog/` once it has a clear owner - no change for installed users.
+This repo also acts as an **incubator**: a skill can start its life under `skills/` here to iterate quickly, then graduate to its product repo and be re-pointed from `catalog/` once it has a clear owner, with no change for installed users.
 
 ### What this means for you
 
-- **One install, full coverage.** You add this repository through the plugin flow of your agent and you get the whole AMD catalog - you do not need to track and install skills product by product.
+- **One install, full coverage.** You add this repository through the plugin flow of your agent and you get the whole AMD catalog, so you do not need to track and install skills product by product.
 - **Skills update with the products they describe.** When ROCm cuts a new release, the ROCm team updates the ROCm skills as part of that release. You see the new behavior the next time you pull the catalog.
 - **Skills you can trust.** Each skill is signed off by the team that owns the underlying product, not assembled second-hand by a separate documentation team.
 
@@ -185,19 +183,19 @@ Once a skill is installed, reference it in plain language while talking to your 
 - "Use the `migraphx-deploy` skill to compile this ONNX model for `gfx942` and benchmark it."
 - "Use the `omniperf-tune` skill to find the bottleneck in this training step."
 
-The agent loads the matching `SKILL.md` and any helper scripts, then carries out the task. In most cases the agent will pick the right skill on its own from the description - explicit invocation is a fallback, not a requirement.
+The agent loads the matching `SKILL.md` and any helper scripts, then carries out the task. In most cases the agent will pick the right skill on its own from the description; explicit invocation is a fallback, not a requirement.
 
 ## Contributing a skill
 
 We welcome contributions from AMD engineers, partners, and the community. There are two contribution paths, matching how the catalog is organized.
 
-### Path A - Skills authored in this repository
+### Path A: Skills authored in this repository
 
 Best for cross-cutting skills that do not have a natural product home.
 
 1. Copy an existing skill folder under `skills/` as a starting point and rename it.
 2. Update the `SKILL.md` frontmatter so the `name` and `description` clearly explain *what* the skill does and *when* an agent should reach for it.
-3. Add the supporting scripts, templates, and reference docs your instructions point to. Keep skills focused - one well-scoped task per skill is better than one mega-skill.
+3. Add the supporting scripts, templates, and reference docs your instructions point to. Keep skills focused: one well-scoped task per skill is better than one mega-skill.
 4. Register the skill in `.claude-plugin/marketplace.json` with a human-readable description.
 5. Validate the skill locally before pushing:
    ```bash
@@ -205,22 +203,22 @@ Best for cross-cutting skills that do not have a natural product home.
    ```
 6. Open a pull request. The `validate` GitHub Actions workflow runs `./scripts/check.sh` and must pass before merge. See [AUTHORING.md](AUTHORING.md#validating-locally) for the full set of enforced rules.
 
-### Path B - Skills authored in a product repository
+### Path B: Skills authored in a product repository
 
 Best for skills that should ship and version with a product (HIP, MIGraphX, Ryzen AI, vLLM-AMD, etc.).
 
-1. Add the skill folder to your product repository - a common location is `.agents/skills/<skill-name>/`.
+1. Add the skill folder to your product repository; a common location is `.agents/skills/<skill-name>/`.
 2. Open a pull request here that adds an entry to `catalog/` pointing at the skill's location and pinning a tag.
 3. CI will validate the linked skill against the same rules as in-repo skills, and the central plugin manifests will surface it through one install.
 
 ### Writing tips
 
-See [AUTHORING.md](AUTHORING.md) for the full authoring guide - when a task is a good fit for a skill, how to write a description that routes correctly, and the conventions every AMD skill should follow. The essentials:
+See [AUTHORING.md](AUTHORING.md) for the full authoring guide, including when a task is a good fit for a skill, how to write a description that routes correctly, and the conventions every AMD skill should follow. The essentials:
 
 - Optimize the `description` for *agent routing*, not marketing copy. Describe the user's goal, not how the skill works internally.
 - Be explicit about prerequisites: ROCm version, kernel, GPU architecture, container image.
 - Prefer scripts and runnable commands over prose where possible.
-- Call out known pitfalls - driver mismatches, unsupported architectures, environment variables that silently change behavior.
+- Call out known pitfalls: driver mismatches, unsupported architectures, and environment variables that silently change behavior.
 
 ## Status
 
