@@ -185,11 +185,11 @@ Best for cross-cutting skills that do not have a natural product home.
 2. Update the `SKILL.md` frontmatter so the `name` and `description` clearly explain *what* the skill does and *when* an agent should reach for it.
 3. Add the supporting scripts, templates, and reference docs your instructions point to. Keep skills focused — one well-scoped task per skill is better than one mega-skill.
 4. Register the skill in `.claude-plugin/marketplace.json` with a human-readable description.
-5. Run the publishing script to validate and regenerate the metadata:
+5. Validate the skill locally before pushing:
    ```bash
-   ./scripts/publish.sh
+   ./scripts/check.sh   # validates every SKILL.md
    ```
-6. Open a pull request. CI will verify that names, descriptions, and paths are consistent across `SKILL.md` files and the marketplace manifest.
+6. Open a pull request. The `validate` GitHub Actions workflow runs `./scripts/check.sh` and must pass before merge. See [AUTHORING.md](AUTHORING.md#validating-locally) for the full set of enforced rules.
 
 ### Path B — Skills authored in a product repository
 

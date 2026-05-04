@@ -1,0 +1,10 @@
+# Local-only working area (briefings, drafts, generated decks).
+internal/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# uv
+.uv-cache/

@@ -148,3 +148,19 @@ Test the skill the way users will hit it:
 - [ ] Scripts handle expected errors and document their constants and dependencies
 - [ ] Prerequisites (ROCm version, GPU arch, container, env vars) are stated explicitly
 - [ ] Tested end-to-end on the target hardware against real prompts
+- [ ] `./scripts/check.sh` passes (CI runs this on every PR)
+
+## Validating locally
+
+The structural rules from this guide — frontmatter shape, name format, description length, and `SKILL.md` body size — are enforced by `scripts/validate_skills.py` and run on every pull request. Run them locally before pushing:
+
+```bash
+./scripts/check.sh   # validates every skill (same command CI runs)
+```
+
+The validator checks every skill under `skills/` for:
+
+- a `SKILL.md` file with a valid YAML frontmatter block
+- `name`: lowercase-with-hyphens, ≤ 64 characters, no `anthropic` / `claude` substrings, matches the directory name
+- `description`: non-empty, ≤ 1024 characters
+- `SKILL.md` body: ≤ 500 lines (push longer reference material into sibling files)
