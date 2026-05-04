@@ -13,8 +13,8 @@ description: >-
 # Local AI App Integration (Embeddable Lemonade)
 
 Add a local AI mode to an existing app that already talks to a cloud AI API
-(OpenAI, Anthropic, or Ollama-compatible). The app launches `lemond` — the
-Embeddable Lemonade binary — as a private subprocess and the existing client
+(OpenAI, Anthropic, or Ollama-compatible). The app launches `lemond` - the
+Embeddable Lemonade binary - as a private subprocess and the existing client
 talks to it on `http://localhost:PORT/api/v1`. The user gets local, private,
 hardware-optimized inference (CPU, AMD iGPU/dGPU, XDNA2 NPU) with no separate
 install.
@@ -26,11 +26,11 @@ Use this skill when **all** of the following are true:
 - The app already calls a cloud AI service over HTTP (OpenAI Chat Completions,
   Anthropic Messages, or Ollama).
 - The user wants that AI to run on the end-user's PC, with the AI engine
-  bundled into the app — not as a separate user install.
+  bundled into the app - not as a separate user install.
 - The target platform is Windows x64 or Linux x64 (macOS embeddable is in beta).
 
 If the user instead wants a **system-wide** Lemonade Server (one install,
-shared across apps), do not use this skill — point them at
+shared across apps), do not use this skill - point them at
 `https://lemonade-server.ai/install_options.html` and the standard OpenAI base
 URL `http://localhost:13305/api/v1`.
 
@@ -52,7 +52,7 @@ Track progress against this checklist. Move on only when each step verifies.
 
 ---
 
-## Step 1 — Survey the app
+## Step 1 - Survey the app
 
 Find every place the app currently calls a cloud AI API. Search the repo for:
 
@@ -65,16 +65,16 @@ Record three things before continuing:
 
 1. **Client library and language** (e.g., `openai-python`, `openai-node`,
    `@anthropic-ai/sdk`, `go-openai`, raw `fetch`).
-2. **Modalities used** — text chat, tool calling, embeddings, image gen,
+2. **Modalities used** - text chat, tool calling, embeddings, image gen,
    transcription, TTS. This drives the model + backend choice in Step 2.
 3. **One single place** where the base URL and API key are constructed. If
    there isn't one, refactor to one before going further. Local-mode toggling
    must flip exactly one config object.
 
-## Step 2 — Pick a model + backend profile
+## Step 2 - Pick a model + backend profile
 
 Choose **one** default profile based on the app's primary modality. Do not
-ship a buffet — ship one good default and document how the user can override
+ship a buffet - ship one good default and document how the user can override
 it.
 
 | App's primary need | Default model | Recipe | Why |
@@ -93,7 +93,7 @@ unset. Override only if the app has hard hardware requirements.
 
 For more options and tradeoffs, see [reference.md](reference.md).
 
-## Step 3 — Place Embeddable Lemonade in the app's tree
+## Step 3 - Place Embeddable Lemonade in the app's tree
 
 Get the embeddable artifact from the latest Lemonade release:
 
@@ -118,12 +118,12 @@ vendor/lemonade/
     models--unsloth--Qwen3-4B-GGUF/
 ```
 
-**Bundle decisions — pick deliberately:**
+**Bundle decisions - pick deliberately:**
 
 - **Backends:** Bundle `llamacpp:vulkan` at packaging time (works on every
   GPU). Install `llamacpp:rocm` at first run on supported AMD systems via
   `POST /v1/install` after probing `GET /v1/system-info`. Never ship every
-  backend — the artifact balloons.
+  backend - the artifact balloons.
 - **Models:** Either bundle the default model under `models/` (offline
   install, larger installer) **or** pull on first run with `POST /v1/pull`
   (smaller installer, needs network). Pick one and document it.
@@ -135,7 +135,7 @@ Strip what you don't ship: delete the `lemonade` CLI and
 `resources/defaults.json` from the shipping artifact once `config.json` is
 initialized.
 
-## Step 4 — Add a `lemond` launcher
+## Step 4 - Add a `lemond` launcher
 
 The launcher is a thin process supervisor. Its only jobs:
 
@@ -227,9 +227,9 @@ async function waitForHealth(port, key, timeoutMs) {
 }
 ```
 
-## Step 5 — Re-point the existing client at `lemond`
+## Step 5 - Re-point the existing client at `lemond`
 
-Change exactly two values in the app's existing client config — the base URL
+Change exactly two values in the app's existing client config - the base URL
 and the API key. Nothing else.
 
 | Existing client | New `base_url` | New auth |
@@ -257,7 +257,7 @@ resp = client.chat.completions.create(
 )
 ```
 
-## Step 6 — Wait for health, then preload the default model
+## Step 6 - Wait for health, then preload the default model
 
 `lemond` lazy-loads models on first inference. To eliminate cold-start
 latency on the user's first message, preload right after the health check
@@ -273,7 +273,7 @@ Content-Type: application/json
 
 If the model isn't downloaded yet, follow the recovery flow in Step 7.
 
-## Step 7 — Lifecycle and recovery
+## Step 7 - Lifecycle and recovery
 
 These are the only failure modes worth handling. Do not over-engineer.
 
@@ -283,13 +283,13 @@ These are the only failure modes worth handling. Do not over-engineer.
 | `/v1/load` returns 500 with backend error | Backend not installed for this hardware | `GET /v1/system-info`, pick a supported backend, `POST /v1/install` with `{"recipe": "...", "backend": "..."}`, retry |
 | Subprocess exits immediately | Port already in use by another `lemond` | Pick a new free port and retry once |
 | `/v1/health` never returns 200 | First-run backend extraction is slow on cold disk | Extend timeout to 90s on first launch, 30s after |
-| HTTP 401 on every request | Forgot the `Authorization: Bearer` header | Audit the client config — Lemonade rejects unauth'd calls when `LEMONADE_API_KEY` is set |
+| HTTP 401 on every request | Forgot the `Authorization: Bearer` header | Audit the client config - Lemonade rejects unauth'd calls when `LEMONADE_API_KEY` is set |
 
 **Shutdown:** On app exit, `proc.terminate()` (Unix) or
 `proc.kill()` (Windows). `lemond` flushes config and exits cleanly within a
-couple of seconds. Always wait on the process — never orphan it.
+couple of seconds. Always wait on the process - never orphan it.
 
-**Do not** parse `lemond` stdout to detect readiness — use the HTTP
+**Do not** parse `lemond` stdout to detect readiness - use the HTTP
 `/v1/health` probe. Stdout format is not a stable contract.
 
 ---
@@ -302,7 +302,7 @@ The integration is done when **all** of these are true:
 - [ ] `GET /api/v1/health` returns 200 within the timeout.
 - [ ] The default model loads successfully via `POST /v1/load`.
 - [ ] The existing client's chat / image / speech call returns a valid
-      response with the base URL and key swapped — no other code changed.
+      response with the base URL and key swapped - no other code changed.
 - [ ] Killing the parent process leaves no `lemond` subprocess behind.
 - [ ] On a fresh machine without the optimal backend, the app still works
       via the Vulkan fallback bundled in `bin/`.

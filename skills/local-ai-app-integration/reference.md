@@ -1,4 +1,4 @@
-# Local AI App Integration — Reference
+# Local AI App Integration - Reference
 
 Detailed reference material for the `local-ai-app-integration` skill. Read
 this only when the main `SKILL.md` flow needs a decision that isn't covered
@@ -32,7 +32,7 @@ hardware-optimized one at first run after a system probe.
 | `cpu` | x86_64 CPU | Windows, Linux | Install only if you need a non-Vulkan CPU path. |
 | `metal` | Apple Silicon | macOS (beta) | macOS-only path. |
 
-### Text generation (NPU recipes — Windows only)
+### Text generation (NPU recipes - Windows only)
 
 | Recipe | Backend | Hardware | Notes |
 |---|---|---|---|
@@ -64,7 +64,7 @@ hardware-optimized one at first run after a system probe.
 
 ## Model picker by use case
 
-Pick **one** model as the app default. Do not list options to the user —
+Pick **one** model as the app default. Do not list options to the user -
 ship a default and document how to override.
 
 | Use case | Recommended model | Approx size | Recipe |
@@ -177,7 +177,7 @@ hand-editing `config.json`, or at runtime via `POST /internal/set`.
 | `host` | string | Default `127.0.0.1`. **Do not** expose on `0.0.0.0` from an embedded app. |
 | `log_level` | enum | `trace`/`debug`/`info`/`warning`/`error`/`fatal`/`none` |
 | `global_timeout` | int seconds | HTTP client timeout for backend installs and pulls |
-| `no_broadcast` | bool | **Set `true` for embedded apps** — disables UDP discovery beacon |
+| `no_broadcast` | bool | **Set `true` for embedded apps** - disables UDP discovery beacon |
 | `extra_models_dir` | string | Search path for arbitrary GGUFs (see below) |
 
 ### Deferred (apply on next load)
