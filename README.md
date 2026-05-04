@@ -100,6 +100,8 @@ Concretely:
 
 Each skill stays close to the engineers who ship the underlying product, the CI that validates it, and the release tag that pins it.
 
+This repo also acts as an **incubator**: a skill can start its life under `skills/` here to iterate quickly, then graduate to its product repo and be re-pointed from `catalog/` once it has a clear owner — no change for installed users.
+
 ### What this means for you
 
 - **One install, full coverage.** You add this repository through the plugin flow of your agent and you get the whole AMD catalog — you do not need to track and install skills product by product.
