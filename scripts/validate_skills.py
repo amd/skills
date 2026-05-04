@@ -16,7 +16,7 @@ Enforces the rules documented in AUTHORING.md:
 
 Run from the repo root:
 
-    ./scripts/check.sh                          # used by CI; runs tests + this
+    ./scripts/check.sh                          # used by CI; thin wrapper
     uv run scripts/validate_skills.py           # ad-hoc
     uv run scripts/validate_skills.py --skills-dir skills
 

@@ -187,7 +187,7 @@ Best for cross-cutting skills that do not have a natural product home.
 4. Register the skill in `.claude-plugin/marketplace.json` with a human-readable description.
 5. Validate the skill locally before pushing:
    ```bash
-   ./scripts/check.sh   # runs unit tests and validates every SKILL.md
+   ./scripts/check.sh   # validates every SKILL.md
    ```
 6. Open a pull request. The `validate` GitHub Actions workflow runs `./scripts/check.sh` and must pass before merge. See [AUTHORING.md](AUTHORING.md#validating-locally) for the full set of enforced rules.
 

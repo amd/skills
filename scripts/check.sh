@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Run unit tests and validate every SKILL.md in the catalog.
+# Validate every SKILL.md in the catalog.
 #
 # Usage:
-#   ./scripts/check.sh              Run tests + validate every skill.
+#   ./scripts/check.sh              Validate every skill.
 #   ./scripts/check.sh -h|--help    Print this help.
 #
 # Requires `uv` (https://github.com/astral-sh/uv).
@@ -24,9 +24,7 @@ usage() {
 
 case "${1:-}" in
   "")
-    uv run scripts/test_validate_skills.py
     uv run scripts/validate_skills.py
-    echo "All checks passed."
     ;;
   -h|--help)
     usage

@@ -155,7 +155,7 @@ Test the skill the way users will hit it:
 The structural rules from this guide — frontmatter shape, name format, description length, and `SKILL.md` body size — are enforced by `scripts/validate_skills.py` and run on every pull request. Run them locally before pushing:
 
 ```bash
-./scripts/check.sh   # runs unit tests + validates every skill (same command CI runs)
+./scripts/check.sh   # validates every skill (same command CI runs)
 ```
 
 The validator checks every skill under `skills/` for:
