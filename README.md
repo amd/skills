@@ -104,7 +104,7 @@ Concretely:
 - The `cuda-to-hip` skill lives with the HIP project.
 - `rocm-doctor` lives with the ROCm release tree.
 - `ryzen-ai-deploy` ships with Ryzen AI.
-- `local-ai-app-integration` is incubating in this repo today and will graduate to `lemonade-sdk/lemonade` so it ships and versions with the `lemond` binary it drives.
+- `local-ai-app-integration` is incubating in this repo today and will graduate to `lemonade-sdk/lemonade`.
 
 Each skill stays close to the engineers who ship the underlying product, the CI that validates it, and the release tag that pins it.
 
@@ -201,7 +201,9 @@ Best for skills that should ship and version with a product (HIP, MIGraphX, Ryze
 
 ### Writing tips
 
-- Optimize the `description` for *agent routing*, not marketing copy. It is what decides whether the skill gets loaded.
+See [AUTHORING.md](AUTHORING.md) for the full authoring guide — when a task is a good fit for a skill, how to write a description that routes correctly, and the conventions every AMD skill should follow. The essentials:
+
+- Optimize the `description` for *agent routing*, not marketing copy. Describe the user's goal, not how the skill works internally.
 - Be explicit about prerequisites: ROCm version, kernel, GPU architecture, container image.
 - Prefer scripts and runnable commands over prose where possible.
 - Call out known pitfalls — driver mismatches, unsupported architectures, environment variables that silently change behavior.
