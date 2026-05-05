@@ -11,7 +11,7 @@
 [![OpenAI Codex](https://img.shields.io/badge/OpenAI_Codex-Compatible-412991)](https://openai.com/codex/)
 [![Gemini CLI](https://img.shields.io/badge/Gemini_CLI-Compatible-4285F4)](https://ai.google.dev/gemini-api/docs/cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-<img src="assets/banner.jpg" alt="AMD Skills"/>
+<img src="assets/banner.gif" alt="AMD Skills"/>
 Give your AI agents the power of AMD's optimized ecosystem.
 
 [**Browse the Skill Catalog ->**](#the-catalog)
