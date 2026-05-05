@@ -5,7 +5,7 @@
 # ///
 """Validate AMD skills against the standardized Agent Skills format.
 
-Enforces the rules documented in AUTHORING.md:
+Enforces the rules documented in CONTRIBUTING.md:
 
   - SKILL.md exists at the skill root
   - YAML frontmatter is parseable
@@ -42,7 +42,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 
-# Limits from AUTHORING.md and the standardized Agent Skills format.
+# Limits from CONTRIBUTING.md and the standardized Agent Skills format.
 MAX_NAME_LEN = 64
 MAX_DESCRIPTION_LEN = 1024
 MAX_BODY_LINES = 500
@@ -163,7 +163,7 @@ def validate_claude_marketplace(skill_dirs: list[Path]) -> list[str]:
     """Return error strings if marketplace entries don't match skills/ on disk.
 
     The marketplace's human-readable `description` is intentionally allowed
-    to differ from the SKILL.md description (per AUTHORING.md), so this only
+    to differ from the SKILL.md description (per CONTRIBUTING.md), so this only
     enforces that names and source paths line up.
     """
     if not CLAUDE_MARKETPLACE.exists():

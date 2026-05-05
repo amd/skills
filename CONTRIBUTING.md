@@ -1,6 +1,40 @@
-# Authoring AMD Skills
+# Contributing to AMD Skills
 
-A short guide for writing skills that agents pick up reliably and execute well. For repository structure and contribution paths, see the [README](README.md). For the full Anthropic reference, see [Skill authoring best practices](https://docs.anthropic.com/en/docs/agents-and-tools/agent-skills/best-practices).
+This guide covers everything you need to ship a skill: how to choose a contribution path, what to validate locally, and the writing conventions every AMD skill should follow.
+
+For repository structure and the broader catalog model, see the [README](README.md). For the upstream reference, see Anthropic's [Skill authoring best practices](https://docs.anthropic.com/en/docs/agents-and-tools/agent-skills/best-practices).
+
+We welcome contributions from AMD engineers and selected partners.
+
+## Contribution paths
+
+There are two contribution paths, matching how the catalog is organized.
+
+### Path A: Skills authored in this repository
+
+Best for cross-cutting skills that do not have a natural product home.
+
+1. Copy an existing skill folder under `skills/` as a starting point and rename it.
+2. Update the `SKILL.md` frontmatter so the `name` and `description` clearly explain *what* the skill does and *when* an agent should reach for it.
+3. Add the supporting scripts, templates, and reference docs your instructions point to. Keep skills focused: one well-scoped task per skill is better than one mega-skill.
+4. Register the skill in `.claude-plugin/marketplace.json` with a human-readable description (the marketplace description is for humans browsing the catalog; the `SKILL.md` description is what the agent uses for routing).
+5. Regenerate the Cursor manifest so it tracks the new skill:
+   ```bash
+   ./scripts/publish.sh   # writes .cursor-plugin/plugin.json
+   ```
+6. Validate the skill locally before pushing:
+   ```bash
+   ./scripts/check.sh   # validates every SKILL.md and that manifests are in sync
+   ```
+7. Open a pull request. The `validate` GitHub Actions workflow runs `./scripts/check.sh` and must pass before merge. See [Validating locally](#validating-locally) for the full set of enforced rules.
+
+### Path B: Skills authored in a product repository
+
+Best for skills that should ship and version with a product (HIP, MIGraphX, Ryzen AI, Lemonade, etc.).
+
+1. Add the skill folder to your product repository; a common location is `.agents/skills/<skill-name>/`.
+2. Open a pull request here that adds an entry to `catalog/` pointing at the skill's location and pinning a tag.
+3. CI will validate the linked skill against the same rules as in-repo skills, and the central plugin manifests will surface it through one install.
 
 ## Is this task a good fit for a skill?
 
@@ -168,4 +202,4 @@ The validator checks every skill under `skills/` for:
 It also checks the plugin manifests:
 
 - every skill under `skills/` has a matching entry in `.claude-plugin/marketplace.json` (and vice versa), with `source` set to `./skills/<name>` and a non-empty human-readable `description`
-- `.cursor-plugin/plugin.json` is up to date with `.claude-plugin/plugin.json` and the discovered skills (regenerate with `./scripts/publish.sh`) (push longer reference material into sibling files)
+- `.cursor-plugin/plugin.json` is up to date with `.claude-plugin/plugin.json` and the discovered skills (regenerate with `./scripts/publish.sh`)
