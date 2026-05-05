@@ -86,6 +86,7 @@ Close the loop from trace to fix to ship.
 | --- | --- |
 | `rocprof-capture` | Capture and interpret a `rocprof` trace for a workload. |
 | `omniperf-tune` | Run `omniperf`, locate the bottleneck, and suggest the fix. |
+| `quark-quantize` | Quantize PyTorch and ONNX models with [AMD Quark](https://github.com/amd/Quark) (INT4/INT8/FP8/MX), pick the right scheme and calibration, and export for AMD deployment. |
 
 > Skills land incrementally; see [Status](#status) for what is available today.
 
