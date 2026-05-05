@@ -46,18 +46,6 @@ Skills earn their keep on repeated, opinionated workflows, exactly where the AMD
 
 The initial catalog is organized into four focus areas.
 
-### Hardware-native skills
-
-Diagnose, configure, and tune AMD silicon directly.
-
-| Skill | What it does |
-| --- | --- |
-| `rocm-doctor` | Detect driver / kernel / ROCm / framework mismatches and propose fixes. |
-| `gfx-target-chooser` | Pick the right `gfx942` / `gfx90a` / `gfx1100` target and matching compiler flags. |
-| `mi300x-tuner` | Opinionated training and inference tuning for MI300X, including TunableOp, FSDP, and FlashAttention. |
-| `rocm-container-picker` | Map a workload to a known-good `rocm/*` container image. |
-| `ryzen-ai-deploy` | Prepare, quantize, and deploy models to Ryzen AI NPUs across the ONNX, PyTorch, and hybrid CPU/NPU/iGPU paths. |
-
 ### Application integration
 
 Embed AMD-optimized AI into end-user applications.
@@ -66,6 +54,18 @@ Embed AMD-optimized AI into end-user applications.
 | --- | --- |
 | `local-ai-app-integration` | Integrate local AI into cloud LLM apps for offline support, better privacy, and lower API costs. |
 | `local-ai-use` | Route image generation, text-to-speech, and speech-to-text through a local AI Server to reduce token/cost usage. |
+
+### Hardware-native skills
+
+Diagnose, configure, and tune AMD silicon directly.
+
+| Skill | What it does |
+| --- | --- |
+| `rocm-doctor` | Detect driver / kernel / ROCm / framework mismatches and propose fixes. |
+| `mi300x-tuner` | Opinionated training and inference tuning for MI300X, including TunableOp, FSDP, and FlashAttention. |
+| `rocm-container-picker` | Map a workload to a known-good `rocm/*` container image. |
+| `gfx-target-chooser` | Pick the right `gfx942` / `gfx90a` / `gfx1100` target and matching compiler flags. |
+
 
 ### Cross-stack porting
 
@@ -86,14 +86,12 @@ Close the loop from trace to fix to ship.
 | --- | --- |
 | `rocprof-capture` | Capture and interpret a `rocprof` trace for a workload. |
 | `omniperf-tune` | Run `omniperf`, locate the bottleneck, and suggest the fix. |
-| `migraphx-deploy` | Compile an ONNX model with MIGraphX and benchmark it on a target. |
-| `rocm-ci-template` | Drop-in GitHub Actions for AMD-targeted projects. |
 
 > Skills land incrementally; see [Status](#status) for what is available today.
 
 ## A federated catalog
 
-The AMD stack is large and moves fast. ROCm, HIP, MIGraphX, vLLM-AMD, Ryzen AI, and framework integrations each have their own team, release cadence, and validation matrix. A single monorepo of skills, maintained by one central team, would always be a step behind.
+The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integrations each have their own team, release cadence, and validation matrix. A single monorepo of skills, maintained by one central team, would always be a step behind.
 
 So skills here are **federated**: each skill is owned and versioned by the team that owns the product it describes, and this repository is the **catalog** that brings them together.
 
@@ -115,13 +113,6 @@ So skills here are **federated**: each skill is owned and versioned by the team 
    rocm-doctor/    cuda-to-hip/    ryzen-ai-deploy/  local-ai-app-   product
    gfx-target-...  triton-amd-...  ...               integration/    repos
 ```
-
-Concretely:
-
-- The `cuda-to-hip` skill lives with the HIP project.
-- `rocm-doctor` lives with the ROCm release tree.
-- `ryzen-ai-deploy` ships with Ryzen AI.
-- `local-ai-app-integration` is incubating in this repo today and will graduate to `lemonade-sdk/lemonade`.
 
 Each skill stays close to the engineers who ship the underlying product, the CI that validates it, and the release tag that pins it.
 
@@ -182,17 +173,15 @@ gemini extensions install https://github.com/amd/skills.git --consent
 
 Once a skill is installed, reference it in plain language while talking to your agent. For example:
 
-- "Integrate local AI capabilities into my app with Embeddable Lemonade."
-- "Use the `pytorch-rocm-setup` skill to get PyTorch running on this MI300X node."
-- "Use the `cuda-to-hip` skill to convert these CUDA kernels and flag anything that needs manual review."
-- "Use the `migraphx-deploy` skill to compile this ONNX model for `gfx942` and benchmark it."
-- "Use the `omniperf-tune` skill to find the bottleneck in this training step."
+- "Use AMD Skills to integrate local AI capabilities into my app with Embeddable Lemonade."
+- "Use AMD Skills to get PyTorch running on this MI300X node."
+- "Use AMD Skills to convert these CUDA kernels and flag anything that needs manual review."
 
 The agent loads the matching `SKILL.md` and any helper scripts, then carries out the task. In most cases the agent will pick the right skill on its own from the description; explicit invocation is a fallback, not a requirement.
 
 ## Contributing a skill
 
-We welcome contributions from AMD engineers, partners, and the community. There are two contribution paths, matching how the catalog is organized.
+We welcome contributions from AMD engineers, and selected partners. There are two contribution paths, matching how the catalog is organized.
 
 ### Path A: Skills authored in this repository
 
