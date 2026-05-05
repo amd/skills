@@ -24,7 +24,9 @@ Skills in this repository follow the standardized [Agent Skills](https://github.
 
 ## Installation
 
-Zero setup is needed on `Claude` and `Cursor` (natively integrated). Simply ask your agent something like "Use AMD Skills to integrate local AI into my app".
+AMD Skills is built directly into Claude and Cursor. **No install. No setup**
+
+Just ask: `"Use AMD Skills to integrate local AI into my app"`.
 
 For integration with other agents, please refer to the [manual-installation](#manual-installation) section.
 
