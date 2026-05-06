@@ -118,6 +118,17 @@ lemonade pull kokoro-v1
 lemonade pull Whisper-Tiny
 ```
 
+To choose a different model while installing the rule, pass it to the setup
+script. For example, to make future image requests use SDXL:
+
+```bash
+python scripts/setup_local_ai.py --image-model SDXL-Turbo
+```
+
+The script will pull the selected model and write that model ID into the
+installed `AGENTS.md` rule. The same pattern works for `--tts-model` and
+`--stt-model`.
+
 Each `pull` is idempotent. To verify what is already downloaded:
 
 ```bash
@@ -135,9 +146,10 @@ Append it to the workspace's `AGENTS.md` (create the file if missing). Both
 Cursor and Claude Code load `AGENTS.md` automatically on every turn, so the
 agent will see the rule on its next message without any further setup.
 
-`scripts/setup_local_ai.py` does this for you, surrounded by stable markers
-so re-running the script replaces the block in place rather than appending
-a second copy. The markers look like:
+`scripts/setup_local_ai.py` does this for you. It bakes the selected endpoint
+and model IDs into the rule, surrounded by stable markers so re-running the
+script replaces the block in place rather than appending a second copy. The
+markers look like:
 
 ```
 <!-- BEGIN amd-skills:local-ai-use -->
@@ -161,7 +173,9 @@ The rule's content is identical; only the file location changes.
 
 Verify each modality against the live server before declaring success. These
 mirror the inline patterns in the installed rule, so a green pass here means
-the rule will work.
+the rule will work. If you installed with a model override such as
+`--image-model SDXL-Turbo`, use that model ID in the smoke test and confirm
+the installed `AGENTS.md` rule contains it.
 
 **Image generation** (writes `out.png`):
 

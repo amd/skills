@@ -30,8 +30,13 @@ asks for higher quality or has explicit hardware to spare.
 | `SD-1.5` | ~4 GB | When the user asks for "Stable Diffusion 1.5" by name. | Needs more steps (~20). |
 | `Flux-2-Klein-4B` | ~4 GB | Image **editing** (`/v1/images/edits`). | Editing-capable, slower than SD-Turbo for plain generation. |
 
-To upgrade: `lemonade pull <model>`, then change `"model"` in the rule
-block in `AGENTS.md` to the new model id.
+To upgrade: re-run setup with the target model, for example:
+
+```bash
+python scripts/setup_local_ai.py --image-model SDXL-Turbo
+```
+
+The script pulls the model and rewrites the `AGENTS.md` rule in place.
 
 ### Text-to-speech (`recipe: kokoro`)
 

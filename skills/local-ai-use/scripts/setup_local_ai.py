@@ -27,9 +27,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
-import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -40,11 +40,13 @@ from pathlib import Path
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 13305
 
-# The Lite Collection from Lemonade OmniRouter. Picked because each fits in
-# under ~5 GB and runs on commodity CPU hardware, so the savings vs. cloud
-# calls are real on a typical developer laptop. See SKILL.md for upgrade
+# The Lite Collection from Lemonade OmniRouter. Picked because each default
+# fits in under ~5 GB and runs on commodity CPU hardware, so the savings vs.
+# cloud calls are real on a typical developer laptop. See SKILL.md for upgrade
 # paths.
-DEFAULT_MODELS = ("SD-Turbo", "kokoro-v1", "Whisper-Tiny")
+DEFAULT_IMAGE_MODEL = "SD-Turbo"
+DEFAULT_TTS_MODEL = "kokoro-v1"
+DEFAULT_STT_MODEL = "Whisper-Tiny"
 
 # Stable markers around the rule block in AGENTS.md. The script rewrites the
 # region between these markers in place; do not change the marker strings or
@@ -84,7 +86,7 @@ def check_server_reachable(host: str, port: int) -> bool:
         return False
 
 
-def list_downloaded_models() -> set[str]:
+def list_downloaded_models(host: str, port: int) -> set[str]:
     """Return the set of locally downloaded model IDs.
 
     Uses `lemonade list --downloaded` (CLI) and falls back to
@@ -103,7 +105,10 @@ def list_downloaded_models() -> set[str]:
         pass
 
     try:
-        status, body = _http_get("http://127.0.0.1:13305/api/v1/models", timeout_s=5)
+        status, body = _http_get(
+            f"http://{host}:{port}/api/v1/models",
+            timeout_s=5,
+        )
         if status == 200:
             data = json.loads(body)
             return {
@@ -140,8 +145,15 @@ def pull_model(model: str) -> bool:
         return False
 
 
-def render_rule_block() -> str:
-    """Read the rule template; pass through unchanged.
+def render_rule_block(
+    *,
+    host: str,
+    port: int,
+    image_model: str,
+    tts_model: str,
+    stt_model: str,
+) -> str:
+    """Read the rule template and fill in endpoint/model choices.
 
     The template already includes BEGIN/END markers and matches the constants
     at the top of this file. We re-validate that here so a future template
@@ -158,13 +170,44 @@ def render_rule_block() -> str:
             "Rule template is missing the BEGIN/END markers; refuse to write "
             "AGENTS.md because re-runs would append duplicate blocks."
         )
+    endpoint_host = "localhost" if host in {"127.0.0.1", "::1"} else host
+    base_root = f"http://{endpoint_host}:{port}"
+    replacements = {
+        "{{LEMONADE_BASE_ROOT}}": base_root,
+        "{{LEMONADE_BASE_URL}}": f"{base_root}/api/v1",
+        "{{IMAGE_MODEL}}": image_model,
+        "{{TTS_MODEL}}": tts_model,
+        "{{STT_MODEL}}": stt_model,
+    }
+    for placeholder, value in replacements.items():
+        text = text.replace(placeholder, value)
+    unresolved = sorted(set(re.findall(r"\{\{[A-Z_]+\}\}", text)))
+    if unresolved:
+        raise ValueError(
+            "Rule template still has unresolved placeholders: "
+            + ", ".join(unresolved)
+        )
     return text.strip() + "\n"
 
 
-def upsert_agents_md(workspace: Path) -> Path:
+def upsert_agents_md(
+    workspace: Path,
+    *,
+    host: str,
+    port: int,
+    image_model: str,
+    tts_model: str,
+    stt_model: str,
+) -> Path:
     """Write or replace the rule block inside <workspace>/AGENTS.md."""
     target = workspace / "AGENTS.md"
-    block = render_rule_block()
+    block = render_rule_block(
+        host=host,
+        port=port,
+        image_model=image_model,
+        tts_model=tts_model,
+        stt_model=stt_model,
+    )
 
     if not target.exists():
         target.write_text(
@@ -223,6 +266,21 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Do not pull missing models; just verify and write AGENTS.md.",
     )
+    parser.add_argument(
+        "--image-model",
+        default=DEFAULT_IMAGE_MODEL,
+        help=f"Image generation model to pull and write into AGENTS.md (default: {DEFAULT_IMAGE_MODEL}).",
+    )
+    parser.add_argument(
+        "--tts-model",
+        default=DEFAULT_TTS_MODEL,
+        help=f"Text-to-speech model to pull and write into AGENTS.md (default: {DEFAULT_TTS_MODEL}).",
+    )
+    parser.add_argument(
+        "--stt-model",
+        default=DEFAULT_STT_MODEL,
+        help=f"Speech-to-text model to pull and write into AGENTS.md (default: {DEFAULT_STT_MODEL}).",
+    )
     args = parser.parse_args(argv)
 
     if not check_cli_installed():
@@ -244,8 +302,11 @@ def main(argv: list[str] | None = None) -> int:
     _print(f"server reachable at http://{args.host}:{args.port}")
 
     if not args.skip_pull:
-        downloaded = list_downloaded_models()
-        for model in DEFAULT_MODELS:
+        downloaded = list_downloaded_models(args.host, args.port)
+        selected_models = dict.fromkeys(
+            (args.image_model, args.tts_model, args.stt_model)
+        )
+        for model in selected_models:
             if model in downloaded:
                 _print(f"already downloaded: {model}")
                 continue
@@ -257,7 +318,14 @@ def main(argv: list[str] | None = None) -> int:
                     "but calls will 404 until you pull it."
                 )
 
-    upsert_agents_md(args.workspace.resolve())
+    upsert_agents_md(
+        args.workspace.resolve(),
+        host=args.host,
+        port=args.port,
+        image_model=args.image_model,
+        tts_model=args.tts_model,
+        stt_model=args.stt_model,
+    )
     _print("done. Future image, TTS, and STT requests now route to local Lemonade.")
     return 0
 
