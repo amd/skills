@@ -8,3 +8,6 @@ __pycache__/
 
 # uv
 .uv-cache/
+
+# Eval run artifacts
+eval/runs/
