@@ -21,6 +21,8 @@ from pathlib import Path
 @dataclass
 class EvalResult:
     prompt: str
+    model: str | None
+    effort: str | None
     wall_time_s: float
     duration_ms: int | None
     duration_api_ms: int | None
@@ -47,7 +49,12 @@ def read_prompt(args: argparse.Namespace) -> str:
     return args.prompt
 
 
-def run_claude(prompt: str, model: str | None, extra_args: list[str]) -> tuple[float, dict]:
+def run_claude(
+    prompt: str,
+    model: str | None,
+    effort: str | None,
+    extra_args: list[str],
+) -> tuple[float, dict]:
     claude_bin = shutil.which("claude")
     if not claude_bin:
         sys.exit("error: 'claude' CLI not found on PATH")
@@ -55,6 +62,8 @@ def run_claude(prompt: str, model: str | None, extra_args: list[str]) -> tuple[f
     cmd = [claude_bin, "-p", prompt, "--output-format", "json"]
     if model:
         cmd += ["--model", model]
+    if effort:
+        cmd += ["--effort", effort]
     cmd += extra_args
 
     start = time.perf_counter()
@@ -83,7 +92,13 @@ def run_claude(prompt: str, model: str | None, extra_args: list[str]) -> tuple[f
     return elapsed, payload
 
 
-def build_result(prompt: str, elapsed_s: float, payload: dict) -> EvalResult:
+def build_result(
+    prompt: str,
+    model: str | None,
+    effort: str | None,
+    elapsed_s: float,
+    payload: dict,
+) -> EvalResult:
     usage = payload.get("usage") or {}
     input_tokens = int(usage.get("input_tokens", 0) or 0)
     output_tokens = int(usage.get("output_tokens", 0) or 0)
@@ -92,6 +107,8 @@ def build_result(prompt: str, elapsed_s: float, payload: dict) -> EvalResult:
 
     return EvalResult(
         prompt=prompt,
+        model=model,
+        effort=effort,
         wall_time_s=round(elapsed_s, 3),
         duration_ms=payload.get("duration_ms"),
         duration_api_ms=payload.get("duration_api_ms"),
@@ -113,6 +130,8 @@ def print_human(result: EvalResult) -> None:
     print("Claude Code Eval Result")
     print("=" * 60)
     print(f"Prompt:           {result.prompt[:120]}{'...' if len(result.prompt) > 120 else ''}")
+    print(f"Model:            {result.model or '(default)'}")
+    print(f"Effort:           {result.effort or '(default)'}")
     print(f"Wall time:        {result.wall_time_s:.3f} s")
     if result.duration_ms is not None:
         print(f"Reported time:    {result.duration_ms / 1000:.3f} s (api: {(result.duration_api_ms or 0) / 1000:.3f} s)")
@@ -135,21 +154,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run a prompt on Claude Code and measure time + tokens.")
     parser.add_argument("prompt", nargs="?", help="The prompt to send (use '-' to read from stdin).")
     parser.add_argument("--prompt-file", help="Read the prompt from a file.")
-    parser.add_argument("--model", help="Optional model name to pass to claude (e.g. sonnet, opus).")
+    parser.add_argument(
+        "--model",
+        default="sonnet",
+        help="Model alias (e.g. sonnet, opus, haiku) or full name (e.g. claude-sonnet-4-6). Default: sonnet.",
+    )
+    parser.add_argument(
+        "--effort",
+        choices=["low", "medium", "high", "max"],
+        default="high",
+        help="Reasoning effort level for the session. Default: high.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of human-readable output.")
     parser.add_argument("--output", help="Also write the result JSON to this file.")
-    parser.add_argument(
-        "extra",
-        nargs=argparse.REMAINDER,
-        help="Extra args forwarded to the claude CLI (after `--`).",
-    )
-    args = parser.parse_args()
-
-    extra_args = [a for a in (args.extra or []) if a != "--"]
+    args, extra_args = parser.parse_known_args()
+    extra_args = [a for a in extra_args if a != "--"]
     prompt = read_prompt(args)
 
-    elapsed, payload = run_claude(prompt, args.model, extra_args)
-    result = build_result(prompt, elapsed, payload)
+    elapsed, payload = run_claude(prompt, args.model, args.effort, extra_args)
+    result = build_result(prompt, args.model, args.effort, elapsed, payload)
 
     if args.output:
         Path(args.output).write_text(json.dumps(asdict(result), indent=2), encoding="utf-8")
