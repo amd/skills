@@ -9,6 +9,12 @@
   },
   "plugins": [
     {
+      "name": "apu-memory-tuner",
+      "source": "./skills/apu-memory-tuner",
+      "skills": "./",
+      "description": "Inspect and tune the shared-vs-dedicated memory split (GTT / UMA Frame Buffer) on AMD Ryzen APUs so larger LLMs and image models fit on the iGPU."
+    },
+    {
       "name": "local-ai-app-integration",
       "source": "./skills/local-ai-app-integration",
       "skills": "./",
