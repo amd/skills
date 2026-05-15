@@ -69,6 +69,7 @@ Diagnose, configure, and tune AMD devices directly.
 
 | Skill | What it does |
 | --- | --- |
+| `apu-memory-tuner` | Inspect and tune the shared-vs-dedicated memory split (GTT / UMA Frame Buffer) on AMD Ryzen APUs. |
 | `rocm-doctor` | Detect driver / kernel / ROCm / framework mismatches and propose fixes. |
 | `mi300x-tuner` | Opinionated inference tuning for MI300X, including TunableOp, FSDP, and FlashAttention. |
 | `gfx-target-chooser` | Pick the right `gfx942` / `gfx90a` / `gfx1100` target and matching compiler flags. |
@@ -199,7 +200,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for step-by-step instructions, the full a
 
 ## Status
 
-This repository is in its early days. In-repo skills include `skills/local-ai-app-integration/` and `skills/local-ai-use/`, seeding the **Application integration** focus area. The Hardware-native, Cross-stack porting, and Profiling and delivery focus areas are being built out incrementally alongside manifests and CI. Expect rapid iteration. File an issue if there is a workflow you want covered, or open a PR with a skill you have been wanting to share.
+This repository is in its early days. In-repo skills include `skills/local-ai-app-integration/` and `skills/local-ai-use/`, seeding the **Application integration** focus area, and `skills/apu-memory-tuner/`, seeding the **Hardware-native** focus area. The remaining Hardware-native, Cross-stack porting, and Profiling and delivery skills are being built out incrementally alongside manifests and CI. Expect rapid iteration. File an issue if there is a workflow you want covered, or open a PR with a skill you have been wanting to share.
 
 ## License
 

@@ -15,6 +15,7 @@ body:
       label: Which skill?
       description: One issue per skill. Pick **Other** if it isn't listed yet.
       options:
+        - apu-memory-tuner
         - local-ai-app-integration
         - local-ai-use
         - Other (name it in the details below)
