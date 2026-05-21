@@ -1,0 +1,93 @@
+name: external-reference-check
+
+# Reach out to every external URL referenced from our markdown and report
+# anything that's unreachable. This is intentionally split from `validate`
+# because external checks are flaky (transient 5xx, rate limits, runner IP
+# blocks, DNS hiccups). The workflow fails on PR and manual runs so broken
+# links are visible; whether they actually block merge is controlled by
+# whether this check is marked required in branch protection (recommended:
+# leave it not-required so a transient hiccup can't block a merge).
+#
+# Internal references and anchors are checked by `validate.yml` with
+# `lychee --offline`.
+
+on:
+  pull_request:
+    paths:
+      - "**/*.md"
+      - ".github/lychee.toml"
+      - ".github/workflows/external-reference-check.yml"
+  schedule:
+    # Mondays at 12:00 UTC. Catches link rot in unchanged content.
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  external-references:
+    name: Check external references in skills
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check external references
+        id: lychee
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --config .github/lychee.toml --no-progress "./**/*.md"
+          # Fail the workflow on PR and manual runs so broken external
+          # references show up as a red check (mark this workflow as
+          # not-required in branch protection if you don't want it to
+          # block merges).
+          #
+          # On the scheduled cron run we deliberately do NOT fail here,
+          # so the issue-filing step below can still execute.
+          fail: ${{ github.event_name != 'schedule' }}
+
+      # Scheduled runs file (or update) an issue when something is rotten,
+      # so unchanged-but-broken links don't silently sit in main.
+      - name: File or update link-rot issue on scheduled failure
+        if: github.event_name == 'schedule' && steps.lychee.outputs.exit_code != 0
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # Create the label on first use; ignore if it already exists.
+          gh label create external-reference-rot \
+            --color ffaa00 \
+            --description "Unreachable external references found by scheduled lychee run" \
+            2>/dev/null || true
+
+          run_url="${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}"
+
+          if [ ! -s ./lychee/out.md ]; then
+            echo "lychee report file is missing or empty; nothing to file." >&2
+            exit 0
+          fi
+
+          existing=$(gh issue list \
+            --label external-reference-rot \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [ -n "$existing" ]; then
+            echo "Updating existing issue #$existing"
+            gh issue edit "$existing" --body-file ./lychee/out.md
+            gh issue comment "$existing" \
+              --body "Refreshed by scheduled run: $run_url"
+          else
+            echo "Filing new issue"
+            gh issue create \
+              --title "External reference rot detected" \
+              --label external-reference-rot \
+              --body-file ./lychee/out.md
+          fi

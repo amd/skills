@@ -1,0 +1,32 @@
+# Shared lychee configuration.
+#
+# Used by:
+#   .github/workflows/validate.yml                  (--offline, blocks PRs)
+#   .github/workflows/external-reference-check.yml  (online, informational + scheduled)
+#
+# Both workflows pass `--config .github/lychee.toml` explicitly because lychee
+# only auto-discovers `lychee.toml` in the current working directory.
+
+# Cache successful checks across the run so we don't hammer the same host.
+cache = true
+max_cache_age = "1d"
+
+# Be polite when retrying transient failures.
+max_retries = 2
+retry_wait_time = 2
+
+# A 429 means the host exists but rate-limited us; treat as success rather
+# than as a broken reference.
+accept = ["200..=206", "429"]
+
+# URL regex patterns to skip. Use this for hosts that are flaky, auth-gated,
+# or routinely block CI runners. Prefer narrow patterns over broad ones so
+# real link rot keeps getting caught.
+#
+# Examples:
+#   '^https://intranet\.example\.com/',
+#   '^https://github\.com/[^/]+/[^/]+/pull/',
+exclude = [
+  # openai.com blocks GitHub-hosted runner IPs with 403; the page is fine
+  '^https://openai\.com/codex/?$',
+]

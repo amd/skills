@@ -6,11 +6,12 @@ on:
   pull_request:
     paths:
       - "scripts/**"
-      - "**/SKILL.md"
+      - "**/*.md"
       - "skills/**"
       - ".claude-plugin/**"
       - ".cursor-plugin/**"
       - ".github/workflows/validate.yml"
+      - ".github/lychee.toml"
   workflow_dispatch:
 
 jobs:
@@ -26,3 +27,13 @@ jobs:
 
       - name: Validate skills and generated manifests
         run: ./scripts/check.sh
+
+      # Deterministic, offline-only reference check: relative paths and
+      # heading anchors. External URLs are intentionally not checked here
+      # because their failure modes are flaky; see
+      # `.github/workflows/external-reference-check.yml` for that.
+      - name: Check internal references and anchors
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --config .github/lychee.toml --offline --include-fragments --no-progress "./**/*.md"
+          fail: true
