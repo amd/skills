@@ -71,7 +71,7 @@ Diagnose, configure, and tune AMD devices directly.
 | --- | --- |
 | `apu-memory-tuner` | Inspect and tune the shared-vs-dedicated memory split (GTT / UMA Frame Buffer) on AMD Ryzen APUs. |
 | `rocm-doctor` | Detect driver / kernel / ROCm / framework mismatches and propose fixes. |
-| `mi300x-tuner` | Opinionated inference tuning for MI300X, including TunableOp, FSDP, and FlashAttention. |
+| `mi-tuner` | Opinionated inference tuning for MI accelerators, including TunableOp, FSDP, and FlashAttention. |
 | `gfx-target-chooser` | Pick the right `gfx942` / `gfx90a` / `gfx1100` target and matching compiler flags. |
 
 
@@ -193,14 +193,14 @@ The agent loads the matching `SKILL.md` and any helper scripts, then carries out
 
 We welcome contributions from AMD engineers and selected partners. There are two paths, matching how the catalog is organized:
 
-- **Path A — In-repo skills.** Authored directly under `skills/` in this repository. Best for cross-cutting workflows that do not have a natural product home.
-- **Path B — Product-repo skills.** Authored in a product repository and registered here through `catalog/` with a pinned tag. Best for skills that should ship and version with a specific product (HIP, ROCm, Ryzen AI, Lemonade, etc.).
+- **Path A: In-repo skills.** Authored directly under `skills/` in this repository. Best for cross-cutting workflows that do not have a natural product home.
+- **Path B: Product-repo skills.** Authored in a product repository and registered here through `catalog/` with a pinned tag. Best for skills that should ship and version with a specific product (HIP, ROCm, Ryzen AI, Lemonade, etc.).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for step-by-step instructions, the full authoring guide, and the rules CI enforces on every pull request.
 
 ## Status
 
-This repository is in its early days. In-repo skills include `skills/local-ai-app-integration/` and `skills/local-ai-use/`, seeding the **Application integration** focus area, and `skills/apu-memory-tuner/`, seeding the **Hardware-native** focus area. The remaining Hardware-native, Cross-stack porting, and Profiling and delivery skills are being built out incrementally alongside manifests and CI. Expect rapid iteration. File an issue if there is a workflow you want covered, or open a PR with a skill you have been wanting to share.
+This repository is in its early days. In-repo skills include `skills/local-ai-app-integration/` and `skills/local-ai-use/`, seeding the **Application integration** focus area, and `skills/apu-memory-tuner/`, seeding the **Hardware-native** focus area. The remaining skills are being built out incrementally alongside manifests and CI. Expect rapid iteration.
 
 ## License
 
