@@ -71,7 +71,7 @@ Diagnose, configure, and tune AMD devices directly.
 | --- | --- |
 | `apu-memory-tuner` | Inspect and tune the shared-vs-dedicated memory split (GTT / UMA Frame Buffer) on AMD Ryzen APUs. |
 | `rocm-doctor` | Detect driver / kernel / ROCm / framework mismatches and propose fixes. |
-| `mi300x-tuner` | Opinionated inference tuning for MI300X, including TunableOp, FSDP, and FlashAttention. |
+| `mi-tuner` | Opinionated inference tuning for MI accelerators, including TunableOp, FSDP, and FlashAttention. |
 | `gfx-target-chooser` | Pick the right `gfx942` / `gfx90a` / `gfx1100` target and matching compiler flags. |
 
 
