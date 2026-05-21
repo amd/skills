@@ -1,10 +1,15 @@
 name: external-reference-check
 
 # Reach out to every external URL referenced from our markdown and report
-# anything that's unreachable. This is intentionally split from `validate`:
-# external checks are flaky (transient 5xx, rate limits, runner IP blocks,
-# DNS hiccups) and must never block a PR merge by themselves. Internal
-# references and anchors are checked by `validate.yml` with `lychee --offline`.
+# anything that's unreachable. This is intentionally split from `validate`
+# because external checks are flaky (transient 5xx, rate limits, runner IP
+# blocks, DNS hiccups). The workflow fails on PR and manual runs so broken
+# links are visible; whether they actually block merge is controlled by
+# whether this check is marked required in branch protection (recommended:
+# leave it not-required so a transient hiccup can't block a merge).
+#
+# Internal references and anchors are checked by `validate.yml` with
+# `lychee --offline`.
 
 on:
   pull_request:
@@ -34,18 +39,14 @@ jobs:
         uses: lycheeverse/lychee-action@v2
         with:
           args: --config .github/lychee.toml --no-progress "./**/*.md"
-          # Informational only. PR failures are surfaced as a workflow
-          # annotation below; scheduled failures open or update an issue.
-          fail: false
-
-      - name: Annotate PR with summary
-        if: github.event_name == 'pull_request'
-        run: |
-          if [ "${{ steps.lychee.outputs.exit_code }}" -ne 0 ]; then
-            echo "::warning::lychee reported unreachable external references. See the 'Check external references' step output. This check is informational and does not block merge."
-          else
-            echo "All external references reachable."
-          fi
+          # Fail the workflow on PR and manual runs so broken external
+          # references show up as a red check (mark this workflow as
+          # not-required in branch protection if you don't want it to
+          # block merges).
+          #
+          # On the scheduled cron run we deliberately do NOT fail here,
+          # so the issue-filing step below can still execute.
+          fail: ${{ github.event_name != 'schedule' }}
 
       # Scheduled runs file (or update) an issue when something is rotten,
       # so unchanged-but-broken links don't silently sit in main.
