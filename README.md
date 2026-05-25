@@ -200,7 +200,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for step-by-step instructions, the full a
 
 ## Status
 
-This repository is in its early days. In-repo skills include `skills/local-ai-app-integration/` and `skills/local-ai-use/`, seeding the **Application integration** focus area, and `skills/apu-memory-tuner/`, seeding the **Hardware-native** focus area. The remaining skills are being built out incrementally alongside manifests and CI. Expect rapid iteration.
+This repository is in its early days. In-repo skills include `skills/local-ai-app-integration/` and `skills/local-ai-use/`, seeding the **Application integration** focus area, and `skills/apu-memory-tuner/` and `skills/rocm-doctor/`, seeding the **Hardware-native** focus area. The remaining skills are being built out incrementally alongside manifests and CI. Expect rapid iteration.
 
 ## License
 
