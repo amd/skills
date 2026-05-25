@@ -7,17 +7,25 @@
 
 This is the first script the skill runs once it has decided the user's
 framework actually touches the system ROCm install (so: PyTorch, llama.cpp,
-and anything built against `/opt/rocm`, but NOT Lemonade / LM Studio /
-Ollama, which ship their own runtime).
+and anything built against `/opt/rocm` on Linux or the HIP SDK on Windows,
+but NOT Lemonade / LM Studio / Ollama, which ship their own runtime).
 
 The script collects the minimum set of facts needed to disambiguate
 every known misconfiguration in `reference.md`. It never installs or
 removes packages, never changes group membership, and never edits files.
 
+Supported platforms:
+  - Linux (native): full Linux probe set.
+  - Windows: HIP SDK + Adrenalin probes (no /sys, no rocminfo; uses
+    Win32_VideoController and hipInfo.exe instead).
+  - WSL2: detected and refused with a route-out message. The ROCm-on-WSL
+    flow needs Adrenalin Pro + the WSL kernel update on the Windows host
+    and is not in this catalog.
+
 Exit codes:
   0 = examination ran; results emitted. The agent should pass the JSON to
       `diagnose.py` next.
-  2 = wrong platform (not Linux, no AMD GPU, NVIDIA-only, etc.). The
+  2 = wrong platform (WSL, neither Linux nor Windows, or no AMD GPU). The
       agent should stop and route the user instead of running diagnose.
   3 = examination ran but something prevented a key probe from completing
       and the agent should warn the user before continuing.
@@ -61,6 +69,8 @@ TRACKED_ENV_VARS = (
     "GPU_DEVICE_ORDINAL",
     "ROCM_PATH",
     "ROCM_HOME",
+    "HIP_PATH",                      # Windows: HIP SDK install root (e.g. C:\Program Files\AMD\ROCm\6.4\).
+    "HIP_PLATFORM",                  # Windows: usually "amd"; "nvidia" means user is on the wrong toolchain.
     "PYTORCH_ROCM_ARCH",
     "HCC_AMDGPU_TARGET",
     "AMDGPU_TARGETS",
@@ -116,6 +126,7 @@ class Examination:
     distro_version: str = ""
     kernel_release: str = ""
     kernel_cmdline: str = ""
+    is_wsl: bool = False                # True iff running inside WSL2 (out of scope; see notes).
 
     # --- hardware ---
     cpu_vendor: str = "unknown"
@@ -126,7 +137,7 @@ class Examination:
     has_apu: bool = False
     has_discrete_amd: bool = False
 
-    # --- driver / runtime ---
+    # --- driver / runtime (Linux) ---
     amdgpu_loaded: bool | None = None
     amdgpu_blacklisted_in: list[str] = field(default_factory=list)
     amdkfd_loaded: bool | None = None
@@ -135,13 +146,13 @@ class Examination:
     kfd: Device | None = None
     render_devices: list[Device] = field(default_factory=list)
 
-    # --- user / groups ---
+    # --- user / groups (Linux) ---
     user_name: str = ""
     user_groups: list[str] = field(default_factory=list)
     in_render_group: bool | None = None
     in_video_group: bool | None = None
 
-    # --- ROCm install ---
+    # --- ROCm install (Linux) ---
     rocm_version: str = ""              # e.g. 6.4.1
     rocm_install_method: str = ""       # amdgpu-install | apt | dnf | pip-only | unknown | none
     rocm_path: str = ""                 # /opt/rocm typically
@@ -149,6 +160,14 @@ class Examination:
     rocminfo_status: str = ""           # ok | not-loaded | permission-denied | missing
     hip_libs_on_ld_path: bool | None = None
     rocm_repos_seen: list[str] = field(default_factory=list)
+
+    # --- HIP SDK install (Windows) ---
+    hip_sdk_path: str = ""              # e.g. C:\Program Files\AMD\ROCm\6.4\
+    hip_sdk_version: str = ""           # e.g. 6.4 (parsed from the install dir)
+    hipinfo_present: bool = False
+    hipinfo_status: str = ""            # ok | error rc=N | missing
+    adrenalin_version: str = ""         # Win32_VideoController.DriverVersion (e.g. 32.0.11020.5)
+    msvc_redist_present: bool | None = None  # vcruntime140 / vcruntime140_1 resolvable
 
     # --- framework ---
     framework: str = "unknown"          # pytorch | llama-cpp | unknown | skipped
@@ -221,6 +240,13 @@ def _probe_os(e: Examination) -> None:
         m = re.search(r"\biommu=(\w+)", e.kernel_cmdline)
         if m:
             e.iommu_kernel_param = m.group(1)
+        # WSL2 advertises itself in /proc/version and via the WSL_DISTRO_NAME
+        # env var. We treat WSL as out of scope -- the ROCm-on-WSL flow needs
+        # Adrenalin Pro + the WSL kernel update on the Windows host, not the
+        # native-Linux fixes in this catalog.
+        proc_version = _read_text("/proc/version").lower()
+        if "microsoft" in proc_version or "wsl" in proc_version or os.environ.get("WSL_DISTRO_NAME"):
+            e.is_wsl = True
     elif sysname == "windows":
         e.os_family = "windows"
     else:
@@ -228,17 +254,27 @@ def _probe_os(e: Examination) -> None:
 
 
 def _probe_cpu(e: Examination) -> None:
-    if e.os_family != "linux":
-        return
-    txt = _read_text("/proc/cpuinfo")
-    for line in txt.splitlines():
-        if line.startswith("vendor_id") and not e.cpu_vendor or e.cpu_vendor == "unknown":
-            val = line.split(":", 1)[1].strip()
-            e.cpu_vendor = "amd" if "AMD" in val else ("intel" if "Intel" in val else val.lower())
-        if line.startswith("model name") and not e.cpu_model:
-            e.cpu_model = line.split(":", 1)[1].strip()
-        if e.cpu_vendor != "unknown" and e.cpu_model:
-            break
+    if e.os_family == "linux":
+        txt = _read_text("/proc/cpuinfo")
+        for line in txt.splitlines():
+            if line.startswith("vendor_id") and not e.cpu_vendor or e.cpu_vendor == "unknown":
+                val = line.split(":", 1)[1].strip()
+                e.cpu_vendor = "amd" if "AMD" in val else ("intel" if "Intel" in val else val.lower())
+            if line.startswith("model name") and not e.cpu_model:
+                e.cpu_model = line.split(":", 1)[1].strip()
+            if e.cpu_vendor != "unknown" and e.cpu_model:
+                break
+    elif e.os_family == "windows":
+        rc, out, _ = _run([
+            "powershell", "-NoProfile", "-Command",
+            "(Get-CimInstance Win32_Processor | Select-Object -First 1).Name",
+        ], timeout=8)
+        if rc == 0 and out.strip():
+            e.cpu_model = out.strip().splitlines()[0].strip()
+            lname = e.cpu_model.lower()
+            e.cpu_vendor = "amd" if "amd" in lname else ("intel" if "intel" in lname else "unknown")
+        else:
+            e.probe_failures.append("Get-CimInstance Win32_Processor failed; cannot identify CPU.")
 
 
 # ---------------------------------------------------------------------------
@@ -259,14 +295,26 @@ def _classify_amd_marketing_name(name: str) -> tuple[str, bool]:
     """Return (best-effort gfx_target, is_apu) for an AMD GPU marketing name.
 
     Falls back to ("", False) when we can't tell, in which case `rocminfo`
-    output (when available) is the source of truth for the gfx target.
+    (Linux) or `hipInfo.exe` (Windows) output is the source of truth for
+    the gfx target.
     """
-    n = name.lower()
+    # Windows reports names like "AMD Radeon(TM) 8060S Graphics"; strip the
+    # (R)/(TM)/(C) decorations and collapse whitespace so substring matches
+    # ("radeon 8060s") don't get broken by them.
+    n = re.sub(r"\(\s*(?:tm|r|c)\s*\)", " ", name.lower())
+    n = re.sub(r"\s+", " ", n).strip()
+    # Strix Halo iGPU shows up under three distinct names depending on host:
+    # the CPU package name on Linux ("Ryzen AI Max+ ..."), the iGPU adapter
+    # name on Windows ("AMD Radeon(TM) 8060S Graphics"), or the codename in
+    # docs ("Strix Halo"). All three map to gfx1151.
     if "ryzen ai max" in n or "strix halo" in n:
+        return "gfx1151", True
+    if "radeon 8050s" in n or "radeon 8060s" in n or "radeon 8045s" in n:
         return "gfx1151", True
     if "radeon 880m" in n or "radeon 890m" in n or "strix point" in n or "krackan" in n:
         return "gfx1150", True
-    if "radeon 780m" in n or "radeon 760m" in n or "phoenix" in n or "hawk point" in n:
+    if "radeon 780m" in n or "radeon 760m" in n or "radeon 740m" in n \
+            or "phoenix" in n or "hawk point" in n:
         return "gfx1103", True
     return "", any(kw in n for kw in _APU_KEYWORDS)
 
@@ -779,34 +827,245 @@ def _probe_dmesg_amdgpu(e: Examination) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Windows-specific probes
+#
+# Windows has no equivalent of /sys, /proc, lsmod, lspci, or rocminfo. Almost
+# everything we need is reachable through PowerShell + CIM (Win32_*) and a
+# couple of well-known install directories. The HIP SDK ships hipInfo.exe,
+# which is the rocminfo analog. The kernel-mode GPU driver is part of the
+# AMD Adrenalin install and reports itself via Win32_VideoController.
+# ---------------------------------------------------------------------------
+
+def _probe_gpus_windows(e: Examination) -> None:
+    """Enumerate AMD/NVIDIA display adapters via Win32_VideoController."""
+    rc, out, _ = _run([
+        "powershell", "-NoProfile", "-Command",
+        "Get-CimInstance Win32_VideoController | "
+        "Select-Object -Property Name,PNPDeviceID,DriverVersion | "
+        "ConvertTo-Json -Compress",
+    ], timeout=10)
+    if rc != 0 or not out.strip():
+        e.probe_failures.append(
+            "Get-CimInstance Win32_VideoController failed; cannot enumerate GPUs."
+        )
+        return
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        e.probe_failures.append("Win32_VideoController returned non-JSON output.")
+        return
+    if isinstance(data, dict):
+        data = [data]
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        name = (entry.get("Name") or "").strip()
+        pnp = (entry.get("PNPDeviceID") or "").strip()
+        is_amd = "VEN_1002" in pnp.upper() or "AMD" in name.upper() or "RADEON" in name.upper()
+        is_nvidia = "VEN_10DE" in pnp.upper() or "NVIDIA" in name.upper()
+        if is_nvidia:
+            e.has_nvidia_gpu = True
+            e.gpus.append(GPU(name=name, pci_id=pnp, is_amd=False, is_apu=False))
+            continue
+        if not is_amd:
+            continue
+        gfx_guess, is_apu_guess = _classify_amd_marketing_name(name)
+        e.gpus.append(GPU(
+            name=name, gfx_target=gfx_guess, pci_id=pnp,
+            is_apu=is_apu_guess, is_amd=True,
+        ))
+
+
+def _probe_hip_sdk_windows(e: Examination) -> None:
+    """Locate the HIP SDK install and run hipInfo for ground-truth gfx target.
+
+    The HIP SDK installer drops files under `C:\\Program Files\\AMD\\ROCm\\<ver>\\`
+    by default and sets `HIP_PATH` (and `HIP_PATH_<ver>`) in the user/machine
+    environment. Multiple SDKs can coexist; we prefer `HIP_PATH` when set
+    because that's what loaders actually pick up.
+    """
+    candidates: list[Path] = []
+    hp = os.environ.get("HIP_PATH")
+    if hp and Path(hp).is_dir():
+        candidates.append(Path(hp))
+    for root in (r"C:\Program Files\AMD\ROCm", r"C:\Program Files (x86)\AMD\ROCm"):
+        try:
+            base = Path(root)
+            if base.is_dir():
+                for child in sorted(base.iterdir(), reverse=True):
+                    if child.is_dir() and re.match(r"\d+(\.\d+)+", child.name):
+                        candidates.append(child)
+        except OSError:
+            continue
+    seen: set[str] = set()
+    chosen: Path | None = None
+    for c in candidates:
+        s = str(c)
+        if s in seen:
+            continue
+        seen.add(s)
+        if chosen is None:
+            chosen = c
+    if chosen is None:
+        return
+    e.hip_sdk_path = str(chosen)
+    m = re.search(r"(\d+(?:\.\d+)+)$", chosen.name)
+    if m:
+        e.hip_sdk_version = m.group(1)
+
+    hipinfo = chosen / "bin" / "hipInfo.exe"
+    if not hipinfo.exists():
+        e.hipinfo_present = False
+        e.hipinfo_status = "missing"
+        return
+    e.hipinfo_present = True
+    rc, out, err = _run([str(hipinfo)], timeout=15)
+    if rc != 0:
+        merged = (out + "\n" + err).lower()
+        if "no rocm" in merged or "no devices" in merged:
+            e.hipinfo_status = "not-loaded"
+        else:
+            e.hipinfo_status = f"error rc={rc}"
+        return
+    e.hipinfo_status = "ok"
+
+    # hipInfo prints a `device# 0` block with `Name:` (gfx target) and
+    # `gcnArchName:` lines. Parse the first GPU device for ground truth.
+    gfx = ""
+    name = ""
+    for line in out.splitlines():
+        s = line.strip()
+        if s.startswith("Name:") and not name:
+            name = s.split(":", 1)[1].strip()
+        if s.startswith("gcnArchName:") and not gfx:
+            val = s.split(":", 1)[1].strip()
+            if val.startswith("gfx"):
+                gfx = val.split(":")[0]
+        if s.startswith("arch:") and not gfx:
+            val = s.split(":", 1)[1].strip()
+            if val.startswith("gfx"):
+                gfx = val
+        if gfx and name:
+            break
+    amd_entries = [g for g in e.gpus if g.is_amd]
+    if gfx and amd_entries:
+        if not amd_entries[0].gfx_target:
+            amd_entries[0].gfx_target = gfx
+            amd_entries[0].is_apu = bool(re.match(r"gfx11[05]\d", gfx))
+        if name and not amd_entries[0].name:
+            amd_entries[0].name = name
+
+
+def _probe_adrenalin_windows(e: Examination) -> None:
+    """Best-effort probe of the AMD Adrenalin / kernel-mode driver version."""
+    rc, out, _ = _run([
+        "powershell", "-NoProfile", "-Command",
+        "(Get-CimInstance Win32_VideoController | "
+        "Where-Object { $_.Name -like '*AMD*' -or $_.Name -like '*Radeon*' } | "
+        "Select-Object -First 1).DriverVersion",
+    ], timeout=8)
+    if rc == 0 and out.strip():
+        e.adrenalin_version = out.strip().splitlines()[0].strip()
+
+
+def _probe_msvc_redist_windows(e: Examination) -> None:
+    """Check whether `vcruntime140.dll` and `vcruntime140_1.dll` are loadable.
+
+    The HIP SDK's amdhip64_*.dll links against the MSVC 2015-2022 runtime;
+    when the redistributable isn't installed, `import torch` fails with a
+    DLL-load error that points at vcruntime140_1.dll.
+    """
+    paths = os.environ.get("PATH", "").split(os.pathsep)
+    sysroot = os.environ.get("SystemRoot") or r"C:\Windows"
+    paths.extend([
+        os.path.join(sysroot, "System32"),
+        os.path.join(sysroot, "SysWOW64"),
+    ])
+    have_140 = False
+    have_140_1 = False
+    for d in paths:
+        if not d:
+            continue
+        try:
+            p = Path(d)
+            if not p.is_dir():
+                continue
+            if (p / "vcruntime140.dll").exists():
+                have_140 = True
+            if (p / "vcruntime140_1.dll").exists():
+                have_140_1 = True
+        except OSError:
+            continue
+        if have_140 and have_140_1:
+            break
+    e.msvc_redist_present = have_140 and have_140_1
+
+
+def _probe_env_windows(e: Examination) -> None:
+    """Capture the env vars the diagnosis catalog reads on Windows.
+
+    Mirrors `_probe_env` for Linux but skips the LD_LIBRARY_PATH scan
+    (Windows uses the PATH-based DLL search instead).
+    """
+    for k in TRACKED_ENV_VARS:
+        v = os.environ.get(k)
+        if v is None:
+            continue
+        if k == "PATH" and len(v) > 4000:
+            v = v[:4000] + "...[truncated]"
+        e.env[k] = v
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 
 def examine(requested_framework: str | None) -> Examination:
     e = Examination()
     _probe_os(e)
-    if e.os_family != "linux":
-        # Phase 0 only supports Linux for diagnostics. Windows is intentionally
-        # out of scope (the WSL/HIP SDK path is its own can of worms).
+    if e.is_wsl:
+        # WSL is a real, common environment but the failure modes there
+        # (Adrenalin Pro on the Windows host, the WSL kernel update, the
+        # /usr/lib/wsl/lib loader handoff) are NOT in this catalog. Refuse
+        # explicitly rather than running Linux-native probes that would all
+        # mislead.
         e.notes.append(
-            f"rocm-doctor only supports Linux (got {e.os_family}). "
-            "On Windows, use the HIP SDK installer + Adrenalin path; "
-            "this skill cannot help here."
+            "Detected WSL2. rocm-doctor does not cover the ROCm-on-WSL flow "
+            "(it requires Adrenalin Pro + the WSL kernel update on the "
+            "Windows host). Either run this script on the native Linux "
+            "host, or follow AMD's WSL guide directly: "
+            "https://rocm.docs.amd.com/projects/install-on-wsl/en/latest/"
         )
         return e
-    _probe_cpu(e)
-    _probe_gpus_lspci(e)
-    _probe_gpus_rocminfo(e)
-    _summarise_gpu_categories(e)
-    _probe_modules(e)
-    _probe_devices(e)
-    _probe_user(e)
-    _probe_secure_boot(e)
-    _probe_rocm_install(e)
-    _probe_env(e)
-    _probe_container(e)
-    _probe_dmesg_amdgpu(e)
-    _probe_framework(e, requested_framework)
+    if e.os_family == "linux":
+        _probe_cpu(e)
+        _probe_gpus_lspci(e)
+        _probe_gpus_rocminfo(e)
+        _summarise_gpu_categories(e)
+        _probe_modules(e)
+        _probe_devices(e)
+        _probe_user(e)
+        _probe_secure_boot(e)
+        _probe_rocm_install(e)
+        _probe_env(e)
+        _probe_container(e)
+        _probe_dmesg_amdgpu(e)
+        _probe_framework(e, requested_framework)
+        return e
+    if e.os_family == "windows":
+        _probe_cpu(e)
+        _probe_gpus_windows(e)
+        _probe_hip_sdk_windows(e)
+        _probe_adrenalin_windows(e)
+        _probe_msvc_redist_windows(e)
+        _summarise_gpu_categories(e)
+        _probe_env_windows(e)
+        _probe_framework(e, requested_framework)
+        return e
+    e.notes.append(
+        f"rocm-doctor supports Linux and Windows; got {e.os_family}. "
+        "This skill cannot help on this platform."
+    )
     return e
 
 
@@ -818,26 +1077,13 @@ def _fmt_yesno(v: bool | None) -> str:
     return "unknown" if v is None else ("yes" if v else "no")
 
 
-def _print_human(e: Examination) -> None:
-    print("rocm-doctor -- system examination (read-only)")
-    print("=" * 60)
-    print(f"OS:               {e.os_family} {e.distro_id} {e.distro_version}".strip())
-    if e.os_family != "linux":
-        for n in e.notes:
-            print(f"  note: {n}")
-        return
-    print(f"Kernel:           {e.kernel_release}")
-    if e.iommu_kernel_param:
-        print(f"  iommu=          {e.iommu_kernel_param}")
-    print(f"CPU:              {e.cpu_model} (vendor: {e.cpu_vendor})")
-    if e.secure_boot != "unknown":
-        print(f"Secure Boot:      {e.secure_boot}")
-    if e.in_container:
-        print(f"Container:        yes ({e.container_kind})")
-
+def _print_gpus(e: Examination) -> None:
     print("\nGPUs:")
     if not e.gpus:
-        print("  (none detected; lspci returned no VGA/3D/Display controllers)")
+        if e.os_family == "linux":
+            print("  (none detected; lspci returned no VGA/3D/Display controllers)")
+        else:
+            print("  (none detected; Win32_VideoController returned no AMD/NVIDIA adapters)")
     for g in e.gpus:
         flag = ""
         if g.is_amd and g.is_apu:
@@ -847,6 +1093,41 @@ def _print_human(e: Examination) -> None:
         elif "NVIDIA" in g.name.upper():
             flag = " [NVIDIA]"
         print(f"  - {g.pci_id}  {g.name or 'unknown'}  gfx={g.gfx_target or '?'}{flag}")
+
+
+def _print_framework_block(e: Examination) -> None:
+    print("\nFramework:")
+    print(f"  detected:        {e.framework}")
+    if e.framework_version:
+        print(f"  version:         {e.framework_version}")
+    if e.framework_rocm_version:
+        print(f"  rocm/hip:        {e.framework_rocm_version}")
+    if e.framework_arch_list:
+        print(f"  arch list:       {' '.join(e.framework_arch_list)}")
+    for n in e.framework_notes:
+        print(f"  note: {n}")
+
+
+def _print_env_block(e: Examination) -> None:
+    if not e.env:
+        return
+    print("\nRelevant environment variables (set in current shell):")
+    for k, v in e.env.items():
+        display = v if len(v) <= 200 else (v[:200] + "...")
+        print(f"  {k}={display}")
+
+
+def _print_human_linux(e: Examination) -> None:
+    print(f"Kernel:           {e.kernel_release}")
+    if e.iommu_kernel_param:
+        print(f"  iommu=          {e.iommu_kernel_param}")
+    print(f"CPU:              {e.cpu_model} (vendor: {e.cpu_vendor})")
+    if e.secure_boot != "unknown":
+        print(f"Secure Boot:      {e.secure_boot}")
+    if e.in_container:
+        print(f"Container:        yes ({e.container_kind})")
+
+    _print_gpus(e)
 
     print("\nDriver & devices:")
     print(f"  amdgpu loaded:   {_fmt_yesno(e.amdgpu_loaded)}")
@@ -878,27 +1159,48 @@ def _print_human(e: Examination) -> None:
         for r in e.rocm_repos_seen:
             print(f"    - {r}")
 
-    print("\nFramework:")
-    print(f"  detected:        {e.framework}")
-    if e.framework_version:
-        print(f"  version:         {e.framework_version}")
-    if e.framework_rocm_version:
-        print(f"  rocm/hip:        {e.framework_rocm_version}")
-    if e.framework_arch_list:
-        print(f"  arch list:       {' '.join(e.framework_arch_list)}")
-    for n in e.framework_notes:
-        print(f"  note: {n}")
-
-    if e.env:
-        print("\nRelevant environment variables (set in current shell):")
-        for k, v in e.env.items():
-            display = v if len(v) <= 200 else (v[:200] + "...")
-            print(f"  {k}={display}")
+    _print_framework_block(e)
+    _print_env_block(e)
 
     if e.dmesg_amdgpu_tail:
         print("\nRecent amdgpu/amdkfd kernel messages (last few interesting lines):")
         for line in e.dmesg_amdgpu_tail:
             print(f"  | {line}")
+
+
+def _print_human_windows(e: Examination) -> None:
+    print(f"CPU:              {e.cpu_model or 'unknown'} (vendor: {e.cpu_vendor})")
+
+    _print_gpus(e)
+
+    print("\nDriver & runtime:")
+    print(f"  Adrenalin driver: {e.adrenalin_version or 'unknown'}")
+    print(f"  hipInfo:          {e.hipinfo_status or 'missing'}")
+    print(f"  MSVC redist:      {_fmt_yesno(e.msvc_redist_present)}")
+
+    print("\nHIP SDK install:")
+    print(f"  path:            {e.hip_sdk_path or 'not found'}")
+    print(f"  version:         {e.hip_sdk_version or 'unknown'}")
+
+    _print_framework_block(e)
+    _print_env_block(e)
+
+
+def _print_human(e: Examination) -> None:
+    print("rocm-doctor -- system examination (read-only)")
+    print("=" * 60)
+    print(f"OS:               {e.os_family} {e.distro_id} {e.distro_version}".strip())
+    if e.is_wsl:
+        print("WSL:              yes (out of scope; see notes)")
+    if e.is_wsl or e.os_family not in ("linux", "windows"):
+        for n in e.notes:
+            print(f"  note: {n}")
+        return
+
+    if e.os_family == "linux":
+        _print_human_linux(e)
+    elif e.os_family == "windows":
+        _print_human_windows(e)
 
     if e.probe_failures:
         print("\nProbes that did not complete:")
@@ -922,14 +1224,22 @@ def _to_jsonable(e: Examination) -> dict:
 
 
 def _exit_code(e: Examination) -> int:
-    if e.os_family != "linux":
+    if e.is_wsl:
+        # WSL is detected but explicitly out of scope. Treat like "wrong
+        # platform" so the agent stops and routes the user.
+        return 2
+    if e.os_family not in ("linux", "windows"):
         return 2
     if not e.has_amd_gpu:
         # NVIDIA-only or no GPU at all -- this skill can't help.
         return 2
     # Probes that didn't complete are a soft warning, not a hard fail.
-    if e.probe_failures and not e.rocminfo_present and not e.gpus:
-        return 3
+    if e.os_family == "linux":
+        if e.probe_failures and not e.rocminfo_present and not e.gpus:
+            return 3
+    else:  # windows
+        if e.probe_failures and not e.hipinfo_present and not e.gpus:
+            return 3
     return 0
 
 

@@ -22,16 +22,23 @@ rebuild), this script prints the commands and exits 0 without running
 them, even without `--dry-run`. The user has to copy-paste, because the
 risk of a half-applied state is too high for a tool to take.
 
+Each recipe carries an `applies_on` set of os_family values. `main` refuses
+with exit 3 when the running OS isn't in that set, replacing the per-runner
+platform.system() checks. Linux-only recipes (fix-3, -4, -5, -7, -10, -11,
+-12) refuse on Windows; Windows-only recipes (fix-13, -14, -15) refuse on
+Linux; the rest are cross-platform.
+
 Exit codes:
   0 = success (or dry-run finished, or fix is advisory-only).
   2 = unknown --fix-id.
-  3 = required environment is missing (e.g. fix needs `sudo` and there's no sudo).
+  3 = required environment is missing (e.g. fix needs `sudo` and there's no
+      sudo, or fix doesn't apply to the running OS).
   4 = the underlying command exited non-zero; nothing was rolled back.
   5 = user declined the change at the interactive prompt.
 
 Design constraints:
   - Never run anything `sudo` without printing the command first.
-  - Never modify Windows registry, BIOS, or kernel cmdline non-interactively.
+  - Never modify the Windows registry, BIOS, or kernel cmdline non-interactively.
   - Never restart services or reboot the machine.
   - Never reinstall packages without an explicit --yes flag.
   - Never silently fall through to an unrelated fix because the requested
@@ -64,6 +71,10 @@ class FixRecipe:
     needs_relogin: bool = False
     verify: str = ""
     notes: list[str] = field(default_factory=list)
+    # OS families this recipe applies on. `main` refuses (exit 3) when the
+    # running OS isn't in this set, replacing the per-runner platform.system()
+    # checks that used to live in each runner.
+    applies_on: frozenset[str] = field(default_factory=lambda: frozenset({"linux"}))
     # When auto_applicable, this callable runs the actual change. It's
     # invoked with (args, recipe) and must return an int exit code. We
     # split this off from `commands` so we can compose multi-step actions
@@ -103,6 +114,7 @@ def _confirm(prompt: str, assume_yes: bool) -> bool:
 
 def _print_recipe(r: FixRecipe) -> None:
     print(f"Fix:        {r.fix_id}  -- {r.title}")
+    print(f"OS scope:   {', '.join(sorted(r.applies_on))}")
     print(f"Rationale:  {r.rationale}")
     if r.commands:
         print("Commands:")
@@ -133,9 +145,6 @@ def _print_recipe(r: FixRecipe) -> None:
 
 def run_render_group(args, recipe: FixRecipe) -> int:
     """fix-4: add the current user to the render group (and 'video' for safety)."""
-    if platform.system().lower() != "linux":
-        print("This fix only applies on Linux.")
-        return 3
     user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
     if not user:
         print("Could not determine current user from $USER/$LOGNAME.")
@@ -171,18 +180,26 @@ def run_render_group(args, recipe: FixRecipe) -> int:
 
 
 def run_unset_override(args, recipe: FixRecipe) -> int:
-    """fix-2: unset HSA_OVERRIDE_GFX_VERSION for the current process tree.
+    """fix-2: unset HSA_OVERRIDE_GFX_VERSION for future shells.
 
     We can only affect THIS process. Persisting the unset requires editing
-    the user's shell rc, which we never do unannounced. We instead:
-      1. Inspect ~/.bashrc, ~/.zshrc, ~/.profile, ~/.config/fish/config.fish
-         for an `export HSA_OVERRIDE_GFX_VERSION=...` line.
-      2. Print exact sed/edit instructions for any hit.
-      3. Exit; the next shell the user opens after editing will be clean.
+    user dotfiles (Linux) or the per-user environment registry (Windows),
+    which we never do unannounced. We instead:
+      Linux:
+        1. Inspect ~/.bashrc, ~/.zshrc, ~/.profile, ~/.config/fish/config.fish
+           for an `export HSA_OVERRIDE_GFX_VERSION=...` line.
+        2. Print exact $EDITOR instructions for any hit.
+      Windows:
+        1. Read the User and Machine env scopes via PowerShell.
+        2. Tell the user which scope still holds the value and how to clear
+           it (`setx HSA_OVERRIDE_GFX_VERSION ""` or System Properties UI).
     """
-    if platform.system().lower() != "linux":
-        print("This fix only applies on Linux.")
-        return 3
+    if platform.system().lower() == "windows":
+        return _run_unset_override_windows(args, recipe)
+    return _run_unset_override_linux(args, recipe)
+
+
+def _run_unset_override_linux(args, recipe: FixRecipe) -> int:
     current = os.environ.get("HSA_OVERRIDE_GFX_VERSION", "")
     if not current:
         print("HSA_OVERRIDE_GFX_VERSION is already unset in this shell.")
@@ -226,23 +243,87 @@ def run_unset_override(args, recipe: FixRecipe) -> int:
     return 0
 
 
-def run_path_export(args, recipe: FixRecipe) -> int:
-    """fix-6: append /opt/rocm/bin to PATH in the user's shell rc (with consent).
+def _run_unset_override_windows(args, recipe: FixRecipe) -> int:
+    current = os.environ.get("HSA_OVERRIDE_GFX_VERSION", "")
+    if current:
+        print(f"HSA_OVERRIDE_GFX_VERSION={current} is set in this shell.")
+        print("Note: clearing it in your Windows env scope does NOT affect this")
+        print("already-open shell -- close and reopen your terminal afterwards.")
+    else:
+        print("HSA_OVERRIDE_GFX_VERSION is not set in this shell.")
 
-    We do the SIMPLEST possible thing: append a single line to ~/.bashrc
-    (or ~/.zshrc when present and bashrc isn't). We never reorder PATH and
-    we never edit /etc/environment. If the line is already there we exit 0
-    without re-appending.
+    user_val = ""
+    machine_val = ""
+    rc, out, _ = _run([
+        "powershell", "-NoProfile", "-Command",
+        "[Environment]::GetEnvironmentVariable('HSA_OVERRIDE_GFX_VERSION','User')",
+    ], timeout=8)
+    if rc == 0:
+        user_val = out.strip()
+    rc, out, _ = _run([
+        "powershell", "-NoProfile", "-Command",
+        "[Environment]::GetEnvironmentVariable('HSA_OVERRIDE_GFX_VERSION','Machine')",
+    ], timeout=8)
+    if rc == 0:
+        machine_val = out.strip()
+
+    if not user_val and not machine_val:
+        print("\nNo persistent HSA_OVERRIDE_GFX_VERSION found in either the User")
+        print("or Machine env scope. You're done after closing/reopening shells.")
+        return 0
+
+    print("\nPersistent HSA_OVERRIDE_GFX_VERSION found in:")
+    if user_val:
+        print(f"  User scope:    {user_val}")
+    if machine_val:
+        print(f"  Machine scope: {machine_val}")
+
+    if user_val:
+        print('\nClear from the User scope (no admin needed):')
+        print('  Will run: setx HSA_OVERRIDE_GFX_VERSION ""')
+        if args.dry_run:
+            print("  (dry-run; not executed)")
+        elif _confirm("Clear HSA_OVERRIDE_GFX_VERSION from User scope?", args.yes):
+            rc, out, err = _run(["setx", "HSA_OVERRIDE_GFX_VERSION", ""], timeout=15)
+            if out: sys.stdout.write(out)
+            if err: sys.stderr.write(err)
+            if rc != 0:
+                print(f"setx exited {rc}; User scope NOT changed.")
+                return 4
+            print("Cleared from User scope. Reopen your terminal for it to take effect.")
+
+    if machine_val:
+        print(
+            "\nThe Machine scope value cannot be cleared without an Admin shell. "
+            "Either run an elevated PowerShell and execute:"
+        )
+        print("  [Environment]::SetEnvironmentVariable('HSA_OVERRIDE_GFX_VERSION', $null, 'Machine')")
+        print(
+            "or remove it through System Properties -> Environment Variables -> "
+            "System variables. apply_fix.py does NOT elevate itself."
+        )
+    return 0
+
+
+def run_path_export(args, recipe: FixRecipe) -> int:
+    """fix-6: persist the ROCm/HIP bin directory on PATH (with consent)."""
+    if platform.system().lower() == "windows":
+        return _run_path_export_windows(args, recipe)
+    return _run_path_export_linux(args, recipe)
+
+
+def _run_path_export_linux(args, recipe: FixRecipe) -> int:
+    """Append `/opt/rocm/bin` to ~/.bashrc (or ~/.zshrc).
+
+    Simplest possible thing: append a single line. We never reorder PATH,
+    we never edit /etc/environment. If the line is already there we exit
+    0 without re-appending.
     """
-    if platform.system().lower() != "linux":
-        print("This fix only applies on Linux.")
-        return 3
     bin_dir = "/opt/rocm/bin"
     if not Path(bin_dir).is_dir():
         print(f"{bin_dir} does not exist; nothing to add to PATH.")
         return 3
 
-    # Pick the rc file. zsh users get .zshrc; everyone else gets .bashrc.
     shell = os.environ.get("SHELL", "")
     rc_file = Path.home() / (".zshrc" if "zsh" in shell else ".bashrc")
     if not rc_file.exists() and (Path.home() / ".bashrc").exists():
@@ -283,17 +364,81 @@ def run_path_export(args, recipe: FixRecipe) -> int:
     return 0
 
 
-def run_hip_visible_devices(args, recipe: FixRecipe) -> int:
-    """fix-9: persist HIP_VISIBLE_DEVICES in the user's rc to hide the iGPU.
+def _run_path_export_windows(args, recipe: FixRecipe) -> int:
+    """Append the HIP SDK's bin directory to the User PATH via setx.
 
-    We DO NOT pick a device index automatically -- rocminfo ordering can
-    surprise even experienced users on dual-GPU laptops. Instead, we print
-    a guided rocminfo query and accept --device-index as the explicit input.
+    `setx` is the only documented way to persist a User env var on
+    Windows without elevation. It rewrites the whole variable; here we
+    fetch the current User-scope PATH first, append our directory if it
+    isn't there yet, and write the result back.
     """
-    if platform.system().lower() != "linux":
-        print("This fix only applies on Linux.")
+    sdk_path = os.environ.get("HIP_PATH", "")
+    if not sdk_path:
+        for root in (r"C:\Program Files\AMD\ROCm", r"C:\Program Files (x86)\AMD\ROCm"):
+            try:
+                base = Path(root)
+                if base.is_dir():
+                    for child in sorted(base.iterdir(), reverse=True):
+                        if child.is_dir() and re.match(r"\d+(\.\d+)+", child.name):
+                            sdk_path = str(child)
+                            break
+            except OSError:
+                continue
+            if sdk_path:
+                break
+    if not sdk_path:
+        print("No HIP SDK install found. Run fix-13-hip-sdk-missing first.")
+        return 3
+    bin_dir = str(Path(sdk_path) / "bin")
+    if not Path(bin_dir).is_dir():
+        print(f"{bin_dir} does not exist on disk; HIP SDK install looks incomplete.")
         return 3
 
+    rc, out, _ = _run([
+        "powershell", "-NoProfile", "-Command",
+        "[Environment]::GetEnvironmentVariable('PATH','User')",
+    ], timeout=8)
+    user_path = out.strip() if rc == 0 else ""
+    if user_path and bin_dir.lower() in user_path.lower():
+        print(f"User PATH already contains {bin_dir}; no change.")
+        return 0
+    new_path = (user_path + ";" + bin_dir).lstrip(";") if user_path else bin_dir
+
+    print(f"Plan: prepend {bin_dir} to your User PATH:")
+    print(f"  setx PATH \"{new_path}\"")
+    if args.dry_run:
+        print("(dry-run; not executed)")
+        return 0
+    if not _confirm("Update User PATH?", args.yes):
+        return 5
+
+    rc, out, err = _run(["setx", "PATH", new_path], timeout=15)
+    if out: sys.stdout.write(out)
+    if err: sys.stderr.write(err)
+    if rc != 0:
+        print(f"setx exited {rc}; User PATH NOT changed.")
+        return 4
+    print(
+        f"Added {bin_dir} to your User PATH. setx only takes effect in NEW "
+        "shells -- close this terminal and reopen it before re-running hipInfo."
+    )
+    return 0
+
+
+def run_hip_visible_devices(args, recipe: FixRecipe) -> int:
+    """fix-9: persist HIP_VISIBLE_DEVICES so the iGPU is hidden.
+
+    We DO NOT pick a device index automatically -- rocminfo / hipInfo
+    ordering can surprise even experienced users on dual-GPU laptops.
+    Instead, we print a guided query and accept --device-index as the
+    explicit input.
+    """
+    if platform.system().lower() == "windows":
+        return _run_hip_visible_devices_windows(args, recipe)
+    return _run_hip_visible_devices_linux(args, recipe)
+
+
+def _run_hip_visible_devices_linux(args, recipe: FixRecipe) -> int:
     idx = args.device_index
     if idx is None:
         print(
@@ -343,11 +488,65 @@ def run_hip_visible_devices(args, recipe: FixRecipe) -> int:
     return 0
 
 
+def _run_hip_visible_devices_windows(args, recipe: FixRecipe) -> int:
+    idx = args.device_index
+    if idx is None:
+        print(
+            "Run the following to identify the discrete GPU's index:"
+        )
+        print(
+            '  & "$env:HIP_PATH\\bin\\hipInfo.exe" | '
+            'Select-String "device#|Name|gcnArchName"'
+        )
+        print(
+            "Then re-run apply_fix.py with --device-index N (the iGPU is "
+            "typically device# 0; the dGPU is usually device# 1)."
+        )
+        return 3
+
+    rc, out, _ = _run([
+        "powershell", "-NoProfile", "-Command",
+        "[Environment]::GetEnvironmentVariable('HIP_VISIBLE_DEVICES','User')",
+    ], timeout=8)
+    existing = out.strip() if rc == 0 else ""
+    if existing:
+        print(
+            f"User scope already sets HIP_VISIBLE_DEVICES={existing!r}; "
+            "remove or update it manually rather than overwriting from this script."
+        )
+        return 0
+
+    print("Plan: persist HIP_VISIBLE_DEVICES in the User env scope:")
+    print(f"  setx HIP_VISIBLE_DEVICES {idx}")
+    if args.dry_run:
+        print("(dry-run; not executed)")
+        return 0
+    if not _confirm("Set HIP_VISIBLE_DEVICES in the User scope?", args.yes):
+        return 5
+
+    rc, out, err = _run(["setx", "HIP_VISIBLE_DEVICES", str(idx)], timeout=15)
+    if out: sys.stdout.write(out)
+    if err: sys.stderr.write(err)
+    if rc != 0:
+        print(f"setx exited {rc}; HIP_VISIBLE_DEVICES NOT changed.")
+        return 4
+    print(
+        "setx only takes effect in NEW shells -- close this terminal and "
+        "reopen it before re-running your workload."
+    )
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Recipe registry. Mirrors the diagnosis catalog in `diagnose.py`. Only the
 # small, safe, well-bounded fixes are auto-applicable; everything else is
 # advisory and prints the plan only.
 # ---------------------------------------------------------------------------
+
+LINUX_AND_WINDOWS = frozenset({"linux", "windows"})
+LINUX_ONLY = frozenset({"linux"})
+WINDOWS_ONLY = frozenset({"windows"})
+
 
 RECIPES: dict[str, FixRecipe] = {
     "fix-1-arch": FixRecipe(
@@ -359,18 +558,21 @@ RECIPES: dict[str, FixRecipe] = {
             "this gfx, OR rebuild llama.cpp with AMDGPU_TARGETS=<gfx>."
         ),
         auto_applicable=False,
+        applies_on=LINUX_AND_WINDOWS,
         commands=[
-            "# PyTorch: switch to the ROCm nightly that ships the gfx115x kernels.",
+            "# PyTorch (Linux): switch to the ROCm nightly that ships the gfx115x kernels.",
             "pip uninstall -y torch torchvision torchaudio",
             "pip install --pre torch torchvision torchaudio \\",
             "  --index-url https://download.pytorch.org/whl/nightly/rocm6.4",
+            "# PyTorch (Windows): use TheRock's per-gfx wheels (https://github.com/ROCm/TheRock).",
             "# llama.cpp:",
             "# cmake -B build -DGGML_HIP=ON -DAMDGPU_TARGETS=<your_gfx_target>",
             "# cmake --build build -j",
         ],
         notes=[
             "TheRock per-gfx wheels are the recommended fallback when the "
-            "official pytorch index does not yet cover your gfx.",
+            "official pytorch index does not yet cover your gfx (and the only "
+            "first-party option on Windows AMD).",
             "HSA_OVERRIDE_GFX_VERSION is NOT the right fix here -- it papers "
             "over the mismatch and risks page faults at runtime.",
         ],
@@ -385,9 +587,14 @@ RECIPES: dict[str, FixRecipe] = {
             "OUT_OF_REGISTERS at runtime."
         ),
         auto_applicable=True,
+        applies_on=LINUX_AND_WINDOWS,
         commands=[
+            "# Linux:",
             "unset HSA_OVERRIDE_GFX_VERSION",
             "# Then remove the line from ~/.bashrc / ~/.zshrc / ~/.profile.",
+            "# Windows:",
+            'setx HSA_OVERRIDE_GFX_VERSION ""',
+            "# Or remove via System Properties -> Environment Variables.",
         ],
         runner=run_unset_override,
         verify="env | grep HSA_OVERRIDE_GFX_VERSION || echo OK_UNSET",
@@ -401,6 +608,7 @@ RECIPES: dict[str, FixRecipe] = {
             "reinstalling, or rerun with --no-dkms and accept the risk."
         ),
         auto_applicable=False,
+        applies_on=LINUX_ONLY,
         commands=[
             "# Cross-check the live AMD matrix before changing anything:",
             "#   https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html",
@@ -417,6 +625,7 @@ RECIPES: dict[str, FixRecipe] = {
             "render group. Adding the user is the safe, standard fix."
         ),
         auto_applicable=True,
+        applies_on=LINUX_ONLY,
         commands=['sudo usermod -a -G render,video "$USER"'],
         needs_sudo=True,
         needs_relogin=True,
@@ -431,6 +640,7 @@ RECIPES: dict[str, FixRecipe] = {
             "for a blacklist entry, regenerate the initramfs, and modprobe."
         ),
         auto_applicable=False,
+        applies_on=LINUX_ONLY,
         commands=[
             "grep -RIl 'blacklist amdgpu' /etc/modprobe.d /usr/lib/modprobe.d 2>/dev/null || true",
             "sudo $EDITOR <file shown above>     # remove the blacklist line",
@@ -449,13 +659,21 @@ RECIPES: dict[str, FixRecipe] = {
     ),
     "fix-6-path": FixRecipe(
         fix_id="fix-6-path",
-        title="Add /opt/rocm/bin to PATH",
+        title="Add the ROCm/HIP bin directory to PATH",
         rationale=(
-            "ROCm is installed at /opt/rocm but its bin directory isn't on "
-            "PATH, so `rocminfo` / `hipcc` aren't visible to the shell."
+            "Linux: ROCm is installed at /opt/rocm but its bin directory isn't "
+            "on PATH, so `rocminfo` / `hipcc` aren't visible to the shell. "
+            "Windows: the HIP SDK is installed but its bin directory isn't on "
+            "the User PATH, so `hipInfo.exe` and the runtime DLLs can't be found."
         ),
         auto_applicable=True,
-        commands=['echo \'export PATH="/opt/rocm/bin:$PATH"\' >> ~/.bashrc'],
+        applies_on=LINUX_AND_WINDOWS,
+        commands=[
+            "# Linux:",
+            'echo \'export PATH="/opt/rocm/bin:$PATH"\' >> ~/.bashrc',
+            "# Windows:",
+            'setx PATH "%PATH%;C:\\Program Files\\AMD\\ROCm\\<version>\\bin"',
+        ],
         runner=run_path_export,
         verify="rocminfo | head -n 5 && hipcc --version",
     ),
@@ -467,6 +685,7 @@ RECIPES: dict[str, FixRecipe] = {
             "is mixing versions; quarantine the extras before reinstalling."
         ),
         auto_applicable=False,
+        applies_on=LINUX_ONLY,
         commands=[
             "ls /etc/apt/sources.list.d/ | grep -iE 'rocm|amdgpu|radeon'",
             "# For each duplicate file:",
@@ -478,17 +697,21 @@ RECIPES: dict[str, FixRecipe] = {
     ),
     "fix-8-wheel-rocm": FixRecipe(
         fix_id="fix-8-wheel-rocm",
-        title="Reinstall the framework against the system ROCm major",
+        title="Reinstall the framework against the system ROCm/HIP major",
         rationale=(
             "The framework's bundled HIP version doesn't match the system "
-            "ROCm. libamdhip64.so.X load failures are the usual signal."
+            "ROCm (Linux) or HIP SDK (Windows). libamdhip64.so.X / "
+            "amdhip64_X.dll load failures are the usual signal."
         ),
         auto_applicable=False,
+        applies_on=LINUX_AND_WINDOWS,
         commands=[
             "pip uninstall -y torch torchvision torchaudio",
-            "# Pick the index that matches your system ROCm major:",
+            "# Linux: pick the index that matches your system ROCm major:",
             "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.4",
             "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.3",
+            "# Windows: use TheRock's wheels matching your HIP SDK major:",
+            "#   https://github.com/ROCm/TheRock",
         ],
         verify="python -c \"import torch; print(torch.__version__, torch.version.hip, torch.cuda.is_available())\"",
     ),
@@ -500,15 +723,20 @@ RECIPES: dict[str, FixRecipe] = {
             "runtime to the dGPU so the iGPU doesn't destabilise it."
         ),
         auto_applicable=True,
+        applies_on=LINUX_AND_WINDOWS,
         commands=[
+            "# Linux:",
             "rocminfo | grep -E 'Agent |Marketing|gfx'   # find the dGPU index",
             "export HIP_VISIBLE_DEVICES=<dGPU-index>",
+            "# Windows:",
+            '& "$env:HIP_PATH\\bin\\hipInfo.exe" | Select-String "device#|Name"',
+            "setx HIP_VISIBLE_DEVICES <dGPU-index>",
         ],
         runner=run_hip_visible_devices,
         verify="python -c \"import torch; print(torch.cuda.device_count(), torch.cuda.get_device_name(0))\"",
         notes=[
-            "Pass --device-index N to write the export line; without it, "
-            "this fix only prints the rocminfo query so you can identify N.",
+            "Pass --device-index N to persist the env var; without it, "
+            "this fix only prints the rocminfo / hipInfo query so you can identify N.",
         ],
     ),
     "fix-10-container": FixRecipe(
@@ -519,6 +747,7 @@ RECIPES: dict[str, FixRecipe] = {
             "devices and the host's render group via the runtime flags."
         ),
         auto_applicable=False,
+        applies_on=LINUX_ONLY,
         commands=[
             "docker run --rm -it \\",
             "  --device=/dev/kfd \\",
@@ -543,6 +772,7 @@ RECIPES: dict[str, FixRecipe] = {
             "editing GRUB and rebooting; we will not do that for you."
         ),
         auto_applicable=False,
+        applies_on=LINUX_ONLY,
         commands=[
             "cat /proc/cmdline",
             "sudo $EDITOR /etc/default/grub        # add iommu=pt to GRUB_CMDLINE_LINUX_DEFAULT",
@@ -563,6 +793,7 @@ RECIPES: dict[str, FixRecipe] = {
             "flag that broke things (commonly --accept-eula on newer installers)."
         ),
         auto_applicable=False,
+        applies_on=LINUX_ONLY,
         commands=[
             "sudo amdgpu-install --uninstall",
             "sudo apt autoremove --purge -y",
@@ -577,6 +808,79 @@ RECIPES: dict[str, FixRecipe] = {
             "packages, stop and resolve those by hand before continuing.",
         ],
     ),
+    "fix-13-hip-sdk-missing": FixRecipe(
+        fix_id="fix-13-hip-sdk-missing",
+        title="Install the AMD HIP SDK for Windows",
+        rationale=(
+            "Your framework links against HIP but the HIP SDK isn't installed "
+            "on this host. The runtime DLLs (amdhip64_X.dll, hipblas.dll, "
+            "hsa-runtime64.dll) and hipInfo.exe ship inside the SDK installer."
+        ),
+        auto_applicable=False,
+        applies_on=WINDOWS_ONLY,
+        commands=[
+            "# Download and install the HIP SDK (matched to your framework's HIP major):",
+            "#   https://www.amd.com/en/developer/resources/rocm-hub/hip-sdk.html",
+            "# After install, reopen the shell so HIP_PATH and PATH pick up the new install.",
+        ],
+        verify=(
+            'powershell -NoProfile -Command '
+            '"& \\"$env:HIP_PATH\\bin\\hipInfo.exe\\" | Select-Object -First 5"'
+        ),
+        notes=[
+            "If you only need PyTorch on Windows AMD and don't need the C/C++ "
+            "HIP toolchain, the TheRock wheels bundle their own HIP runtime "
+            "and may not require a system HIP SDK install.",
+        ],
+    ),
+    "fix-14-adrenalin-too-old": FixRecipe(
+        fix_id="fix-14-adrenalin-too-old",
+        title="Update the Adrenalin / kernel-mode driver",
+        rationale=(
+            "The HIP SDK is installed but the AMD kernel-mode driver "
+            "(Adrenalin / Adrenalin Pro) is older than the SDK release notes "
+            "call out. The user-space SDK and the driver have to match."
+        ),
+        auto_applicable=False,
+        applies_on=WINDOWS_ONLY,
+        commands=[
+            "# Cross-check the HIP SDK release notes for the exact driver pairing:",
+            "#   https://rocm.docs.amd.com/projects/install-on-windows/en/latest/install/install.html",
+            "# Then download the matching driver from:",
+            "#   https://www.amd.com/en/support",
+            "# Reboot after the install for the kernel-mode driver to take effect.",
+        ],
+        needs_reboot=True,
+        verify=(
+            'powershell -NoProfile -Command '
+            '"(Get-CimInstance Win32_VideoController | '
+            "Where-Object { $_.Name -like '*AMD*' -or $_.Name -like '*Radeon*' } | "
+            'Select-Object -First 1).DriverVersion"'
+        ),
+    ),
+    "fix-15-msvc-redist": FixRecipe(
+        fix_id="fix-15-msvc-redist",
+        title="Install the MSVC 2015-2022 runtime redistributable",
+        rationale=(
+            "The HIP SDK's amdhip64_X.dll links against the MSVC 2015-2022 "
+            "runtime. When vcruntime140.dll / vcruntime140_1.dll aren't on "
+            "PATH, `import torch` fails with a missing-DLL error that points "
+            "at vcruntime140_1.dll, not at the HIP runtime itself."
+        ),
+        auto_applicable=False,
+        applies_on=WINDOWS_ONLY,
+        commands=[
+            "# Download and install (x64):",
+            "#   https://aka.ms/vs/17/release/vc_redist.x64.exe",
+            "# After the install, reopen the shell and re-run your import / hipInfo check.",
+        ],
+        verify="where vcruntime140.dll && where vcruntime140_1.dll",
+        notes=[
+            "If installing the redistributable still leaves a missing-DLL "
+            "error, the failing DLL is probably amdhip64_X.dll itself; that "
+            "points at fix-13-hip-sdk-missing rather than this fix.",
+        ],
+    ),
 }
 
 
@@ -584,7 +888,8 @@ def _list_recipes() -> None:
     print("Available fix-ids (mirror diagnose.py):")
     for r in RECIPES.values():
         kind = "AUTO" if r.auto_applicable else "PRINT-ONLY"
-        print(f"  [{kind:>10s}] {r.fix_id}  -- {r.title}")
+        scope = "/".join(sorted(r.applies_on))
+        print(f"  [{kind:>10s}] [{scope:>14s}] {r.fix_id}  -- {r.title}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -630,13 +935,30 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.json:
-        # Strip the runner callable; it isn't JSON-serialisable.
-        d = {k: v for k, v in recipe.__dict__.items() if k != "runner"}
+        # Strip the runner callable; it isn't JSON-serialisable. Convert
+        # the frozenset for `applies_on` into a sorted list so the JSON
+        # output is stable.
+        d = {}
+        for k, v in recipe.__dict__.items():
+            if k == "runner":
+                continue
+            if k == "applies_on":
+                d[k] = sorted(v)
+            else:
+                d[k] = v
         print(json.dumps(d, indent=2))
         return 0
 
     _print_recipe(recipe)
     print()
+
+    sysname = platform.system().lower()
+    if sysname not in recipe.applies_on:
+        print(
+            f"This fix only applies on: {', '.join(sorted(recipe.applies_on))}. "
+            f"Running OS is: {sysname}."
+        )
+        return 3
 
     if not recipe.auto_applicable:
         print("This fix is print-only (manual change required).")

@@ -131,8 +131,25 @@ KEYWORDS_LIB_MISMATCH = [
     (r"libamdhip64\.so", 50, "error mentions libamdhip64.so"),
     (r"libhsa-runtime", 45, "error mentions libhsa-runtime"),
     (r"libhipblas", 40, "error mentions libhipblas"),
+    (r"amdhip64_\d+\.dll", 50, "error mentions amdhip64_X.dll (Windows)"),
+    (r"hipblas\.dll", 40, "error mentions hipblas.dll (Windows)"),
     (r"cannot open shared object file", 25, "ldopen failure"),
+    (r"dll load failed", 25, "Windows DLL load failure"),
     (r"version `?glibc", 5, "tangential glibc version error"),
+]
+
+KEYWORDS_HIP_SDK_MISSING = [
+    (r"amdhip64.*not found", 50, "error names amdhip64 missing"),
+    (r"could not find hip", 40, "error mentions HIP not found"),
+    (r"hip_path.*not set", 35, "user mentions HIP_PATH unset"),
+    (r"hipinfo.*not recognized", 45, "Windows says hipInfo is not a command"),
+]
+
+KEYWORDS_MSVC_REDIST = [
+    (r"vcruntime140(?:_1)?\.dll", 50, "error mentions vcruntime140 / vcruntime140_1"),
+    (r"api-ms-win-crt-.*\.dll", 35, "error mentions api-ms-win-crt-* DLL"),
+    (r"the (program|application) can't start because", 25, "Windows missing-DLL dialog text"),
+    (r"msvcp140\.dll", 30, "error mentions msvcp140.dll"),
 ]
 
 KEYWORDS_REPO_BROKEN = [
@@ -332,19 +349,38 @@ def check_2_hsa_override_unneeded(exam: dict, symptom: str) -> Diagnosis:
             f"list ({framework_arch}); the override is hiding the native gfx."
         )
 
-    fix = Fix(
-        summary="Unset HSA_OVERRIDE_GFX_VERSION and use the native wheel.",
-        commands=[
-            "unset HSA_OVERRIDE_GFX_VERSION",
-            "# Also remove it from ~/.bashrc / ~/.zshrc / ~/.profile if persisted.",
-        ],
-        fix_id="fix-2-unset-override",
-        auto_applicable=True,
-        verify=(
-            "env | grep HSA_OVERRIDE_GFX_VERSION || echo OK_UNSET; "
-            "python -c \"import torch; print(torch.cuda.is_available())\""
-        ),
-    )
+    if _g(exam, "os_family", default="linux") == "windows":
+        fix = Fix(
+            summary="Clear HSA_OVERRIDE_GFX_VERSION (Windows) and use the native HIP SDK / wheel.",
+            commands=[
+                "# Inspect the User and Machine env scopes:",
+                "[Environment]::GetEnvironmentVariable('HSA_OVERRIDE_GFX_VERSION','User')",
+                "[Environment]::GetEnvironmentVariable('HSA_OVERRIDE_GFX_VERSION','Machine')",
+                "# Clear from the User scope (does NOT affect already-open shells):",
+                'setx HSA_OVERRIDE_GFX_VERSION ""',
+                "# Or remove via System Properties -> Environment Variables.",
+            ],
+            fix_id="fix-2-unset-override",
+            auto_applicable=True,
+            verify=(
+                "powershell -NoProfile -Command "
+                "\"[Environment]::GetEnvironmentVariable('HSA_OVERRIDE_GFX_VERSION','User')\""
+            ),
+        )
+    else:
+        fix = Fix(
+            summary="Unset HSA_OVERRIDE_GFX_VERSION and use the native wheel.",
+            commands=[
+                "unset HSA_OVERRIDE_GFX_VERSION",
+                "# Also remove it from ~/.bashrc / ~/.zshrc / ~/.profile if persisted.",
+            ],
+            fix_id="fix-2-unset-override",
+            auto_applicable=True,
+            verify=(
+                "env | grep HSA_OVERRIDE_GFX_VERSION || echo OK_UNSET; "
+                "python -c \"import torch; print(torch.cuda.is_available())\""
+            ),
+        )
     return Diagnosis(
         id="fix-2-unset-override",
         title="HSA_OVERRIDE_GFX_VERSION set on a GPU that has a native wheel",
@@ -529,21 +565,34 @@ def check_5_amdgpu_blacklisted(exam: dict, symptom: str) -> Diagnosis:
 
 
 def check_6_path_missing(exam: dict, symptom: str) -> Diagnosis:
-    """ROCm binaries not on PATH after install."""
+    """ROCm/HIP binaries not on PATH after install."""
     score = 0
     evidence: list[str] = []
 
-    rocm_path = _g(exam, "rocm_path", default="")
-    rocminfo_present = _g(exam, "rocminfo_present", default=None)
+    os_family = _g(exam, "os_family", default="linux")
     env_path = _g(exam, "env", default={}).get("PATH", "")
-    bin_dir = f"{rocm_path}/bin" if rocm_path else "/opt/rocm/bin"
 
-    if rocm_path and rocminfo_present is False:
-        score += 50
-        evidence.append(f"{rocm_path} exists but `rocminfo` is not on PATH")
-    if rocm_path and env_path and bin_dir not in env_path:
-        score += 20
-        evidence.append(f"{bin_dir} is not in $PATH")
+    if os_family == "windows":
+        sdk_path = _g(exam, "hip_sdk_path", default="")
+        hipinfo_present = _g(exam, "hipinfo_present", default=None)
+        bin_dir = f"{sdk_path}\\bin" if sdk_path else r"C:\Program Files\AMD\ROCm\<version>\bin"
+        if sdk_path and hipinfo_present is False:
+            score += 50
+            evidence.append(f"{sdk_path} exists but hipInfo.exe wasn't found in its bin directory")
+        if sdk_path and env_path and bin_dir.lower() not in env_path.lower():
+            score += 20
+            evidence.append(f"{bin_dir} is not in PATH")
+    else:
+        rocm_path = _g(exam, "rocm_path", default="")
+        rocminfo_present = _g(exam, "rocminfo_present", default=None)
+        bin_dir = f"{rocm_path}/bin" if rocm_path else "/opt/rocm/bin"
+        if rocm_path and rocminfo_present is False:
+            score += 50
+            evidence.append(f"{rocm_path} exists but `rocminfo` is not on PATH")
+        if rocm_path and env_path and bin_dir not in env_path:
+            score += 20
+            evidence.append(f"{bin_dir} is not in $PATH")
+
     kw_score, kw_ev = _keyword_score(symptom, KEYWORDS_PATH_MISSING)
     score += kw_score
     evidence += kw_ev
@@ -551,19 +600,32 @@ def check_6_path_missing(exam: dict, symptom: str) -> Diagnosis:
     if score <= 0:
         return Diagnosis(id="fix-6-path", title="ROCm not on PATH", score=0)
 
-    fix = Fix(
-        summary=f"Add {bin_dir} to PATH for this shell and persist in your shell rc.",
-        commands=[
-            f"export PATH={bin_dir}:$PATH",
-            f"echo 'export PATH={bin_dir}:$PATH' >> ~/.bashrc   # or ~/.zshrc",
-        ],
-        fix_id="fix-6-path",
-        auto_applicable=True,
-        verify="rocminfo | head -n 5 && hipcc --version",
-    )
+    if os_family == "windows":
+        fix = Fix(
+            summary=f"Add {bin_dir} to your User PATH and reopen the shell.",
+            commands=[
+                f'setx PATH "%PATH%;{bin_dir}"',
+                "# Or: System Properties -> Environment Variables -> Path -> Edit -> New.",
+                "# `setx` only affects NEW shells; close and reopen this terminal afterwards.",
+            ],
+            fix_id="fix-6-path",
+            auto_applicable=True,
+            verify=f'powershell -NoProfile -Command "& \\"{bin_dir}\\hipInfo.exe\\" | Select-Object -First 5"',
+        )
+    else:
+        fix = Fix(
+            summary=f"Add {bin_dir} to PATH for this shell and persist in your shell rc.",
+            commands=[
+                f"export PATH={bin_dir}:$PATH",
+                f"echo 'export PATH={bin_dir}:$PATH' >> ~/.bashrc   # or ~/.zshrc",
+            ],
+            fix_id="fix-6-path",
+            auto_applicable=True,
+            verify="rocminfo | head -n 5 && hipcc --version",
+        )
     return Diagnosis(
         id="fix-6-path",
-        title="ROCm binaries not on PATH after install",
+        title="ROCm/HIP binaries not on PATH after install",
         score=min(score, 100),
         evidence=evidence,
         fix=fix,
@@ -620,8 +682,12 @@ def check_8_wheel_rocm_mismatch(exam: dict, symptom: str) -> Diagnosis:
     """Framework wheel built for a different ROCm major than the system."""
     score = 0
     evidence: list[str] = []
+    os_family = _g(exam, "os_family", default="linux")
     fw_rocm = _g(exam, "framework_rocm_version", default="")
-    sys_rocm = _g(exam, "rocm_version", default="")
+    if os_family == "windows":
+        sys_rocm = _g(exam, "hip_sdk_version", default="")
+    else:
+        sys_rocm = _g(exam, "rocm_version", default="")
 
     def _major(s: str) -> str | None:
         m = re.search(r"(\d+)\.(\d+)", s)
@@ -631,8 +697,9 @@ def check_8_wheel_rocm_mismatch(exam: dict, symptom: str) -> Diagnosis:
     sys_major = _major(sys_rocm)
     if fw_major and sys_major and fw_major != sys_major:
         score += 50
+        runtime = "HIP SDK" if os_family == "windows" else "ROCm"
         evidence.append(
-            f"Framework links HIP {fw_major} but system ROCm is {sys_major}"
+            f"Framework links HIP {fw_major} but system {runtime} is {sys_major}"
         )
 
     kw_score, kw_ev = _keyword_score(symptom, KEYWORDS_LIB_MISMATCH)
@@ -642,23 +709,41 @@ def check_8_wheel_rocm_mismatch(exam: dict, symptom: str) -> Diagnosis:
     if score <= 0:
         return Diagnosis(id="fix-8-wheel-rocm", title="Wheel/ROCm mismatch", score=0)
 
-    fix = Fix(
-        summary=(
-            "Reinstall the framework from the wheel index that matches the "
-            "system ROCm major (or upgrade the system ROCm to match the wheel)."
-        ),
-        commands=[
-            "pip uninstall -y torch torchvision torchaudio",
-            "# Pick the index that matches your system ROCm major. Examples:",
-            "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.4",
-            "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.3",
-            "# Then re-check:",
-            "python -c \"import torch; print(torch.__version__, torch.version.hip)\"",
-        ],
-        fix_id="fix-8-wheel-rocm",
-        auto_applicable=False,
-        verify="python -c \"import torch; print(torch.cuda.is_available(), torch.version.hip)\"",
-    )
+    if os_family == "windows":
+        fix = Fix(
+            summary=(
+                "Reinstall the framework against the HIP SDK major you have "
+                "installed (or install the HIP SDK major the wheel needs)."
+            ),
+            commands=[
+                "pip uninstall -y torch torchvision torchaudio",
+                "# TheRock publishes Windows ROCm wheels per HIP SDK release:",
+                "#   https://github.com/ROCm/TheRock",
+                "# Match the wheel index to the HIP SDK major you have on disk.",
+                "python -c \"import torch; print(torch.__version__, torch.version.hip)\"",
+            ],
+            fix_id="fix-8-wheel-rocm",
+            auto_applicable=False,
+            verify="python -c \"import torch; print(torch.cuda.is_available(), torch.version.hip)\"",
+        )
+    else:
+        fix = Fix(
+            summary=(
+                "Reinstall the framework from the wheel index that matches the "
+                "system ROCm major (or upgrade the system ROCm to match the wheel)."
+            ),
+            commands=[
+                "pip uninstall -y torch torchvision torchaudio",
+                "# Pick the index that matches your system ROCm major. Examples:",
+                "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.4",
+                "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.3",
+                "# Then re-check:",
+                "python -c \"import torch; print(torch.__version__, torch.version.hip)\"",
+            ],
+            fix_id="fix-8-wheel-rocm",
+            auto_applicable=False,
+            verify="python -c \"import torch; print(torch.cuda.is_available(), torch.version.hip)\"",
+        )
     return Diagnosis(
         id="fix-8-wheel-rocm",
         title="Framework wheel built for a different ROCm major than the system",
@@ -687,28 +772,50 @@ def check_9_igpu_dgpu_collision(exam: dict, symptom: str) -> Diagnosis:
         score += 15
         evidence.append("user mentions a crash / segfault")
 
-    # Try to identify which device index is the dGPU. Without rocminfo
-    # ordering we can't know for certain, so we ask the user to pick.
     gfx_targets = _amd_gfx_targets(exam)
-    fix = Fix(
-        summary=(
-            "Pin the runtime to the discrete GPU with HIP_VISIBLE_DEVICES "
-            "so the iGPU is hidden."
-        ),
-        commands=[
-            "# Confirm which index is the dGPU (`rocminfo` output order):",
-            "rocminfo | grep -E 'Agent |gfx|Marketing'",
-            "# Then pin HIP to the dGPU (typically index 1 when an APU is index 0):",
-            "export HIP_VISIBLE_DEVICES=1",
-            "# Persist in your shell rc or your launch script.",
-        ],
-        fix_id="fix-9-igpu-dgpu",
-        auto_applicable=False,
-        verify="HIP_VISIBLE_DEVICES=1 python -c \"import torch; print(torch.cuda.device_count())\"",
-        notes=[
-            f"Detected gfx targets: {gfx_targets}. The dGPU is usually the higher-numbered family (gfx11xx).",
-        ],
-    )
+    if _g(exam, "os_family", default="linux") == "windows":
+        fix = Fix(
+            summary=(
+                "Pin the HIP runtime to the discrete GPU with HIP_VISIBLE_DEVICES "
+                "so the iGPU is hidden."
+            ),
+            commands=[
+                "# Confirm which index is the dGPU (hipInfo.exe output order):",
+                '& "$env:HIP_PATH\\bin\\hipInfo.exe" | Select-String "device#|Name|gcnArchName"',
+                "# Then persist HIP_VISIBLE_DEVICES in the User environment:",
+                "setx HIP_VISIBLE_DEVICES 1",
+                "# `setx` only takes effect in NEW shells; reopen the terminal.",
+            ],
+            fix_id="fix-9-igpu-dgpu",
+            auto_applicable=True,
+            verify=(
+                'powershell -NoProfile -Command "$env:HIP_VISIBLE_DEVICES=1; '
+                'python -c \\"import torch; print(torch.cuda.device_count())\\""'
+            ),
+            notes=[
+                f"Detected gfx targets: {gfx_targets}. The dGPU is usually the higher-numbered family (gfx11xx).",
+            ],
+        )
+    else:
+        fix = Fix(
+            summary=(
+                "Pin the runtime to the discrete GPU with HIP_VISIBLE_DEVICES "
+                "so the iGPU is hidden."
+            ),
+            commands=[
+                "# Confirm which index is the dGPU (`rocminfo` output order):",
+                "rocminfo | grep -E 'Agent |gfx|Marketing'",
+                "# Then pin HIP to the dGPU (typically index 1 when an APU is index 0):",
+                "export HIP_VISIBLE_DEVICES=1",
+                "# Persist in your shell rc or your launch script.",
+            ],
+            fix_id="fix-9-igpu-dgpu",
+            auto_applicable=False,
+            verify="HIP_VISIBLE_DEVICES=1 python -c \"import torch; print(torch.cuda.device_count())\"",
+            notes=[
+                f"Detected gfx targets: {gfx_targets}. The dGPU is usually the higher-numbered family (gfx11xx).",
+            ],
+        )
     return Diagnosis(
         id="fix-9-igpu-dgpu",
         title="iGPU enumerated alongside dGPU and destabilising the runtime",
@@ -880,26 +987,221 @@ def check_12_amdgpu_install_broken(exam: dict, symptom: str) -> Diagnosis:
     )
 
 
-CHECKERS: list[Callable[[dict, str], Diagnosis]] = [
-    check_1_arch_not_in_wheel,
-    check_2_hsa_override_unneeded,
-    check_3_rocm_kernel_unsupported,
-    check_4_render_group,
-    check_5_amdgpu_blacklisted,
-    check_6_path_missing,
-    check_7_stale_repos,
-    check_8_wheel_rocm_mismatch,
-    check_9_igpu_dgpu_collision,
-    check_10_container_devices,
-    check_11_iommu_hang,
-    check_12_amdgpu_install_broken,
+def check_13_hip_sdk_missing(exam: dict, symptom: str) -> Diagnosis:
+    """Windows: framework imports HIP but the HIP SDK isn't installed."""
+    if _g(exam, "os_family", default="") != "windows":
+        return Diagnosis(id="fix-13-hip-sdk-missing", title="HIP SDK not installed", score=0)
+
+    score = 0
+    evidence: list[str] = []
+    sdk_path = _g(exam, "hip_sdk_path", default="")
+    hipinfo_present = _g(exam, "hipinfo_present", default=None)
+    framework = _g(exam, "framework", default="")
+    fw_rocm = _g(exam, "framework_rocm_version", default="")
+    has_amd = _g(exam, "has_amd_gpu", default=False)
+
+    if not sdk_path:
+        score += 35
+        evidence.append("No HIP SDK install found under C:\\Program Files\\AMD\\ROCm")
+    elif hipinfo_present is False:
+        score += 30
+        evidence.append(f"HIP SDK at {sdk_path} but hipInfo.exe is missing from its bin directory")
+
+    if has_amd and framework == "pytorch" and fw_rocm.startswith("hip="):
+        score += 25
+        evidence.append("PyTorch is a HIP build but the HIP SDK is not present on this host")
+
+    kw_score, kw_ev = _keyword_score(symptom, KEYWORDS_HIP_SDK_MISSING)
+    score += kw_score
+    evidence += kw_ev
+
+    if score <= 0:
+        return Diagnosis(id="fix-13-hip-sdk-missing", title="HIP SDK not installed", score=0)
+
+    fix = Fix(
+        summary=(
+            "Install the AMD HIP SDK for Windows; the HIP runtime DLLs and "
+            "hipInfo.exe come from there."
+        ),
+        commands=[
+            "# Download and install the HIP SDK (matched to your framework's HIP major):",
+            "#   https://www.amd.com/en/developer/resources/rocm-hub/hip-sdk.html",
+            "# After install, reopen the shell so HIP_PATH and PATH pick up the new install.",
+        ],
+        fix_id="fix-13-hip-sdk-missing",
+        auto_applicable=False,
+        verify=(
+            'powershell -NoProfile -Command '
+            '"& \\"$env:HIP_PATH\\bin\\hipInfo.exe\\" | Select-Object -First 5"'
+        ),
+        notes=[
+            "If you only need PyTorch on Windows AMD and don't need the C/C++ "
+            "HIP toolchain, the TheRock wheels bundle their own HIP runtime "
+            "and may not require a system HIP SDK install.",
+        ],
+    )
+    return Diagnosis(
+        id="fix-13-hip-sdk-missing",
+        title="HIP SDK not installed (Windows)",
+        score=min(score, 100),
+        evidence=evidence,
+        fix=fix,
+    )
+
+
+def check_14_adrenalin_too_old(exam: dict, symptom: str) -> Diagnosis:
+    """Windows: HIP SDK present but Adrenalin (kernel-mode driver) is too old.
+
+    We deliberately do NOT hardcode a minimum Adrenalin version here: AMD
+    bumps the HIP SDK <-> Adrenalin pairing every release, and the live
+    table goes stale within months. Instead we trigger on observable
+    failure patterns (HIP SDK present + hipInfo unable to enumerate, or
+    user pasted a 'Driver version too old' style symptom) and route the
+    user to the live release notes.
+    """
+    if _g(exam, "os_family", default="") != "windows":
+        return Diagnosis(id="fix-14-adrenalin-too-old", title="Adrenalin driver too old", score=0)
+
+    score = 0
+    evidence: list[str] = []
+    sdk_path = _g(exam, "hip_sdk_path", default="")
+    hipinfo_present = _g(exam, "hipinfo_present", default=False)
+    hipinfo_status = _g(exam, "hipinfo_status", default="")
+    adrenalin = _g(exam, "adrenalin_version", default="")
+
+    if sdk_path and hipinfo_present and hipinfo_status not in ("ok", ""):
+        score += 35
+        evidence.append(
+            f"HIP SDK at {sdk_path} is installed but hipInfo.exe reports {hipinfo_status!r}; "
+            "this typically means the kernel-mode driver doesn't match the SDK."
+        )
+    if adrenalin:
+        evidence.append(f"Adrenalin / kernel-mode driver version: {adrenalin}")
+
+    if symptom and re.search(r"driver.*(too old|out of date|unsupported)", symptom, re.IGNORECASE):
+        score += 35
+        evidence.append("error mentions 'driver too old / out of date / unsupported'")
+    if symptom and re.search(r"hsa.*invalid agent|no agents (were )?found", symptom, re.IGNORECASE):
+        score += 25
+        evidence.append("HSA error suggests driver/runtime can't enumerate the GPU")
+
+    if score <= 0:
+        return Diagnosis(id="fix-14-adrenalin-too-old", title="Adrenalin driver too old", score=0)
+
+    fix = Fix(
+        summary=(
+            "Update the AMD Adrenalin (or PRO) graphics driver to the version "
+            "the HIP SDK release notes call out as the supported pairing."
+        ),
+        commands=[
+            "# Cross-check the HIP SDK release notes for the exact driver pairing:",
+            "#   https://rocm.docs.amd.com/projects/install-on-windows/en/latest/install/install.html",
+            "# Then download the matching driver from:",
+            "#   https://www.amd.com/en/support",
+            "# Reboot after the install for the kernel-mode driver to take effect.",
+        ],
+        needs_reboot=True,
+        fix_id="fix-14-adrenalin-too-old",
+        auto_applicable=False,
+        verify=(
+            'powershell -NoProfile -Command '
+            '"(Get-CimInstance Win32_VideoController | '
+            "Where-Object { $_.Name -like '*AMD*' -or $_.Name -like '*Radeon*' } | "
+            'Select-Object -First 1).DriverVersion"'
+        ),
+    )
+    return Diagnosis(
+        id="fix-14-adrenalin-too-old",
+        title="Adrenalin / kernel-mode driver too old for the installed HIP SDK",
+        score=min(score, 100),
+        evidence=evidence,
+        fix=fix,
+    )
+
+
+def check_15_msvc_redist(exam: dict, symptom: str) -> Diagnosis:
+    """Windows: MSVC runtime DLL missing -- HIP DLLs fail to load."""
+    if _g(exam, "os_family", default="") != "windows":
+        return Diagnosis(id="fix-15-msvc-redist", title="MSVC runtime missing", score=0)
+
+    score = 0
+    evidence: list[str] = []
+    redist = _g(exam, "msvc_redist_present", default=None)
+    if redist is False:
+        score += 45
+        evidence.append("vcruntime140.dll / vcruntime140_1.dll not resolvable on PATH")
+
+    kw_score, kw_ev = _keyword_score(symptom, KEYWORDS_MSVC_REDIST)
+    score += kw_score
+    evidence += kw_ev
+
+    if score <= 0:
+        return Diagnosis(id="fix-15-msvc-redist", title="MSVC runtime missing", score=0)
+
+    fix = Fix(
+        summary=(
+            "Install the Microsoft Visual C++ 2015-2022 redistributable so the "
+            "HIP SDK's amdhip64_*.dll can load."
+        ),
+        commands=[
+            "# Download & install (x64):",
+            "#   https://aka.ms/vs/17/release/vc_redist.x64.exe",
+            "# After the install, reopen the shell and re-run your import / hipInfo check.",
+        ],
+        fix_id="fix-15-msvc-redist",
+        auto_applicable=False,
+        verify=(
+            "where vcruntime140.dll && where vcruntime140_1.dll"
+        ),
+        notes=[
+            "If installing the redistributable still leaves a missing-DLL error, "
+            "the failing DLL is probably amdhip64_X.dll itself; that points at "
+            "fix-13-hip-sdk-missing (the HIP SDK install) rather than this fix.",
+        ],
+    )
+    return Diagnosis(
+        id="fix-15-msvc-redist",
+        title="MSVC runtime missing (HIP DLLs cannot load)",
+        score=min(score, 100),
+        evidence=evidence,
+        fix=fix,
+    )
+
+
+# Each entry: (checker, frozenset of os_family values it applies to).
+# `run_all_checks` reads the running OS from the exam JSON and skips
+# checkers whose `applicable_on` doesn't include it. This keeps the OS
+# branching in one place rather than scattered through the checkers.
+CHECKERS: list[tuple[Callable[[dict, str], Diagnosis], frozenset[str]]] = [
+    (check_1_arch_not_in_wheel,       frozenset({"linux", "windows"})),
+    (check_2_hsa_override_unneeded,   frozenset({"linux", "windows"})),
+    (check_3_rocm_kernel_unsupported, frozenset({"linux"})),
+    (check_4_render_group,            frozenset({"linux"})),
+    (check_5_amdgpu_blacklisted,      frozenset({"linux"})),
+    (check_6_path_missing,            frozenset({"linux", "windows"})),
+    (check_7_stale_repos,             frozenset({"linux"})),
+    (check_8_wheel_rocm_mismatch,     frozenset({"linux", "windows"})),
+    (check_9_igpu_dgpu_collision,     frozenset({"linux", "windows"})),
+    (check_10_container_devices,      frozenset({"linux"})),
+    (check_11_iommu_hang,             frozenset({"linux"})),
+    (check_12_amdgpu_install_broken,  frozenset({"linux"})),
+    (check_13_hip_sdk_missing,        frozenset({"windows"})),
+    (check_14_adrenalin_too_old,      frozenset({"windows"})),
+    (check_15_msvc_redist,            frozenset({"windows"})),
 ]
 
 
 def run_all_checks(exam: dict, symptom: str) -> list[Diagnosis]:
-    """Run every checker, drop zero-score results, sort by score desc."""
+    """Run every applicable checker, drop zero-score results, sort by score desc.
+
+    Checkers whose `applicable_on` set doesn't include the running OS are
+    skipped silently (they were never going to score against this exam).
+    """
+    os_family = _g(exam, "os_family", default="linux")
     results: list[Diagnosis] = []
-    for fn in CHECKERS:
+    for fn, applicable_on in CHECKERS:
+        if os_family not in applicable_on:
+            continue
         try:
             d = fn(exam, symptom or "")
         except Exception as exc:  # checker bug should not kill diagnose
