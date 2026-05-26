@@ -35,6 +35,18 @@ body:
       required: true
 
   - type: dropdown
+    id: amd_only_credible
+    attributes:
+      label: Is AMD the only credible institution to create this skill?
+      description: |
+        Skills in this catalog must be ones that only AMD is uniquely positioned to author credibly (e.g. they require AMD hardware expertise, internal performance knowledge, or first-party tooling). If another institution could produce this skill just as credibly, the skill proposal will likely not be accepted.
+      options:
+        - "Yes"
+        - "No"
+    validations:
+      required: true
+
+  - type: dropdown
     id: home
     attributes:
       label: Where should this skill live?
