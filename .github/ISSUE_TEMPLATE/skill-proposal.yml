@@ -50,7 +50,7 @@ body:
     id: home
     attributes:
       label: Where should this skill live?
-      description: See the two contribution paths in `CONTRIBUTING.md`. Path A skills are authored under `skills/` in this repo; Path B skills live in a product repo and are registered here via `catalog/`.
+      description: See the two contribution paths in `CONTRIBUTING.md`. Path A skills are authored under `skills/` in this repo; Path B skills live in a product repo and are registered here via `scripts/sources.yml`.
       options:
         - "Path A: incubated in this repo (may move to a product repo and continbue to be registered here)"
         - "Path B: authored in a product repo (HIP, ROCm, Ryzen AI, Lemonade, ...) and registered here"

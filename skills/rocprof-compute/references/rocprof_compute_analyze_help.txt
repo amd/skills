@@ -1,0 +1,79 @@
+rocprof-compute analyze --help
+usage: 
+rocprof-compute analyze --path <workload_path> [analyze options]
+
+-----------------------------------------------------------------------------------
+Examples:
+        rocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
+        rocprof-compute analyze -p workloads/mixbench/mi200/ --dispatch 12 34 --decimal 3
+        rocprof-compute analyze -p workloads/mixbench/mi200/ --gui
+-----------------------------------------------------------------------------------
+        
+
+Help:
+  -h, --help                            show this help message and exit
+
+General Options:
+  -v, --version                         show program's version number and exit
+  -V, --verbose                         Increase output verbosity (use multiple times for higher levels)
+  -q, --quiet                           Reduce output and run quietly.
+  -s, --specs                           Print system specs and exit.
+
+Analyze Options:
+  -p  [ ...], --path  [ ...]                            Specify the raw data root dirs or desired results directory.
+  --list-stats                                          List all detected kernels and kernel dispatches.
+  --list-metrics                                        List all available metrics for analysis on specified arch:
+                                                                   gfx908
+                                                                   gfx90a
+                                                                   gfx940
+                                                                   gfx941
+                                                                   gfx942
+                                                                   gfx950
+  -k  [ ...], --kernel  [ ...]                          Specify kernel id(s) from --list-stats for filtering.
+  -d  [ ...], --dispatch  [ ...]                        Specify dispatch id(s) for filtering.
+  -b  [ ...], --block  [ ...]                           Specify metric id(s) from --list-metrics for filtering.
+  --gpu-id  [ ...]                                      Specify GPU id(s) for filtering.
+  --spatial-multiplexing                                Mode of spatial multiplexing.
+  -o , --output                                         Specify an output file to save analysis results.
+  --gui [GUI]                                           Activate a GUI to interate with rocprofiler-compute metrics.
+                                                        Optionally, specify port to launch application (DEFAULT: 8050)
+  --tui                                                 Activate a Textual User Interface (TUI) to interact with rocprofiler-compute metrics.
+  -R  [ ...], --roofline-data-type  [ ...]
+                                                        Choose datatypes to view roofline PDFs for: (DEFAULT: FP32)
+                                                                   FP4
+                                                                   FP6
+                                                                   FP8
+                                                                   FP16
+                                                                   BF16
+                                                                   FP32
+                                                                   FP64
+                                                                   I8
+                                                                   I32
+                                                                   I64
+                                                                 
+  --pc-sampling-sorting-type                            Set the sorting type of pc sampling: offset or count (DEFAULT: offset).
+
+Advanced Options:
+  --random-port                                         Randomly generate a port to launch GUI application.
+                                                        Registered Ports range inclusive (1024-49151).
+  --max-stat-num                                        Specify the maximum number of stats shown in "Top Stats" tables (DEFAULT: 10)
+  -n , --normal-unit                                    Specify the normalization unit: (DEFAULT: per_kernel)
+                                                           per_wave
+                                                           per_cycle
+                                                           per_second
+                                                           per_kernel
+  -t , --time-unit                                      Specify display time unit in kernel top stats: (DEFAULT: ns)
+                                                           s
+                                                           ms
+                                                           us
+                                                           ns
+  --decimal                                             Specify desired decimal precision of analysis results. (DEFAULT: 2)
+  --config-dir                                          Specify the directory of customized configs.
+  --save-dfs                                            Specify the dirctory to save analysis dataframe csv files.
+  --cols  [ ...]                                        Specify column indices to display.
+  -g                                                    Debug single metric.
+  --dependency                                          List the installation dependency.
+  --kernel-verbose                                      Specify Kernel Name verbose level 1-5. Lower the level, shorter the kernel name. (DEFAULT: 5) (DISABLE: 5)
+  --specs-correction                                    Specify the specs to correct. e.g. --specs-correction='specname1:specvalue1,specname2:specvalue2'
+  --list-nodes                                          Multi-node option: list all node names.
+  --nodes [ ...]                                        Multi-node option: filter with node names. Enable it without node names means ALL.

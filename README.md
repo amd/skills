@@ -107,8 +107,8 @@ So skills here are **federated**: each skill is owned and versioned by the team 
                 ┌─────────────────────────────────────────────────────┐
                 │                amd/skills (this repo)               │
                 │                                                     │
-                │   skills/         catalog/         .*-plugin/       │
-                │   in-repo skills  pointers         agent manifests  │
+                │   skills/         scripts/         .*-plugin/      │
+                │   in-repo skills  sources.yml       agent manifests │
                 └──────────────────────┬──────────────────────────────┘
                                        │  one install
                                        ▼
@@ -124,7 +124,7 @@ So skills here are **federated**: each skill is owned and versioned by the team 
 
 Each skill stays close to the engineers who ship the underlying product, the CI that validates it, and the release tag that pins it.
 
-This repo also acts as an **incubator**: a skill can start its life under `skills/` here to iterate quickly, then graduate to its product repo and be re-pointed from `catalog/` once it has a clear owner, with no change for installed users.
+This repo also acts as an **incubator**: a skill can start its life under `skills/` here to iterate quickly, then graduate to its product repo and be re-pointed from `scripts/sources.yml` once it has a clear owner, with no change for installed users.
 
 ### What this means for you
 
@@ -135,20 +135,28 @@ This repo also acts as an **incubator**: a skill can start its life under `skill
 ### What this means if you contribute
 
 - **In-repo skills** (Path A) are best for cross-cutting workflows that do not have a natural product home.
-- **Product-repo skills** (Path B) are best for skills that should live and version with a specific product. You add the skill folder to your product repo and open a small PR here that registers it in `catalog/` with a pinned tag. CI validates the linked skill against the same rules as in-repo skills, and the central plugin manifests surface it through the same one install.
+- **Product-repo skills** (Path B) are best for skills that should live and version with a specific product. You add the skill folder to your product repo and open a small PR here that registers it in `scripts/sources.yml` with a pinned tag. CI validates the linked skill against the same rules as in-repo skills, and the central plugin manifests surface it through the same one install.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the step-by-step contribution flow for each path.
 
 ### Repository layout
 
 ```
-skills/             # Skills authored in this repository
-catalog/            # Manifest pointers to skills that live in product repositories
-.cursor-plugin/     # Cursor plugin manifest
-.claude-plugin/     # Claude Code marketplace manifest
-.github/workflows/  # CI for validating skills and manifests
-scripts/            # Tooling for publishing and regenerating manifests
+skills/                  # All skills the agent can load (in-repo + vendored copies of federated)
+.cursor-plugin/          # Cursor plugin manifest
+.claude-plugin/          # Claude Code marketplace manifest
+.github/workflows/       # CI for validating skills and the `import-external-skills` workflow
+scripts/                 # Tooling for publishing, regenerating manifests, and importing
+scripts/sources.yml      # Master list of external skill sources for federation
 ```
+
+In-repo skills are authored directly under `skills/`. Federated skills are
+declared in [`scripts/sources.yml`](scripts/sources.yml) and vendored into
+`skills/` by the manually-dispatched `import-external-skills` workflow,
+which opens a pull request with the imported copies. Each vendored skill
+carries a `.federated.json` marker that records the upstream repo and
+pinned commit, so the importer can refresh or remove it without disturbing
+in-repo skills.
 
 ## Manual Installation
 
@@ -194,7 +202,7 @@ The agent loads the matching `SKILL.md` and any helper scripts, then carries out
 We welcome contributions from AMD engineers and selected partners. There are two paths, matching how the catalog is organized:
 
 - **Path A: In-repo skills.** Authored directly under `skills/` in this repository. Best for cross-cutting workflows that do not have a natural product home.
-- **Path B: Product-repo skills.** Authored in a product repository and registered here through `catalog/` with a pinned tag. Best for skills that should ship and version with a specific product (HIP, ROCm, Ryzen AI, Lemonade, etc.).
+- **Path B: Product-repo skills.** Authored in a product repository and registered here through `scripts/sources.yml` with a pinned tag. Best for skills that should ship and version with a specific product (HIP, ROCm, Ryzen AI, Lemonade, etc.).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for step-by-step instructions, the full authoring guide, and the rules CI enforces on every pull request.
 

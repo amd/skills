@@ -33,8 +33,8 @@ Best for cross-cutting skills that do not have a natural product home.
 Best for skills that should ship and version with a product (HIP, MIGraphX, Ryzen AI, Lemonade, etc.).
 
 1. Add the skill folder to your product repository; a common location is `.agents/skills/<skill-name>/`.
-2. Open a pull request here that adds an entry to `catalog/` pointing at the skill's location and pinning a tag.
-3. CI will validate the linked skill against the same rules as in-repo skills, and the central plugin manifests will surface it through one install.
+2. Open a pull request here that adds (or extends) an entry in [`scripts/sources.yml`](scripts/sources.yml) — the master list — naming your repo, a pinned ref, the sub-path that holds skill folders, and your skill's folder name.
+3. Once the catalog change merges, dispatch the **Import external skills** workflow from the Actions tab. It shallow-clones your repo at the pinned ref, vendors the skill into `skills/<name>/`, updates `.claude-plugin/marketplace.json`, and opens a follow-up pull request. Validation then runs against the same rules as in-repo skills before merge.
 
 ## Is this task a good fit for a skill?
 

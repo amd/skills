@@ -1,0 +1,9 @@
+{
+  "source": "amd-agi-apex",
+  "repo": "AMD-AGI/Apex",
+  "ref": "main",
+  "commit": "6ee40e7e6f2d03902cce503cddf873f2ab75f05c",
+  "path": "tools/skills/gpu-architecture-fundamentals",
+  "license": "MIT",
+  "imported_at": "2026-05-27T16:23:31Z"
+}

@@ -1,0 +1,43 @@
+# Master list of external skill sources federated into this repository.
+#
+# Each entry under `sources:` declares a repository that owns and versions a
+# set of skills. The `import-external-skills` GitHub Actions workflow (manual
+# dispatch) reads this file, shallow-clones each repo at the pinned `ref`,
+# and vendors the named skill folders into `skills/<name>/`. Vendored skills
+# are marked with a `.federated.json` file so the importer can manage them
+# without disturbing skills authored directly in this repo.
+#
+# Schema:
+#   sources:
+#     - name:    short identifier for the source (kebab-case)
+#       repo:    GitHub "<owner>/<repo>"
+#       ref:     branch, tag, or full commit SHA (pinned for reproducibility)
+#       path:    directory inside the repo that contains skill folders
+#       license: SPDX license identifier (carried into the marker file)
+#       skills:  list of skill folder names to import from `path`
+#                Either a bare string (folder name) or a mapping:
+#                  { name: <folder>, marketplace_description: <override> }
+#
+# To add or remove an imported skill, edit `skills:` here and then run the
+# "Import external skills" workflow. The workflow opens a pull request with
+# the resulting changes for human review.
+
+sources:
+  - name: amd-agi-apex
+    repo: AMD-AGI/Apex
+    ref: main
+    path: tools/skills
+    license: MIT
+    # `skill-creator` is intentionally excluded; this catalog already has
+    # its own `create-skill` story via CONTRIBUTING.md.
+    skills:
+      - aiter-reflection
+      - gpu-architecture-fundamentals
+      - hip-kernel-optimization
+      - kernel-exp-history
+      - mi300-hip-programming-insights
+      - pytorch-kernel-optimization
+      - rocprof-compute
+      - triton-hip-reference-kernel-search
+      - triton-kernel-optimization
+      - triton-kernel-reflection-prompts

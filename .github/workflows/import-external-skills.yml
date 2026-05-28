@@ -1,0 +1,103 @@
+name: import-external-skills
+
+# Manually-dispatched workflow that refreshes the federated portion of the
+# catalog. It reads `scripts/sources.yml`, shallow-clones each declared
+# source, vendors the named skills into `skills/<name>/`, updates
+# `.claude-plugin/marketplace.json`, regenerates the Cursor manifest, and
+# opens a pull request with the result. Every imported skill goes through
+# the same `validate` checks as in-repo skills before it lands on `main`.
+#
+# See the "A federated catalog" section of `README.md` for the design.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Resolve sources and print planned changes without committing."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: import-external-skills
+  cancel-in-progress: false
+
+jobs:
+  import:
+    name: Import external skills
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Configure git for sparse-checkout
+        run: |
+          git --version
+          git config --global init.defaultBranch main
+
+      - name: Import skills declared in scripts/sources.yml
+        id: import
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            uv run scripts/import_external_skills.py --dry-run
+          else
+            uv run scripts/import_external_skills.py
+          fi
+
+      - name: Regenerate Cursor plugin manifest
+        if: ${{ inputs.dry_run != true }}
+        run: uv run scripts/generate_cursor_plugin.py
+
+      - name: Validate skills and manifests
+        if: ${{ inputs.dry_run != true }}
+        run: ./scripts/check.sh
+
+      - name: Detect changes
+        if: ${{ inputs.dry_run != true }}
+        id: changes
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes to import. Skipping PR."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git status --short
+          fi
+
+      # Use the GitHub-maintained action to push to a dedicated branch and
+      # open a PR. PRs (rather than direct commits to main) keep imported
+      # changes reviewable and let the standard `validate` workflow gate
+      # them.
+      - name: Open pull request with imported skills
+        if: ${{ inputs.dry_run != true && steps.changes.outputs.changed == 'true' }}
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: bot/import-external-skills
+          delete-branch: true
+          commit-message: "chore(catalog): refresh federated skills from scripts/sources.yml"
+          title: "Refresh federated skills"
+          body: |
+            Automated import driven by `scripts/sources.yml`.
+
+            See the "A federated catalog" section of `README.md` for the
+            design. Each vendored skill includes a `.federated.json` marker
+            recording the source repo, pinned ref, and resolved commit at
+            import time.
+
+            Triggered by @${{ github.actor }} via the `import-external-skills`
+            workflow ([run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})).
+          labels: |
+            catalog
+            automated
+          add-paths: |
+            scripts/sources.yml
+            skills/**
+            .claude-plugin/**
+            .cursor-plugin/**

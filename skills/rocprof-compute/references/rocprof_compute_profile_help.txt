@@ -1,0 +1,93 @@
+rocprof-compute profile --help
+usage: 
+
+rocprof-compute profile --name <workload_name> [profile options] [roofline options] -- <profile_cmd>
+
+---------------------------------------------------------------------------------
+Examples:
+        rocprof-compute profile -n vcopy_all -- ./vcopy -n 1048576 -b 256
+        rocprof-compute profile -n vcopy_SPI_TCC -b SQ TCC -- ./vcopy -n 1048576 -b 256
+        rocprof-compute profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
+        rocprof-compute profile -n vcopy_disp -d 0 -- ./vcopy -n 1048576 -b 256
+        rocprof-compute profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
+---------------------------------------------------------------------------------
+        
+
+Help:
+  -h, --help                            show this help message and exit
+
+General Options:
+  -v, --version                         show program's version number and exit
+  -V, --verbose                         Increase output verbosity (use multiple times for higher levels)
+  -q, --quiet                           Reduce output and run quietly.
+  -s, --specs                           Print system specs and exit.
+
+Profile Options:
+  -n , --name                                                   Assign a name to workload.
+  -p , --path                                                   Specify path to save workload.
+                                                                (DEFAULT: /root/aiter/workloads/<name>)
+  --subpath                                                     Specify the type of subpath to save workload: node_name, gpu_model.
+  --hip-trace                                                   HIP trace, execturion trace for the entire application at the HIP level.
+  -k  [ ...], --kernel  [ ...]                                  Kernel filtering.
+  -d  [ ...], --dispatch  [ ...]                                Dispatch ID filtering.
+  -b  [ ...], --block  [ ...]                                   Specify metric id(s) from --list-metrics for filtering (e.g. 10, 4, 4.3).
+                                                                Can provide multiple space separated arguments.
+                                                                Can also accept Hardware blocks.
+                                                                Hardware block filtering (to be deprecated soon):
+                                                                   SQ
+                                                                   SQC
+                                                                   TA
+                                                                   TD
+                                                                   TCP
+                                                                   TCC
+                                                                   SPI
+                                                                   CPC
+                                                                   CPF
+  --list-metrics []                                     List all available metrics for analysis on specified arch:
+                                                                   gfx908
+                                                                   gfx90a
+                                                                   gfx940
+                                                                   gfx941
+                                                                   gfx942
+                                                                   gfx950
+  --config-dir                                                  Specify the directory of customized report section configs.
+  --join-type                                                   Choose how to join rocprof runs: (DEFAULT: grid)
+                                                                   kernel (i.e. By unique kernel name dispatches)
+                                                                   grid (i.e. By unique kernel name + grid size dispatches)
+  --no-roof                                                     Profile without collecting roofline data.
+  -- [ ...]                                                     Provide command for profiling after double dash.
+  --spatial-multiplexing  [ ...]                                Provide Node ID and GPU number per node.
+  --format-rocprof-output                                       Set the format of output file of rocprof.
+  --pc-sampling-method                                          Set the method of pc sampling, stochastic or host_trap. Support stochastic only >= MI300
+  --pc-sampling-interval                                        Set the interval of pc sampling.
+                                                                   For stochastic sampling, the interval is in cycles.
+                                                                   For host_trap sampling, the interval is in microsecond (DEFAULT: 1048576).
+  --rocprofiler-sdk-library-path ROCPROFILER_SDK_LIBRARY_PATH
+                                                                Set the path to rocprofiler SDK library.
+
+Standalone Roofline Options:
+  --roof-only                                                   Profile roofline data only.
+  --sort                                                        Overlay top kernels or top dispatches: (DEFAULT: kernels)
+                                                                   kernels
+                                                                   dispatches
+  -m  [ ...], --mem-level  [ ...]                               Filter by memory level: (DEFAULT: ALL)
+                                                                   HBM
+                                                                   L2
+                                                                   vL1D
+                                                                   LDS
+  --device                                                      Target GPU device ID. (DEFAULT: ALL)
+  --kernel-names                                                Include kernel names in roofline plot.
+  -R  [ ...], --roofline-data-type  [ ...]
+                                                                Choose datatypes to view roofline PDFs for: (DEFAULT: FP32)
+                                                                   FP4
+                                                                   FP6
+                                                                   FP8
+                                                                   FP16
+                                                                   BF16
+                                                                   FP32
+                                                                   FP64
+                                                                   I8
+                                                                   I32
+                                                                   I64
+                                                                   
+                                                                   
