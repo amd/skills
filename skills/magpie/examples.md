@@ -40,15 +40,15 @@ magpie compare k1.hip k2.hip k3.hip -t "./test.sh" --baseline 0
 ## Benchmark (config file)
 
 ```bash
-magpie benchmark --benchmark-config examples/benchmark_vllm.yaml
-magpie benchmark --benchmark-config examples/benchmark_sglang.yaml -o ./results
+magpie benchmark --benchmark-config examples/benchmarks/benchmark_vllm_dsr1.yaml
+magpie benchmark --benchmark-config examples/benchmarks/benchmark_sglang_dsr1.yaml -o ./results
 ```
 
 ## Benchmark (CLI overrides)
 
 ```bash
 magpie benchmark vllm -m deepseek-ai/DeepSeek-R1-0528 -p fp8 --tp 8
-magpie benchmark --benchmark-config examples/benchmark_vllm.yaml --run-mode local --timeout 1800
+magpie benchmark --benchmark-config examples/benchmarks/benchmark_vllm_dsr1.yaml --run-mode local --timeout 1800
 ```
 
 ## Gap analysis (standalone)
@@ -62,5 +62,5 @@ magpie benchmark gap-analysis --trace-dir ./results/run_xyz/torch_trace --top-k 
 
 ```bash
 magpie -v analyze --kernel-config my.yaml
-magpie --config path/to/config.yaml benchmark --benchmark-config examples/benchmark_vllm.yaml
+magpie --config path/to/config.yaml benchmark --benchmark-config examples/benchmarks/benchmark_vllm_dsr1.yaml
 ```
