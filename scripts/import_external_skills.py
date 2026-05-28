@@ -12,10 +12,15 @@ For each source, the script:
 2. Copies each named skill folder into `skills/<skill>/`.
 3. Writes `.federated.json` inside each copy with source metadata so we
    can tell vendored skills apart from skills authored in this repo.
-4. Updates `.claude-plugin/marketplace.json` with an entry per imported
+4. Rewrites relative markdown links that point outside the copied skill
+   folder (e.g. `examples/foo.yaml`, `docs/bar.md`) into absolute
+   github.com URLs pinned to the imported commit, so the offline link
+   checker doesn't flag them as missing local files. Links to files that
+   were actually copied into the skill folder are left untouched.
+5. Updates `.claude-plugin/marketplace.json` with an entry per imported
    skill (using the SKILL.md `description` as the marketplace blurb,
    unless the source declares an override).
-5. Removes any previously imported skill (one with a `.federated.json`)
+6. Removes any previously imported skill (one with a `.federated.json`)
    that is no longer listed in `scripts/sources.yml`.
 
 Usage:
@@ -30,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import posixpath
 import re
 import shutil
 import subprocess
@@ -52,6 +58,14 @@ FRONTMATTER_RE = re.compile(
     r"\A---\s*\n(?P<frontmatter>.*?)\n---\s*\n?(?P<body>.*)\Z",
     re.DOTALL,
 )
+# Inline markdown links and images: `[text](target)` / `![alt](target)`,
+# with an optional `"title"` after the target. The `target` group captures
+# everything up to whitespace or the closing paren.
+MARKDOWN_LINK_RE = re.compile(
+    r"(?P<prefix>!?\[[^\]]*\]\()(?P<target>[^)\s]+)(?P<suffix>(?:\s+\"[^\"]*\")?\))"
+)
+# Anything with an explicit URI scheme (https://, mailto:, etc.).
+URI_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 # Marketplace descriptions are read by humans browsing the catalog; truncate
 # very long SKILL.md descriptions so the listing stays readable. The full
 # description is still available in the vendored SKILL.md.
@@ -180,6 +194,104 @@ def shallow_clone(repo: str, ref: str, sub_path: str, dest: Path) -> str:
     # `git checkout <ref>` resolves branches, tags, and full commit SHAs.
     run(["git", "checkout", ref], cwd=dest)
     return run(["git", "rev-parse", "HEAD"], cwd=dest)
+
+
+def list_repo_files(clone_dir: Path, commit: str) -> set[str]:
+    """Return every tracked path in the repo at `commit` (POSIX style).
+
+    Uses `git ls-tree`, which reads tree objects only, so it works even on a
+    blob-filtered, sparse checkout without fetching file contents.
+    """
+    out = run(["git", "ls-tree", "-r", "--name-only", commit], cwd=clone_dir)
+    return {line.strip() for line in out.splitlines() if line.strip()}
+
+
+def _should_skip_target(target: str) -> bool:
+    """True for targets that are not repo-relative file paths.
+
+    Skips absolute URLs (`https://...`), scheme links (`mailto:`), in-page
+    anchors (`#section`), root-absolute paths (`/foo`), and protocol-relative
+    URLs (`//host/...`).
+    """
+    t = target.strip()
+    if not t:
+        return True
+    if t[0] in "#/":
+        return True
+    if URI_SCHEME_RE.match(t):
+        return True
+    return False
+
+
+def rewrite_external_references(
+    skill_dir: Path,
+    repo_skill_path: str,
+    repo_files: set[str],
+    repo: str,
+    commit: str,
+    log: list[str],
+) -> None:
+    """Rewrite relative links that escape the skill folder into GitHub URLs.
+
+    A vendored skill often links to files that live elsewhere in its source
+    repo (e.g. `examples/foo.yaml`, `docs/bar.md`). Those paths don't exist
+    inside the copied skill folder, so the offline link checker flags them as
+    missing files. For each such link we point at the upstream repo on
+    github.com, pinned to the imported `commit`.
+
+    Links that resolve to a file actually present inside the skill folder
+    (e.g. `reference.md`) are left untouched so they keep working locally.
+    """
+    repo_skill_path = repo_skill_path.strip("/")
+
+    def replace_in(text: str) -> tuple[str, list[tuple[str, str]]]:
+        rewrites: list[tuple[str, str]] = []
+
+        def _sub(match: re.Match[str]) -> str:
+            target = match.group("target")
+            if _should_skip_target(target):
+                return match.group(0)
+            path_part, sep, anchor = target.partition("#")
+            frag = sep + anchor if sep else ""
+            if not path_part:
+                return match.group(0)
+
+            # Resolve the link both as the markdown spec would (relative to
+            # the file's folder in the repo) and relative to the repo root,
+            # since skill docs often write repo-root-relative paths.
+            skill_rel = posixpath.normpath(posixpath.join(repo_skill_path, path_part))
+            root_rel = posixpath.normpath(path_part)
+
+            within_skill = skill_rel == repo_skill_path or skill_rel.startswith(
+                repo_skill_path + "/"
+            )
+            if within_skill and skill_rel in repo_files:
+                # Genuine intra-skill link; it was copied, leave it local.
+                return match.group(0)
+
+            if skill_rel in repo_files:
+                chosen = skill_rel
+            else:
+                chosen = root_rel
+
+            # Can't map something that points above the repo root.
+            if chosen.startswith("..") or chosen.startswith("/"):
+                return match.group(0)
+
+            url = f"https://github.com/{repo}/blob/{commit}/{chosen}{frag}"
+            rewrites.append((target, url))
+            return f"{match.group('prefix')}{url}{match.group('suffix')}"
+
+        return MARKDOWN_LINK_RE.sub(_sub, text), rewrites
+
+    for md_path in sorted(skill_dir.rglob("*.md")):
+        original = md_path.read_text(encoding="utf-8")
+        updated, rewrites = replace_in(original)
+        if updated != original:
+            md_path.write_text(updated, encoding="utf-8")
+            rel = md_path.relative_to(skill_dir.parent).as_posix()
+            for old, new in rewrites:
+                log.append(f"    [{rel}] {old} -> {new}")
 
 
 def parse_frontmatter(text: str) -> dict:
@@ -311,6 +423,7 @@ def import_source(
         log.append(f"[{source.name}] cloning {source.repo}@{source.ref}")
         commit = shallow_clone(source.repo, source.ref, source.path, tmp_path)
         log.append(f"[{source.name}] resolved to commit {commit}")
+        repo_files = list_repo_files(tmp_path, commit)
 
         src_root = tmp_path / source.path
         if not src_root.is_dir():
@@ -349,6 +462,14 @@ def import_source(
             if not dry_run:
                 copy_skill(src_skill, dest_skill)
                 write_marker(dest_skill, source, commit, relative_path)
+                rewrite_external_references(
+                    dest_skill,
+                    relative_path,
+                    repo_files,
+                    source.repo,
+                    commit,
+                    log,
+                )
 
             results.append(
                 ImportResult(

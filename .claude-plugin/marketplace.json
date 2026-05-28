@@ -51,6 +51,12 @@
       "description": "Route image generation, text-to-speech, and speech-to-text through a local AI Server to reduce token/cost usage."
     },
     {
+      "name": "magpie",
+      "source": "./skills/magpie",
+      "skills": "./",
+      "description": "Performs GPU kernel correctness and performance evaluation and LLM inference benchmarking with Magpie. Analyzes single or multiple kernels (HIP/CUDA/PyTorch), compares kernel implementations, runs vLLM/SGLang benchmarks with profiling and TraceLens, and runs gap analysis on torch traces."
+    },
+    {
       "name": "mi300-hip-programming-insights",
       "source": "./skills/mi300-hip-programming-insights",
       "skills": "./",

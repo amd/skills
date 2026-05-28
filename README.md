@@ -82,7 +82,7 @@ Diagnose, configure, and ready AMD systems for AI workloads: drivers, BIOS, memo
 
 ### Kernel engineering
 
-Author, tune, and reason about GPU kernels for AMD targets. All entries are federated from [`AMD-AGI/Apex`](https://github.com/AMD-AGI/Apex) at `main` (`tools/skills/`).
+Author, tune, and reason about GPU kernels for AMD targets.
 
 | Skill | What it does | Source |
 | --- | --- | --- |
@@ -112,6 +112,7 @@ Close the loop from trace to fix to ship.
 
 | Skill | What it does | Source |
 | --- | --- | --- |
+| [`magpie`](skills/magpie/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM / SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
 | [`rocprof-compute`](skills/rocprof-compute/SKILL.md) | Profile AMD GPU kernels with `rocprof-compute` to collect metrics, roofline data, and bottleneck analysis. | [Apex](https://github.com/AMD-AGI/Apex) |
 | `omniperf-tune` | Run `omniperf`, locate the bottleneck, and suggest the fix. | _planned_ |
 | `quark-quantize` | Quantize PyTorch / ONNX models with [AMD Quark](https://github.com/amd/Quark) and export for AMD deployment. | _planned_ |

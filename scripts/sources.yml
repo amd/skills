@@ -41,3 +41,11 @@ sources:
       - triton-hip-reference-kernel-search
       - triton-kernel-optimization
       - triton-kernel-reflection-prompts
+
+  - name: amd-agi-magpie
+    repo: AMD-AGI/Magpie
+    ref: main
+    path: skills
+    license: MIT
+    skills:
+      - magpie
