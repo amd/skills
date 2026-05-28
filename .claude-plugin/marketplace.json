@@ -9,10 +9,34 @@
   },
   "plugins": [
     {
+      "name": "aiter-reflection",
+      "source": "./skills/aiter-reflection",
+      "skills": "./",
+      "description": "This skill should be used when optimizing AMD GPU kernels on MI300 using the aiter project, including running op tests, benchmarking, iterating on kernel changes, and recording results in the kernel experiment database."
+    },
+    {
       "name": "apu-memory-tuner",
       "source": "./skills/apu-memory-tuner",
       "skills": "./",
       "description": "Inspect and tune the shared-vs-dedicated memory split (GTT / UMA Frame Buffer) on AMD Ryzen APUs so larger LLMs and image models fit on the iGPU."
+    },
+    {
+      "name": "gpu-architecture-fundamentals",
+      "source": "./skills/gpu-architecture-fundamentals",
+      "skills": "./",
+      "description": "This skill should be used when reasoning about GPU architecture fundamentals to guide kernel optimization choices such as memory hierarchy usage, execution model mapping, block sizing, and latency-aware tuning across HIP, Triton, and PyTorch."
+    },
+    {
+      "name": "hip-kernel-optimization",
+      "source": "./skills/hip-kernel-optimization",
+      "skills": "./",
+      "description": "This skill should be used when writing or tuning HIP kernels on AMD/NVIDIA GPUs, covering memory coalescing, shared-memory tiling, bank conflict avoidance, warp primitives, occupancy, vectorization, async ops, loop unrolling, and profiling."
+    },
+    {
+      "name": "kernel-exp-history",
+      "source": "./skills/kernel-exp-history",
+      "skills": "./",
+      "description": "This skill should be used when optimizing kernels in this repo and needing to consult past optimization experiments, or when recording the current optimization iteration back into the kernel experiment database."
     },
     {
       "name": "local-ai-app-integration",
@@ -27,10 +51,58 @@
       "description": "Route image generation, text-to-speech, and speech-to-text through a local AI Server to reduce token/cost usage."
     },
     {
+      "name": "mi300-cdna3-architecture",
+      "source": "./skills/mi300-cdna3-architecture",
+      "skills": "./",
+      "description": "MI300/CDNA3 architecture guide for HIP/Triton optimization—MFMA variants, dual register files, data formats, sparsity, LDS/GWS, and best practices."
+    },
+    {
+      "name": "mi300-hip-programming-insights",
+      "source": "./skills/mi300-hip-programming-insights",
+      "skills": "./",
+      "description": "CDNA3/MI300 HIP programming insights—chiplet/cache model, Infinity Cache, memory coherency, matrix cores, sparsity, and best practices."
+    },
+    {
+      "name": "mi300-hip-vs-nvidia",
+      "source": "./skills/mi300-hip-vs-nvidia",
+      "skills": "./",
+      "description": "MI300 HIP programming differences vs NVIDIA—wavefront vs warp, memory hierarchy, MFMA usage, occupancy, and profiling pitfalls."
+    },
+    {
+      "name": "pytorch-kernel-optimization",
+      "source": "./skills/pytorch-kernel-optimization",
+      "skills": "./",
+      "description": "This skill should be used when optimizing PyTorch models and kernels, including efficient tensor operations, torch.compile, custom autograd/CUDA/Triton extensions, mixed precision, memory and data pipeline tuning, model optimization techniques, CUDA graphs, and profiling."
+    },
+    {
       "name": "rocm-doctor",
       "source": "./skills/rocm-doctor",
       "skills": "./",
       "description": "Diagnose why ROCm, PyTorch, or llama.cpp isn't working on an AMD GPU. Matches the symptom against a fixed list of twelve known misconfigurations and proposes the next step."
+    },
+    {
+      "name": "rocprof-compute",
+      "source": "./skills/rocprof-compute",
+      "skills": "./",
+      "description": "This skill should be used when profiling AMD GPU kernels with rocprof-compute to collect metrics, roofline data, and analyze bottlenecks for HIP kernels."
+    },
+    {
+      "name": "triton-hip-reference-kernel-search",
+      "source": "./skills/triton-hip-reference-kernel-search",
+      "skills": "./",
+      "description": "Search and adapt Triton/HIP kernel patterns from a corpus to optimize AMD GPUs; use to find similar ops and reuse tiling/occupancy strategies."
+    },
+    {
+      "name": "triton-kernel-optimization",
+      "source": "./skills/triton-kernel-optimization",
+      "skills": "./",
+      "description": "This skill should be used when writing or tuning Triton GPU kernels, including autotuning block sizes, coalesced accesses, tiled matmul, fused ops, reductions, flash-attention style kernels, quantization, custom gradients, and profiling."
+    },
+    {
+      "name": "triton-kernel-reflection-prompts",
+      "source": "./skills/triton-kernel-reflection-prompts",
+      "skills": "./",
+      "description": "Reflection/self-critique prompts for reviewing and fixing AMD-targeted Triton kernels after generation or test failures."
     }
   ]
 }
