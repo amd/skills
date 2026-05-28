@@ -18,17 +18,15 @@
 
 </div>
 
-AMD Skills provide agents with knowledge, scripts, and conventions for working with AMD hardware and software.
-
-Skills in this repository follow the standardized [Agent Skills](https://github.com/anthropics/skills) format and are designed to interoperate with the major coding agents like Cursor, Claude Code, OpenAI Codex, and Gemini CLI.
+AMD Skills give coding agents the knowledge, scripts, and conventions they need to work with AMD hardware and software. Each skill follows the standardized [Agent Skills](https://github.com/anthropics/skills) format and works with Cursor, Claude Code, OpenAI Codex, and Gemini CLI.
 
 ## Installation
 
-AMD Skills is built directly into Claude and Cursor. **No install. No setup**
+AMD Skills is built directly into Claude and Cursor. **No install. No setup.**
 
 Just ask something like: `"Use AMD Skills to integrate local AI into my app"`.
 
-> For integration with other agents, please refer to the [manual-installation](#manual-installation) section.
+> For other agents, see [Manual installation](#manual-installation).
 
 ## What is a skill?
 
@@ -52,63 +50,76 @@ Skills earn their keep on repeated, opinionated workflows, exactly where the AMD
 
 ## The catalog
 
-The initial catalog is organized into four focus areas.
+The initial catalog is organized into five focus areas.
+
 
 ### Application integration
 
 Embed AMD-optimized AI into end-user applications.
 
-| Skill | What it does |
-| --- | --- |
-| `local-ai-app-integration` | Integrate local AI into cloud LLM apps for offline support, better privacy, and lower API costs. |
-| `local-ai-use` | Route image generation, text-to-speech, and speech-to-text through a local AI Server to reduce token/cost usage. |
+| Skill | What it does | Source |
+| --- | --- | --- |
+| [`local-ai-app-integration`](skills/local-ai-app-integration/SKILL.md) | Integrate local AI into cloud LLM apps for offline support, better privacy, and lower API costs. | in-repo |
+| [`local-ai-use`](skills/local-ai-use/SKILL.md) | Route image generation, text-to-speech, and speech-to-text through a local AI server to reduce token cost. | in-repo |
 
 ### Hardware-native skills
 
 Diagnose, configure, and tune AMD devices directly.
 
-| Skill | What it does |
-| --- | --- |
-| `apu-memory-tuner` | Inspect and tune the shared-vs-dedicated memory split (GTT / UMA Frame Buffer) on AMD Ryzen APUs. |
-| `rocm-doctor` | Detect driver / kernel / ROCm / framework mismatches and propose fixes. |
-| `mi-tuner` | Opinionated inference tuning for MI accelerators, including TunableOp, FSDP, and FlashAttention. |
-| `gfx-target-chooser` | Pick the right `gfx942` / `gfx90a` / `gfx1100` target and matching compiler flags. |
+| Skill | What it does | Source |
+| --- | --- | --- |
+| [`apu-memory-tuner`](skills/apu-memory-tuner/SKILL.md) | Inspect and tune the shared-vs-dedicated memory split (GTT / UMA Frame Buffer) on AMD Ryzen APUs. | in-repo |
+| [`rocm-doctor`](skills/rocm-doctor/SKILL.md) | Diagnose ROCm / PyTorch / llama.cpp failures on AMD GPUs against a fixed list of known misconfigurations. | in-repo |
+| `mi-tuner` | Opinionated inference tuning for MI accelerators (TunableOp, FSDP, FlashAttention). | _planned_ |
+| `gfx-target-chooser` | Pick the right `gfx942` / `gfx90a` / `gfx1100` target and matching compiler flags. | _planned_ |
 
+### Kernel optimization
+
+Write, tune, and reason about GPU kernels for AMD targets. All entries are federated from [`AMD-AGI/Apex`](https://github.com/AMD-AGI/Apex) at `main` (`tools/skills/`).
+
+| Skill | What it does | Source |
+| --- | --- | --- |
+| [`aiter-reflection`](skills/aiter-reflection/SKILL.md) | Optimize AMD GPU kernels on MI300 using the aiter project: op tests, benchmarks, iteration, experiment database. | [Apex](https://github.com/AMD-AGI/Apex) |
+| [`gpu-architecture-fundamentals`](skills/gpu-architecture-fundamentals/SKILL.md) | Reason about memory hierarchy, execution model, block sizing, and latency across HIP, Triton, and PyTorch. | [Apex](https://github.com/AMD-AGI/Apex) |
+| [`hip-kernel-optimization`](skills/hip-kernel-optimization/SKILL.md) | Write and tune HIP kernels: coalescing, shared-memory tiling, bank conflicts, warp primitives, occupancy, vectorization. | [Apex](https://github.com/AMD-AGI/Apex) |
+| [`kernel-exp-history`](skills/kernel-exp-history/SKILL.md) | Consult past kernel optimization experiments and record the current iteration back into the experiment database. | [Apex](https://github.com/AMD-AGI/Apex) |
+| [`mi300-hip-programming-insights`](skills/mi300-hip-programming-insights/SKILL.md) | CDNA3 / MI300 HIP programming insights: chiplet and cache model, Infinity Cache, coherency, matrix cores, sparsity. | [Apex](https://github.com/AMD-AGI/Apex) |
+| [`pytorch-kernel-optimization`](skills/pytorch-kernel-optimization/SKILL.md) | Optimize PyTorch models and kernels: `torch.compile`, custom extensions, mixed precision, CUDA graphs, profiling. | [Apex](https://github.com/AMD-AGI/Apex) |
+| [`triton-hip-reference-kernel-search`](skills/triton-hip-reference-kernel-search/SKILL.md) | Search and adapt Triton / HIP kernel patterns from a corpus to reuse tiling and occupancy strategies. | [Apex](https://github.com/AMD-AGI/Apex) |
+| [`triton-kernel-optimization`](skills/triton-kernel-optimization/SKILL.md) | Write and tune Triton kernels: autotune block sizes, tiled matmul, fused ops, reductions, flash-attention, quantization. | [Apex](https://github.com/AMD-AGI/Apex) |
+| [`triton-kernel-reflection-prompts`](skills/triton-kernel-reflection-prompts/SKILL.md) | Reflection / self-critique prompts for reviewing and fixing AMD-targeted Triton kernels. | [Apex](https://github.com/AMD-AGI/Apex) |
 
 ### Cross-stack porting
 
 Bring existing workloads onto AMD.
 
-| Skill | What it does |
-| --- | --- |
-| `cuda-to-hip` | Port CUDA kernels with `hipify` and flag anything that needs manual review. |
-| `vllm-rocm` | Stand up vLLM on AMD with the right environment variables and model configurations. |
-| `pytorch-rocm-setup` | Get a known-good PyTorch + ROCm stack running on a target node, end to end. |
+| Skill | What it does | Source |
+| --- | --- | --- |
+| `cuda-to-hip` | Port CUDA kernels with `hipify` and flag anything that needs manual review. | _planned_ |
+| `vllm-rocm` | Stand up vLLM on AMD with the right environment variables and model configurations. | _planned_ |
+| `pytorch-rocm-setup` | Get a known-good PyTorch + ROCm stack running on a target node, end to end. | _planned_ |
 
 ### Profiling and delivery
 
 Close the loop from trace to fix to ship.
 
-| Skill | What it does |
-| --- | --- |
-| `rocprof-capture` | Capture and interpret a `rocprof` trace for a workload. |
-| `omniperf-tune` | Run `omniperf`, locate the bottleneck, and suggest the fix. |
-| `quark-quantize` | Quantize PyTorch and ONNX models with [AMD Quark](https://github.com/amd/Quark) (INT4/INT8/FP8/MX), pick the right scheme and calibration, and export for AMD deployment. |
-
-> Skills land incrementally; see [Status](#status) for what is available today.
+| Skill | What it does | Source |
+| --- | --- | --- |
+| [`rocprof-compute`](skills/rocprof-compute/SKILL.md) | Profile AMD GPU kernels with `rocprof-compute` to collect metrics, roofline data, and bottleneck analysis. | [Apex](https://github.com/AMD-AGI/Apex) |
+| `rocprof-capture` | Capture and interpret a `rocprof` trace for a workload. | _planned_ |
+| `omniperf-tune` | Run `omniperf`, locate the bottleneck, and suggest the fix. | _planned_ |
+| `quark-quantize` | Quantize PyTorch / ONNX models with [AMD Quark](https://github.com/amd/Quark) and export for AMD deployment. | _planned_ |
 
 ## A federated catalog
 
-The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integrations each have their own team, release cadence, and validation matrix. A single monorepo of skills, maintained by one central team, would always be a step behind.
-
-So skills here are **federated**: each skill is owned and versioned by the team that owns the product it describes, and this repository is the **catalog** that brings them together.
+The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integrations each have their own team, release cadence, and validation matrix. So skills here are **federated**: each skill is owned and versioned by the team that owns the product it describes, and this repository is the catalog that brings them together.
 
 ```
                 ┌─────────────────────────────────────────────────────┐
                 │                amd/skills (this repo)               │
                 │                                                     │
-                │   skills/         scripts/         .*-plugin/      │
-                │   in-repo skills  sources.yml       agent manifests │
+                │   skills/         scripts/         .*-plugin/       │
+                │   in-repo skills  sources.yml      agent manifests  │
                 └──────────────────────┬──────────────────────────────┘
                                        │  one install
                                        ▼
@@ -122,45 +133,17 @@ So skills here are **federated**: each skill is owned and versioned by the team 
    gfx-target-...  triton-amd-...  ...               integration/    repos
 ```
 
-Each skill stays close to the engineers who ship the underlying product, the CI that validates it, and the release tag that pins it.
+This repo also acts as an **incubator**: a skill can start under `skills/` to iterate quickly, then graduate to its product repo and be re-pointed from `scripts/sources.yml` once it has a clear owner, with no change for installed users.
 
-This repo also acts as an **incubator**: a skill can start its life under `skills/` here to iterate quickly, then graduate to its product repo and be re-pointed from `scripts/sources.yml` once it has a clear owner, with no change for installed users.
+- **One install, full coverage.** Add this repository through your agent's plugin flow and you get the whole AMD catalog.
+- **Skills update with the products they describe.** When ROCm cuts a release, the ROCm team updates the ROCm skills as part of that release.
+- **Skills you can trust.** Each skill is signed off by the team that owns the underlying product.
 
-### What this means for you
+Each vendored skill carries a `.federated.json` marker that records the upstream repo and pinned commit, so the importer can refresh or remove it without disturbing in-repo skills.
 
-- **One install, full coverage.** You add this repository through the plugin flow of your agent and you get the whole AMD catalog, so you do not need to track and install skills product by product.
-- **Skills update with the products they describe.** When ROCm cuts a new release, the ROCm team updates the ROCm skills as part of that release. You see the new behavior the next time you pull the catalog.
-- **Skills you can trust.** Each skill is signed off by the team that owns the underlying product, not assembled second-hand by a separate documentation team.
+## Manual installation
 
-### What this means if you contribute
-
-- **In-repo skills** (Path A) are best for cross-cutting workflows that do not have a natural product home.
-- **Product-repo skills** (Path B) are best for skills that should live and version with a specific product. You add the skill folder to your product repo and open a small PR here that registers it in `scripts/sources.yml` with a pinned tag. CI validates the linked skill against the same rules as in-repo skills, and the central plugin manifests surface it through the same one install.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the step-by-step contribution flow for each path.
-
-### Repository layout
-
-```
-skills/                  # All skills the agent can load (in-repo + vendored copies of federated)
-.cursor-plugin/          # Cursor plugin manifest
-.claude-plugin/          # Claude Code marketplace manifest
-.github/workflows/       # CI for validating skills and the `import-external-skills` workflow
-scripts/                 # Tooling for publishing, regenerating manifests, and importing
-scripts/sources.yml      # Master list of external skill sources for federation
-```
-
-In-repo skills are authored directly under `skills/`. Federated skills are
-declared in [`scripts/sources.yml`](scripts/sources.yml) and vendored into
-`skills/` by the manually-dispatched `import-external-skills` workflow,
-which opens a pull request with the imported copies. Each vendored skill
-carries a `.federated.json` marker that records the upstream repo and
-pinned commit, so the importer can refresh or remove it without disturbing
-in-repo skills.
-
-## Manual Installation
-
-AMD Skills are compatible with Cursor, Claude Code, OpenAI Codex, and Gemini CLI. The general flow:
+AMD Skills are compatible with Cursor, Claude Code, OpenAI Codex, and Gemini CLI.
 
 ### Cursor
 
@@ -177,7 +160,7 @@ Register this repository as a plugin marketplace, then install individual skills
 
 ### OpenAI Codex
 
-Copy or symlink the desired folders from `skills/` into one of Codex's standard skill locations (for example `$REPO_ROOT/.agents/skills` or `$HOME/.agents/skills`). Codex will discover the `SKILL.md` files automatically.
+Copy or symlink the desired folders from `skills/` into one of Codex's standard skill locations (for example `$REPO_ROOT/.agents/skills` or `$HOME/.agents/skills`). Codex discovers `SKILL.md` files automatically.
 
 ### Gemini CLI
 
@@ -189,26 +172,21 @@ gemini extensions install https://github.com/amd/skills.git --consent
 
 ## Using a skill
 
-Once a skill is installed, reference it in plain language while talking to your agent. For example:
+Reference it in plain language while talking to your agent. The agent loads the matching `SKILL.md` and any helper scripts, then carries out the task.
 
 - "Use AMD Skills to integrate local AI capabilities into my app with Embeddable Lemonade."
-- "Use AMD Skills to get PyTorch running on this MI300X node."
 - "Use AMD Skills to convert these CUDA kernels and flag anything that needs manual review."
 
-The agent loads the matching `SKILL.md` and any helper scripts, then carries out the task. In most cases the agent will pick the right skill on its own from the description; explicit invocation is a fallback, not a requirement.
+In most cases the agent picks the right skill on its own from the description; explicit invocation is a fallback, not a requirement.
 
 ## Contributing a skill
 
-We welcome contributions from AMD engineers and selected partners. There are two paths, matching how the catalog is organized:
+We welcome contributions from AMD engineers and selected partners. Two paths, matching how the catalog is organized:
 
-- **Path A: In-repo skills.** Authored directly under `skills/` in this repository. Best for cross-cutting workflows that do not have a natural product home.
-- **Path B: Product-repo skills.** Authored in a product repository and registered here through `scripts/sources.yml` with a pinned tag. Best for skills that should ship and version with a specific product (HIP, ROCm, Ryzen AI, Lemonade, etc.).
+- **Path A — In-repo skills.** Authored directly under `skills/`. Best for cross-cutting workflows without a natural product home.
+- **Path B — Product-repo skills.** Authored in a product repository and registered here through [`scripts/sources.yml`](scripts/sources.yml) with a pinned tag. Best for skills that should ship and version with a specific product.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for step-by-step instructions, the full authoring guide, and the rules CI enforces on every pull request.
-
-## Status
-
-This repository is in its early days. In-repo skills include `skills/local-ai-app-integration/` and `skills/local-ai-use/`, seeding the **Application integration** focus area, and `skills/apu-memory-tuner/` and `skills/rocm-doctor/`, seeding the **Hardware-native** focus area. The remaining skills are being built out incrementally alongside manifests and CI. Expect rapid iteration.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for step-by-step instructions and the rules CI enforces.
 
 ## License
 
