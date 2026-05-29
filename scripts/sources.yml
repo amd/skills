@@ -1,11 +1,11 @@
 # Master list of external skill sources federated into this repository.
 #
 # Each entry under `sources:` declares a repository that owns and versions a
-# set of skills. The `import-external-skills` GitHub Actions workflow (manual
-# dispatch) reads this file, shallow-clones each repo at the pinned `ref`,
-# and vendors the named skill folders into `skills/<name>/`. Vendored skills
-# are marked with a `.federated.json` file so the importer can manage them
-# without disturbing skills authored directly in this repo.
+# set of skills. The `import-external-skills` GitHub Actions workflow (nightly
+# cron, plus manual dispatch) reads this file, shallow-clones each repo at the
+# pinned `ref`, and vendors the named skill folders into `skills/<name>/`.
+# Vendored skills are marked with a `.federated.json` file so the importer can
+# manage them without disturbing skills authored directly in this repo.
 #
 # Schema:
 #   sources:
@@ -18,9 +18,11 @@
 #                Either a bare string (folder name) or a mapping:
 #                  { name: <folder>, marketplace_description: <override> }
 #
-# To add or remove an imported skill, edit `skills:` here and then run the
-# "Import external skills" workflow. The workflow opens a pull request with
-# the resulting changes for human review.
+# To add or remove an imported skill, edit `skills:` here. The next nightly
+# run (or a manual dispatch) validates the changes and pushes them straight
+# to `main` (no pull request). A skill that fails validation is held back and
+# reported as a `federated-import-failure` issue instead of blocking the
+# others.
 
 sources:
   - name: amd-agi-apex

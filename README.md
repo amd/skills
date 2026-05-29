@@ -153,11 +153,7 @@ scripts/sources.yml      # Master list of external skill sources for federation
 
 In-repo skills are authored directly under `skills/`. Federated skills are
 declared in [`scripts/sources.yml`](scripts/sources.yml) and vendored into
-`skills/` by the manually-dispatched `import-external-skills` workflow,
-which opens a pull request with the imported copies. Each vendored skill
-carries a `.federated.json` marker that records the upstream repo and
-pinned commit, so the importer can refresh or remove it without disturbing
-in-repo skills.
+`skills/` by the `import-external-skills` workflow.
 
 ## Manual Installation
 
