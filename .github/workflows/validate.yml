@@ -15,8 +15,50 @@ on:
   workflow_dispatch:
 
 jobs:
-  validate:
-    name: Validate skills and plugin manifests
+  # Enumerate the skills so the validation job can fan out over them with a
+  # matrix. Running each skill in its own job (with fail-fast disabled) means
+  # one broken skill shows up as a single red check instead of failing the
+  # whole suite and hiding the status of every other skill.
+  discover-skills:
+    name: Discover skills
+    runs-on: ubuntu-latest
+    outputs:
+      skills: ${{ steps.discover.outputs.skills }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: List skills
+        id: discover
+        run: echo "skills=$(uv run scripts/validate_skills.py --list)" >> "$GITHUB_OUTPUT"
+
+  validate-skill:
+    name: Validate skill
+    needs: discover-skills
+    runs-on: ubuntu-latest
+    strategy:
+      # Don't cancel the other skills when one fails; we want to see every
+      # skill's status in a single run.
+      fail-fast: false
+      matrix:
+        skill: ${{ fromJson(needs.discover-skills.outputs.skills) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Validate skill
+        run: uv run scripts/validate_skills.py --skill "${{ matrix.skill }}"
+
+  # Repo-wide checks that aren't tied to a single skill: the generated plugin
+  # manifests and internal markdown references.
+  validate-manifests:
+    name: Validate plugin manifests
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -25,8 +67,11 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Validate skills and generated manifests
-        run: ./scripts/check.sh
+      - name: Validate marketplace manifest
+        run: uv run scripts/validate_skills.py --marketplace-only
+
+      - name: Validate generated Cursor manifest
+        run: uv run scripts/generate_cursor_plugin.py --check
 
       # Deterministic, offline-only reference check: relative paths and
       # heading anchors. External URLs are intentionally not checked here

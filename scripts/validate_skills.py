@@ -20,11 +20,18 @@ marketplace entry must point at an existing skill.
 
 Run from the repo root:
 
-    ./scripts/check.sh                          # used by CI; thin wrapper
-    uv run scripts/validate_skills.py           # ad-hoc
+    ./scripts/check.sh                          # used locally; thin wrapper
+    uv run scripts/validate_skills.py           # validate every skill + manifest
     uv run scripts/validate_skills.py --skills-dir skills
+    uv run scripts/validate_skills.py --list    # print skill names as JSON
+    uv run scripts/validate_skills.py --skill rocm-doctor   # one skill only
+    uv run scripts/validate_skills.py --marketplace-only    # manifest only
 
-Exits non-zero if any skill fails validation.
+The `--list` / `--skill` options let CI validate each skill in its own job
+(see .github/workflows/validate.yml) so a single bad skill doesn't mask the
+status of the others.
+
+Exits non-zero if any validated skill (or the marketplace check) fails.
 """
 
 from __future__ import annotations
@@ -227,6 +234,53 @@ def validate_claude_marketplace(skill_dirs: list[Path]) -> list[str]:
     return errors
 
 
+def _print_report(report: SkillReport) -> int:
+    """Print a single skill report and return its error count."""
+    status = "OK  " if not report.errors else "FAIL"
+    print(f"[{status}] {report.skill}")
+    for err in report.errors:
+        print(f"        {err}")
+    return len(report.errors)
+
+
+def list_skills(skills_dir: Path) -> int:
+    """Print discovered skill names as a compact JSON array (for CI matrices)."""
+    skills = discover_skills(skills_dir)
+    if not skills:
+        print(f"No skills found under {skills_dir}", file=sys.stderr)
+        return 1
+    print(json.dumps([p.name for p in skills], separators=(",", ":")))
+    return 0
+
+
+def run_single(skills_dir: Path, name: str) -> int:
+    """Validate a single skill directory by name (no marketplace cross-check)."""
+    skill_dir = skills_dir / name
+    if not skill_dir.is_dir():
+        print(f"No such skill directory: {skill_dir}", file=sys.stderr)
+        return 1
+
+    errors = _print_report(validate_skill(skill_dir))
+    print(f"\nSummary: {errors} error(s) in skill `{name}`")
+    return 0 if errors == 0 else 1
+
+
+def run_marketplace(skills_dir: Path) -> int:
+    """Validate only that marketplace.json is in sync with skills on disk."""
+    skills = discover_skills(skills_dir)
+    if not skills:
+        print(f"No skills found under {skills_dir}", file=sys.stderr)
+        return 1
+
+    marketplace_errors = validate_claude_marketplace(skills)
+    status = "OK  " if not marketplace_errors else "FAIL"
+    print(f"[{status}] .claude-plugin/marketplace.json")
+    for err in marketplace_errors:
+        print(f"        {err}")
+    print(f"\nSummary: {len(marketplace_errors)} error(s) in marketplace manifest")
+    return 0 if not marketplace_errors else 1
+
+
 def run(skills_dir: Path) -> int:
     skills = discover_skills(skills_dir)
     if not skills:
@@ -236,12 +290,7 @@ def run(skills_dir: Path) -> int:
     print(f"Validating {len(skills)} skill(s) in {skills_dir}\n")
     total_errors = 0
     for skill_dir in skills:
-        report = validate_skill(skill_dir)
-        status = "OK  " if not report.errors else "FAIL"
-        print(f"[{status}] {report.skill}")
-        for err in report.errors:
-            print(f"        {err}")
-        total_errors += len(report.errors)
+        total_errors += _print_report(validate_skill(skill_dir))
 
     marketplace_errors = validate_claude_marketplace(skills)
     marketplace_status = "OK  " if not marketplace_errors else "FAIL"
@@ -264,8 +313,33 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_SKILLS_DIR,
         help=f"Directory containing skill folders (default: {DEFAULT_SKILLS_DIR}).",
     )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--list",
+        action="store_true",
+        help="Print discovered skill names as a JSON array and exit.",
+    )
+    group.add_argument(
+        "--skill",
+        metavar="NAME",
+        help="Validate only the named skill directory (skips the marketplace "
+        "cross-check, which is repo-wide).",
+    )
+    group.add_argument(
+        "--marketplace-only",
+        action="store_true",
+        help="Only validate that marketplace.json is in sync with skills/.",
+    )
     args = parser.parse_args(argv)
-    return run(args.skills_dir.resolve())
+    skills_dir = args.skills_dir.resolve()
+
+    if args.list:
+        return list_skills(skills_dir)
+    if args.skill:
+        return run_single(skills_dir, args.skill)
+    if args.marketplace_only:
+        return run_marketplace(skills_dir)
+    return run(skills_dir)
 
 
 if __name__ == "__main__":
