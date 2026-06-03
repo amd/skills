@@ -97,6 +97,7 @@ Close the loop from trace to fix to ship.
 | Skill | What it does | Source |
 | --- | --- | --- |
 | [`magpie`](skills/magpie/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM / SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
+| `hyperloom` | Autonomously optimizes LLM inference on AMD GPUs. | _planned_ |
 | `omniperf-tune` | Run `omniperf`, locate the bottleneck, and suggest the fix. | _planned_ |
 | `quark-quantize` | Quantize PyTorch / ONNX models with [AMD Quark](https://github.com/amd/Quark) and export for AMD deployment. | _planned_ |
 
