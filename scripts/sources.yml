@@ -23,25 +23,6 @@
 # the resulting changes for human review.
 
 sources:
-  - name: amd-agi-apex
-    repo: AMD-AGI/Apex
-    ref: main
-    path: tools/skills
-    license: MIT
-    # `skill-creator` is intentionally excluded; this catalog already has
-    # its own `create-skill` story via CONTRIBUTING.md.
-    skills:
-      - aiter-reflection
-      - gpu-architecture-fundamentals
-      - hip-kernel-optimization
-      - kernel-exp-history
-      - mi300-hip-programming-insights
-      - pytorch-kernel-optimization
-      - rocprof-compute
-      - triton-hip-reference-kernel-search
-      - triton-kernel-optimization
-      - triton-kernel-reflection-prompts
-
   - name: amd-agi-magpie
     repo: AMD-AGI/Magpie
     ref: main

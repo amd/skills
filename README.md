@@ -57,7 +57,7 @@ Skills earn their keep on repeated, opinionated workflows, exactly where the AMD
 >
 > **Target: ready for testing by June 12.** Until then, treat anything below as a preview.
 
-The initial catalog is organized into five focus areas.
+The initial catalog is organized into four focus areas.
 
 
 ### Application integration
@@ -80,22 +80,6 @@ Diagnose, configure, and ready AMD systems for AI workloads: drivers, BIOS, memo
 | `gfx-target-chooser` | Pick the right `gfx942` / `gfx90a` / `gfx1100` target and matching compiler flags. | _planned_ |
 | `pytorch-rocm-setup` | Get a known-good PyTorch + ROCm stack running on a target node, end to end. | _planned_ |
 
-### Kernel engineering
-
-Author, tune, and reason about GPU kernels for AMD targets.
-
-| Skill | What it does | Source |
-| --- | --- | --- |
-| [`aiter-reflection`](skills/aiter-reflection/SKILL.md) | Optimize AMD GPU kernels on MI300 using the aiter project: op tests, benchmarks, iteration, experiment database. | [Apex](https://github.com/AMD-AGI/Apex) |
-| [`gpu-architecture-fundamentals`](skills/gpu-architecture-fundamentals/SKILL.md) | Reason about memory hierarchy, execution model, block sizing, and latency across HIP, Triton, and PyTorch. | [Apex](https://github.com/AMD-AGI/Apex) |
-| [`hip-kernel-optimization`](skills/hip-kernel-optimization/SKILL.md) | Write and tune HIP kernels: coalescing, shared-memory tiling, bank conflicts, warp primitives, occupancy, vectorization. | [Apex](https://github.com/AMD-AGI/Apex) |
-| [`kernel-exp-history`](skills/kernel-exp-history/SKILL.md) | Consult past kernel optimization experiments and record the current iteration back into the experiment database. | [Apex](https://github.com/AMD-AGI/Apex) |
-| [`mi300-hip-programming-insights`](skills/mi300-hip-programming-insights/SKILL.md) | CDNA3 / MI300 HIP programming insights: chiplet and cache model, Infinity Cache, coherency, matrix cores, sparsity. | [Apex](https://github.com/AMD-AGI/Apex) |
-| [`pytorch-kernel-optimization`](skills/pytorch-kernel-optimization/SKILL.md) | Optimize PyTorch models and kernels: `torch.compile`, custom extensions, mixed precision, CUDA graphs, profiling. | [Apex](https://github.com/AMD-AGI/Apex) |
-| [`triton-hip-reference-kernel-search`](skills/triton-hip-reference-kernel-search/SKILL.md) | Search and adapt Triton / HIP kernel patterns from a corpus to reuse tiling and occupancy strategies. | [Apex](https://github.com/AMD-AGI/Apex) |
-| [`triton-kernel-optimization`](skills/triton-kernel-optimization/SKILL.md) | Write and tune Triton kernels: autotune block sizes, tiled matmul, fused ops, reductions, flash-attention, quantization. | [Apex](https://github.com/AMD-AGI/Apex) |
-| [`triton-kernel-reflection-prompts`](skills/triton-kernel-reflection-prompts/SKILL.md) | Reflection / self-critique prompts for reviewing and fixing AMD-targeted Triton kernels. | [Apex](https://github.com/AMD-AGI/Apex) |
-
 ### Cross-stack porting
 
 Bring existing workloads onto AMD.
@@ -113,7 +97,6 @@ Close the loop from trace to fix to ship.
 | Skill | What it does | Source |
 | --- | --- | --- |
 | [`magpie`](skills/magpie/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM / SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
-| [`rocprof-compute`](skills/rocprof-compute/SKILL.md) | Profile AMD GPU kernels with `rocprof-compute` to collect metrics, roofline data, and bottleneck analysis. | [Apex](https://github.com/AMD-AGI/Apex) |
 | `omniperf-tune` | Run `omniperf`, locate the bottleneck, and suggest the fix. | _planned_ |
 | `quark-quantize` | Quantize PyTorch / ONNX models with [AMD Quark](https://github.com/amd/Quark) and export for AMD deployment. | _planned_ |
 
