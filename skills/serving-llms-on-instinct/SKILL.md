@@ -16,12 +16,7 @@ allowed-tools: Bash, Read
 
 # Serving LLMs on AMD Instinct
 
-Get a vLLM endpoint running on AMD Instinct GPU hardware. The full flow is:
-detect GPU, validate environment, get the correct Docker command, launch,
-poll until healthy, return the endpoint.
-
-Run each step, verify before moving to the next. The scripts handle the
-deterministic parts; use your judgment for the rest.
+Get a vLLM endpoint running on AMD Instinct GPU hardware.
 
 ## Prerequisites
 
@@ -33,165 +28,195 @@ deterministic parts; use your judgment for the rest.
 - For remote GPU: SSH key access configured (`ssh <user>@<host>` must work
   without a password prompt)
 
-## The four-step flow
+## Data files
 
-```
-[ ] 1. Detect the GPU — identify gfx_version and available VRAM
-[ ] 2. Validate the environment — check devices, Docker, env vars
-[ ] 3. Get the Docker command — model + GPU specific config
-[ ] 4. Launch and verify — start the container, poll health, return endpoint
-```
+Read these files directly to get model and GPU configuration:
 
-Run `scripts/run_model.py` to execute all four steps in one shot:
+- **`data/recipes_cache.json`** -- model configs synced from
+  [vllm-project/recipes](https://github.com/vllm-project/recipes). Each entry
+  under `models.<HF_ID>.recipe` contains the full recipe with `model.base_args`,
+  `model.base_env`, `features.tool_calling.args`, `features.reasoning.args`,
+  `hardware_overrides.amd.extra_args`, `hardware_overrides.amd.extra_env`.
+  The top-level `docker_image` field has the latest resolved vLLM ROCm image.
 
-```bash
-python scripts/run_model.py --model Qwen/Qwen3-8B
-# Remote GPU:
-python scripts/run_model.py --model Qwen/Qwen3-8B --host root@10.0.0.5
-```
+- **`data/gpu_overrides.json`** -- GPU-specific configuration. Contains
+  `docker_flags` (mandatory for all AMD Instinct), `gpu_configs` keyed by
+  gfx_version with `env_defaults` and `workarounds`, and `legacy_models` for
+  models not yet in vLLM recipes.
 
-Or run each step individually using the scripts below.
+- **`data/blacklist.json`** -- models in vLLM recipes that cannot be served
+  as LLM endpoints. Includes diffusion/image/audio generation models, embedding
+  models, rerankers, ASR models needing audio pipelines, and models requiring
+  unreleased vLLM nightly builds. Check this before attempting to serve a model.
+  If the user requests a blacklisted model, explain why it won't work and
+  suggest an alternative.
 
----
+If the user doesn't specify a model, default to **Qwen/Qwen3.5-9B**: dense
+multimodal with MTP, Apache 2.0 license (no HF token needed), fits on a single
+GPU, strong reasoning and tool-calling.
 
 ## Step 1: Detect the GPU
 
 ```bash
-python scripts/detect.py
+python3 scripts/detect.py
 # Remote:
-python scripts/detect.py --host root@10.0.0.5
+python3 scripts/detect.py --host user@hostname
 ```
 
-The script returns the `gfx_version` — the true hardware identity. Always
-work from this, not the market name. Full architecture reference in
-[reference.md](reference.md#gpu-architecture).
-
-Expected output includes: `gfx_version`, `vram_gb`, `gpu_count`, `rocm_version`.
+Returns JSON with `gfx_version`, `vram_gb`, `gpu_count`, `rocm_version`.
 
 | gfx_version | Hardware | VRAM |
 |---|---|---|
-| gfx950 | MI350 / MI350X | 192–294 GB |
-| gfx942 | MI300X / MI300A / MI325X | 128–288 GB |
+| gfx950 | MI350 / MI350X | 192-294 GB |
+| gfx942 | MI300X / MI300A / MI325X | 128-288 GB |
 
-If `gfx_version` comes back `unknown`: `amd-smi` ran but found no GPU.
-Check that the amdgpu kernel module is loaded: `lsmod | grep amdgpu`.
+If `gfx_version` is `unknown`: `amd-smi` ran but found no GPU. Check
+`lsmod | grep amdgpu`.
 
 ## Step 2: Validate the environment
 
 ```bash
-python scripts/validate.py
-# With auto-fix for safe issues (NUMA balancing, hipBLASLt path):
-python scripts/validate.py --auto-fix
+python3 scripts/validate.py --auto-fix
 # Remote:
-python scripts/validate.py --host root@10.0.0.5
+python3 scripts/validate.py --auto-fix --host user@hostname
 ```
 
-The script checks: `/dev/kfd` access, `/dev/dri` presence, Docker status,
-NUMA balancing, hipBLASLt, and `HF_TOKEN`. It classifies issues as `error`
-(blocks launch), `warning` (degrades performance), or `advisory` (informational).
+Returns JSON with `ready` (bool), `errors`, `warnings`, `fixes_applied`.
+Do not proceed if `ready` is `false`.
 
-Do not proceed to Step 3 if any `error`-severity issues remain unresolved.
-`warning` issues reduce throughput but do not prevent launch.
+## Step 3: Refresh recipes (if stale)
 
-## Step 3: Get the Docker command
+Check `fetched_at` in `data/recipes_cache.json`. If older than 24 hours or
+the file is missing, refresh:
 
 ```bash
-python scripts/get_config.py --gfx gfx942 --model Qwen/Qwen3-8B
+python3 scripts/sync_recipes.py
 ```
 
-Returns the complete Docker command with all required flags, environment
-variables, and model-specific workarounds applied. Copy and run it directly.
-Do not modify the generated flags without a specific reason — each one exists
-to work around a real failure mode.
+This shallow-clones vllm-project/recipes from GitHub and fetches the latest
+Docker tag from Docker Hub. Takes ~10 seconds. If it fails, the existing
+cache still works.
 
-For the full flag and env var reference, see [reference.md](reference.md#vllm-flags).
+## Step 4: Construct the Docker command
 
-## Step 4: Launch and verify
+Read `data/recipes_cache.json` and `data/gpu_overrides.json` directly.
+Build the Docker command by combining:
 
-Run the Docker command from Step 3. Then poll health:
+1. **Docker flags** from `gpu_overrides.json > docker_flags` (mandatory for all AMD GPUs)
+2. **HF cache mount**: `-v ~/.cache/huggingface:/root/.cache/huggingface`
+   (if a shared cache like `/home/amd/models` exists, mount it to
+   `/root/.cache/huggingface/hub` instead)
+3. **Port**: `-p <port>:<port>` (default 8000)
+4. **Environment variables**: merge `gpu_configs.<gfx_version>.env_defaults`
+   with the recipe's `model.base_env` and `hardware_overrides.amd.extra_env`.
+   Always add `--env HF_TOKEN=${HF_TOKEN}`.
+5. **Docker image**: use `docker_image` from `recipes_cache.json` top level
+   (unless the model needs a pinned image, e.g. GLM-4.5 needs `v0.15.1`)
+6. **Model ID**: `--model <HF_ID>`
+7. **vLLM args**: combine the recipe's `model.base_args` +
+   `hardware_overrides.amd.extra_args` + `features.tool_calling.args` +
+   `features.reasoning.args`. Add `--enable-auto-tool-choice` if not present.
+   For multi-GPU, add `--tensor-parallel-size N`.
+8. **Port arg**: `--port <port>`
 
+If the model is not in `recipes_cache.json`, check `legacy_models` in
+`gpu_overrides.json`. If not there either, use a generic config with
+`--enable-auto-tool-choice --trust-remote-code --tool-call-parser hermes`.
+
+Docker command template:
+```
+docker run -d --name vllm-<model-slug> \
+  <docker_flags> \
+  -v <hf_cache_mount> \
+  -p <port>:<port> \
+  --env <key>=<value> (for each env var) \
+  --env HF_TOKEN=${HF_TOKEN} \
+  <docker_image> \
+  --model <model_id> \
+  <vllm_args> \
+  --port <port>
+```
+
+## Step 5: Launch and verify
+
+Before launching, check for port conflicts:
 ```bash
-# Poll until healthy (up to 15 minutes for first load):
+ss -tlnp 2>/dev/null | grep ':<port> '
+```
+If a Docker container is on that port, stop it with `docker rm -f <name>`.
+
+Run the Docker command. Then poll health:
+```bash
 until curl -sf http://localhost:8000/health; do sleep 10; done && echo "READY"
 ```
 
-Expected timelines after the model is cached locally:
-- Qwen3-8B: 2–4 minutes
-- 70B model: 8–15 minutes
+Expected load times after the model is cached locally:
+- Small models (< 20B): 2-4 minutes
+- Large models (70B+): 8-15 minutes
 
-A 503 response during this window is normal — vLLM is loading weights.
-Only conclude failure after 15+ minutes with no change.
+A 503 during this window is normal. Only conclude failure after 15+ minutes.
 
-**Verify the endpoint works:**
-
+After health returns 200, send a warmup request (triggers HIP kernel compilation,
+30-90 seconds on gfx942):
 ```bash
 curl -s http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"Qwen/Qwen3-8B","messages":[{"role":"user","content":"say hi"}]}'
+  -d '{"model":"<model_id>","messages":[{"role":"user","content":"say hi"}],"max_tokens":5}'
 ```
 
-**Success:** return to the user:
+Return to the user:
 - `base_url`: `http://<host>:8000/v1`
 - `api_key`: none required for local
 - `model`: the model ID used
 
-**Demo tip:** Send one warmup inference request immediately after health
-passes. The first request triggers HIP kernel compilation (30–90 seconds
-on gfx942). Subsequent requests are fast.
+## Remote vs. local
 
----
+All scripts accept `--host user@hostname`. When given, they SSH to the target.
+Set `ROCM_SSH_HOST` and `ROCM_SSH_USER` env vars to avoid passing `--host`
+every time.
+
+For remote Docker commands, run them over SSH:
+```bash
+ssh user@host 'docker run -d ...'
+```
+Use `localhost` for health/warmup curl URLs (curl runs on the remote host).
 
 ## Gotchas
 
-**`CUDA_VISIBLE_DEVICES` set on the host** — AMD GPUs disappear. The ROCm
+**`CUDA_VISIBLE_DEVICES` set on the host** -- AMD GPUs disappear. The ROCm
 runtime treats this NVIDIA variable as "no visible GPUs." Unset it before
 launching: `unset CUDA_VISIBLE_DEVICES`. Pass `--env CUDA_VISIBLE_DEVICES=`
 in the Docker command to block it inside the container.
 
-**FP4BMM crash on gfx942 (MI300X)** — If the container exits immediately
-with a segfault or illegal instruction: `VLLM_ROCM_USE_AITER_FP4BMM` is set
-to `1` on gfx942. Set it to `0`. `get_config.py` handles this automatically;
-only relevant if the Docker command was hand-edited. See vLLM issue #34641.
+**FP4BMM crash on gfx942 (MI300X)** -- If the container exits immediately
+with a segfault or illegal instruction: `VLLM_ROCM_USE_AITER_FP4BMM` must be
+`0` on gfx942. This is set correctly in `gpu_overrides.json` for gfx942.
+See vLLM issue #34641.
 
-**`HIP error: no kernel image`** — The Docker image has no compiled kernel
+**`HIP error: no kernel image`** -- The Docker image has no compiled kernel
 for your GPU's gfx version. Use `vllm/vllm-openai-rocm:latest`; it includes
-gfx942 and gfx950 kernels. Older images may not.
+gfx942 and gfx950 kernels.
 
-**MLA models need `--block-size 1`** — DeepSeek-R1/V3, Kimi-K2.5, Kimi-K2.
+**MLA models need `--block-size 1`** -- DeepSeek-R1/V3, Kimi-K2.5.
 Without it the MLA attention backend silently falls back to a slower path.
-`get_config.py` includes this automatically for MLA models.
+This is in the recipe args for these models.
 
-**MoE models on multi-GPU need `--distributed-executor-backend mp`** —
+**MoE models on multi-GPU need `--distributed-executor-backend mp`** --
 Qwen3-235B, GLM-4.5, MiniMax-M2. The default distributed executor does not
 work reliably with MoE on ROCm.
 
-**`/dev/kfd` permission denied** — User is not in the `video` or `render`
+**`/dev/kfd` permission denied** -- User is not in the `video` or `render`
 group. Fix: `sudo usermod -aG video,render $USER` (requires re-login).
 
-**SSH key not configured** — The scripts use `BatchMode=yes` SSH (no
-interactive prompts). If SSH fails with `Permission denied (publickey)`,
-the user must configure key-based SSH access to the GPU host before the
-remote path works.
+**SSH key not configured** -- The scripts use `BatchMode=yes` SSH. If SSH
+fails with `Permission denied (publickey)`, configure key-based access first.
 
-**Model not specified** — Default to `Qwen/Qwen3-8B`: AMD Day 0 support,
-Apache 2.0 license (no HF token needed), fits on any MI-series GPU, strong
-reasoning and tool-calling. Good for any demo.
-
----
-
-## Remote vs. local
-
-All scripts accept an optional `--host user@hostname` argument. When given,
-the script SSHs to the target machine and runs the relevant commands there
-via `BatchMode=yes`. When omitted, everything runs locally.
-
-Set `ROCM_SSH_HOST` and `ROCM_SSH_USER` environment variables to avoid
-passing `--host` on every command.
+**Restricting GPUs on shared hosts** -- Use `--env HIP_VISIBLE_DEVICES=0,1`
+to target specific GPUs by index. Never set `CUDA_VISIBLE_DEVICES` on AMD.
 
 ---
 
 ## Reference
 
-Full model compatibility matrix, complete vLLM flag and env var reference,
-multi-GPU tensor parallelism guide, and known hardware quirks:
+Full GPU architecture table, env var reference, flag details, and known quirks:
 [reference.md](reference.md)

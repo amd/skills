@@ -28,20 +28,25 @@ def _is_local(host):
 
 
 def _run(cmd, host, user, port, timeout=20):
-    if _is_local(host):
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-    else:
-        ssh = [
-            "ssh",
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-o", "ConnectTimeout=15",
-            "-o", "BatchMode=yes",
-            "-o", "LogLevel=ERROR",
-            "-p", str(port),
-            f"{user}@{host}", cmd,
-        ]
-        r = subprocess.run(ssh, capture_output=True, text=True, timeout=timeout)
-    return r.returncode, r.stdout.strip(), r.stderr.strip()
+    try:
+        if _is_local(host):
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        else:
+            ssh_target = f"{user}@{host}" if user else host
+            ssh = [
+                "ssh",
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-o", "ConnectTimeout=15",
+                "-o", "BatchMode=yes",
+                "-o", "LogLevel=ERROR",
+                "-p", str(port),
+                ssh_target, cmd,
+            ]
+            r = subprocess.run(ssh, capture_output=True, text=True, timeout=timeout)
+        return r.returncode, r.stdout.strip(), r.stderr.strip()
+    except subprocess.TimeoutExpired:
+        target = f"{user}@{host}" if user else host
+        return 1, "", f"Command timed out after {timeout}s on {target}"
 
 
 def main():
@@ -58,7 +63,7 @@ def main():
         user, host = host.split("@", 1)
 
     host = host or os.environ.get("ROCM_SSH_HOST", "")
-    user = user or os.environ.get("ROCM_SSH_USER", "root")
+    user = user or os.environ.get("ROCM_SSH_USER", "")
     port = args.port or int(os.environ.get("ROCM_SSH_PORT", "22"))
 
     issues = []
@@ -76,11 +81,13 @@ def main():
     else:
         rc2, out2, _ = _run("test -r /dev/kfd && echo ok || echo denied", host, user, port)
         if "denied" in out2:
+            # Docker passes --device /dev/kfd directly, so host user permissions
+            # don't block containerized workloads. Downgrade to warning.
             issues.append({
                 "check": "dev_kfd",
-                "severity": "error",
-                "message": "/dev/kfd exists but is not readable. Current user is not in the video/render group.",
-                "fix": "sudo usermod -aG video,render $USER  # then re-login",
+                "severity": "warning",
+                "message": "/dev/kfd exists but current user is not in video/render group. Docker containers will still work.",
+                "fix": "sudo usermod -aG video,render $USER  # then re-login (only needed for non-Docker use)",
             })
 
     # /dev/dri
@@ -148,6 +155,16 @@ def main():
             "severity": "advisory",
             "message": "HF_TOKEN not set. Required for gated models (Llama, Gemma). Not needed for Qwen3.",
             "fix": "export HF_TOKEN=hf_...",
+        })
+
+    # vLLM Docker image
+    rc, out, _ = _run("docker images vllm/vllm-openai-rocm --format '{{.Tag}}' 2>/dev/null | head -1", host, user, port)
+    if not out.strip():
+        issues.append({
+            "check": "vllm_image",
+            "severity": "advisory",
+            "message": "vllm/vllm-openai-rocm image not pulled yet. First launch will download ~20GB.",
+            "fix": "docker pull vllm/vllm-openai-rocm:latest",
         })
 
     # CUDA_VISIBLE_DEVICES footgun

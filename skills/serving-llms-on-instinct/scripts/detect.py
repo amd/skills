@@ -27,20 +27,25 @@ def _is_local(host):
 
 
 def _run(cmd, host, user, port, timeout=30):
-    if _is_local(host):
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-    else:
-        ssh = [
-            "ssh",
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-o", "ConnectTimeout=15",
-            "-o", "BatchMode=yes",
-            "-o", "LogLevel=ERROR",
-            "-p", str(port),
-            f"{user}@{host}", cmd,
-        ]
-        r = subprocess.run(ssh, capture_output=True, text=True, timeout=timeout)
-    return r.returncode, r.stdout, r.stderr
+    try:
+        if _is_local(host):
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        else:
+            ssh_target = f"{user}@{host}" if user else host
+            ssh = [
+                "ssh",
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-o", "ConnectTimeout=15",
+                "-o", "BatchMode=yes",
+                "-o", "LogLevel=ERROR",
+                "-p", str(port),
+                ssh_target, cmd,
+            ]
+            r = subprocess.run(ssh, capture_output=True, text=True, timeout=timeout)
+        return r.returncode, r.stdout, r.stderr
+    except subprocess.TimeoutExpired:
+        target = f"{user}@{host}" if user else host
+        return 1, "", f"Command timed out after {timeout}s on {target}"
 
 
 def main():
@@ -56,10 +61,13 @@ def main():
         user, host = host.split("@", 1)
 
     host = host or os.environ.get("ROCM_SSH_HOST", "")
-    user = user or os.environ.get("ROCM_SSH_USER", "root")
+    user = user or os.environ.get("ROCM_SSH_USER", "")
     port = args.port or int(os.environ.get("ROCM_SSH_PORT", "22"))
 
     rc, out, err = _run("amd-smi static --asic --vram --json", host, user, port)
+    if rc != 0 and "required groups" in err:
+        # User not in video/render group -- retry with sudo
+        rc, out, err = _run("sudo amd-smi static --asic --vram --json", host, user, port)
     if rc != 0:
         print(json.dumps({
             "error": "amd-smi failed",
@@ -91,7 +99,9 @@ def main():
         })
 
     rocm_version = "unknown"
-    rc2, out2, _ = _run("amd-smi version --json", host, user, port, timeout=10)
+    rc2, out2, err2 = _run("amd-smi version --json", host, user, port, timeout=10)
+    if rc2 != 0 and "required groups" in err2:
+        rc2, out2, _ = _run("sudo amd-smi version --json", host, user, port, timeout=10)
     if rc2 == 0:
         try:
             vdata = json.loads(out2)

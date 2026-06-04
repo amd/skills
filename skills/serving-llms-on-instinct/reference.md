@@ -33,7 +33,9 @@ rocminfo | grep "gfx"
 
 ## Model Compatibility Matrix
 
-All entries from vllm-project/recipes AMD-verified configurations.
+Model configs are auto-synced from [vllm-project/recipes](https://github.com/vllm-project/recipes)
+into `data/recipes_cache.json`. Read the cache file directly for the full current
+list. The table below covers commonly used models for reference.
 VRAM at FP16/BF16 unless noted.
 
 | Model | HF ID | Arch | VRAM FP16 | VRAM FP8 | Min TP | Notes |
@@ -41,7 +43,8 @@ VRAM at FP16/BF16 unless noted.
 | Qwen3-0.6B | Qwen/Qwen3-0.6B | Dense | 2 GB | — | 1 | |
 | Qwen3-1.7B | Qwen/Qwen3-1.7B | Dense | 4 GB | — | 1 | |
 | Qwen3-4B | Qwen/Qwen3-4B | Dense | 9 GB | — | 1 | |
-| Qwen3-8B | Qwen/Qwen3-8B | Dense | 18 GB | — | 1 | **Default. Apache 2.0.** |
+| Qwen3-8B | Qwen/Qwen3-8B | Dense | 18 GB | -- | 1 | Apache 2.0. |
+| Qwen3.5-9B | Qwen/Qwen3.5-9B | Dense+MM | 22 GB | -- | 1 | **Default. Apache 2.0. MTP.** |
 | Qwen3-14B | Qwen/Qwen3-14B | Dense | 30 GB | — | 1 | |
 | Qwen3-32B | Qwen/Qwen3-32B | Dense | 66 GB | — | 1 | |
 | Qwen3-72B | Qwen/Qwen3-72B | Dense | 148 GB | — | 1 | Fits MI300X+ |
@@ -123,9 +126,10 @@ TP degree must divide evenly into the model's attention head count.
 
 ### Docker image
 
-`vllm/vllm-openai-rocm:latest` — includes gfx942 and gfx950 kernels.
+`vllm/vllm-openai-rocm:<tag>` -- tag is auto-resolved from Docker Hub
+during recipe sync (currently `v0.22.0`). Includes gfx942 and gfx950 kernels.
 Do NOT use `vllm/vllm-openai` (CUDA-only).
-**Exception:** GLM models must use `vllm/vllm-openai-rocm:v0.15.1`.
+**Exception:** GLM-4.5 must use `vllm/vllm-openai-rocm:v0.15.1`.
 
 ### vLLM server arguments
 
@@ -205,7 +209,7 @@ Do NOT use `vllm/vllm-openai` (CUDA-only).
 Segfault or illegal instruction during model warmup on MI300X/MI325X/MI300A.
 Triggered when `VLLM_ROCM_USE_AITER_FP4BMM=1` on gfx942.
 Fix: always set `VLLM_ROCM_USE_AITER_FP4BMM=0` on gfx942.
-`get_config.py` handles this automatically.
+This is set correctly in `data/gpu_overrides.json` for gfx942.
 
 **CUDA_VISIBLE_DEVICES interference**
 If set in the shell environment, this NVIDIA variable causes ROCm to see zero GPUs.
