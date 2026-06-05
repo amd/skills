@@ -15,13 +15,26 @@ description: >-
 
 # Local AI Use (route image, TTS, STT through Lemonade)
 
-This is a **meta-skill**. You run it once. After that, every later request that
-needs image generation, text-to-speech, or speech-to-text uses the local
+This is a **meta-skill**. After you run it, every later request that needs
+image generation, text-to-speech, or speech-to-text uses the local
 [Lemonade Server](https://lemonade-server.ai) instead of a cloud API. The
 agent's own LLM keeps handling text; only the expensive multimodal calls move
 on-device.
 
-The skill does two things:
+The skill covers **two independent modality groups** — set up only the one(s)
+the user actually needs:
+
+| Group | Covers | Default model(s) |
+|---|---|---|
+| **image** | image generation + editing | `SD-Turbo` |
+| **speech** | text-to-speech **and** speech-to-text | `kokoro-v1`, `Whisper-Tiny` |
+
+> **Do ONLY the group the user asked for.** If the user wants to generate an
+> image, set up `image` only — do **not** pull the speech models. The setup
+> command takes the group as an argument (`image`, `speech`, or `all`), and the
+> rule installed into `AGENTS.md` contains only the group(s) you set up.
+
+For each group you set up, the skill does two things:
 
 1. **Verifies that local Lemonade is reachable and has the right models.**
 2. **Drops a `Local AI Use` block into the workspace `AGENTS.md`** so the agent
@@ -48,32 +61,36 @@ instead.
   missing, install from <https://lemonade-server.ai/install_options.html>
   before continuing. Do not silently install on the user's machine; that is a
   system-wide change and must be the user's call.
-- **Disk:** ~8 GB free for the three default models (SD-Turbo + Whisper-Tiny
-  + kokoro-v1).
+- **Disk:** ~5 GB for `image` (SD-Turbo); ~0.4 GB for `speech`
+  (kokoro-v1 + Whisper-Tiny). Only the group(s) you set up are downloaded.
 - **Network:** required for the first `lemonade pull` of each model. After
   that, every modality runs offline.
 
 ## The opinionated path
 
-Run this checklist top to bottom. Track progress against it; do not move on
-until each step verifies.
+Run this checklist top to bottom for the group(s) the user needs. Track progress
+against it; do not move on until each step verifies.
 
 ```
 [ ] 1. Confirm Lemonade Server is installed and reachable
-[ ] 2. Pull the three default modality models
+[ ] 2. Pull the selected group's default models
 [ ] 3. Install the routing rule into the workspace AGENTS.md
-[ ] 4. Smoke-test image, TTS, and STT against the local endpoint
+[ ] 4. Smoke-test the selected group's endpoints
 ```
 
-The single command that does steps 1, 2, and 3 in one shot is:
+The single command that does steps 1, 2, and 3 in one shot, scoped to a group:
 
 ```bash
-python scripts/setup_local_ai.py
+python scripts/setup_local_ai.py image     # image only
+python scripts/setup_local_ai.py speech    # TTS + STT only
+python scripts/setup_local_ai.py all       # both (only if the user wants both)
 ```
 
-(Run from this skill's folder.) The script is idempotent: re-running it on a
-fully configured workspace is a no-op apart from a healthcheck. Read the
-sections below for what to do when each step fails.
+(Run from this skill's folder.) The script pulls only the selected group's
+models and writes only that group's rule section. It is idempotent: re-running
+with the same group is a no-op apart from a healthcheck. To add a group later,
+re-run with the full set you want (e.g. `all`). Read the sections below for what
+to do when each step fails.
 
 ---
 
@@ -101,33 +118,36 @@ and no API key is required (the system-wide server defaults to no auth on
 loopback). If the user has set `LEMONADE_API_KEY`, the routing rule template
 in `templates/local-ai-rule.md` shows where to add the `Authorization` header.
 
-## Step 2: pull the three default modality models
+## Step 2: pull the selected group's default models
 
-Pull these three. They are the **Lite Collection** defaults from Lemonade
-OmniRouter, sized to keep token-and-cost savings real on commodity hardware:
+Pull only the models for the group(s) you are setting up. They are the
+**Lite Collection** defaults from Lemonade OmniRouter, sized to keep
+token-and-cost savings real on commodity hardware:
 
-| Modality | Model | Size | Why this default |
-|---|---|---|---|
-| Image generation | `SD-Turbo` | ~5 GB | Single-step generation, runs on CPU and AMD iGPU/dGPU |
-| Text-to-speech | `kokoro-v1` | ~0.3 GB | Only TTS model Lemonade currently supports; CPU-only, low latency |
-| Speech-to-text | `Whisper-Tiny` | ~0.1 GB | Smallest Whisper; fast on CPU. Upgrade to `Whisper-Large-v3-Turbo` if accuracy matters more than latency. |
+| Group | Modality | Model | Size | Why this default |
+|---|---|---|---|---|
+| `image` | Image generation | `SD-Turbo` | ~5 GB | Single-step generation, runs on CPU and AMD iGPU/dGPU |
+| `speech` | Text-to-speech | `kokoro-v1` | ~0.3 GB | Only TTS model Lemonade currently supports; CPU-only, low latency |
+| `speech` | Speech-to-text | `Whisper-Tiny` | ~0.1 GB | Smallest Whisper; fast on CPU. Upgrade to `Whisper-Large-v3-Turbo` if accuracy matters more than latency. |
 
 ```bash
+# image group
 lemonade pull SD-Turbo
+# speech group
 lemonade pull kokoro-v1
 lemonade pull Whisper-Tiny
 ```
 
 To choose a different model while installing the rule, pass it to the setup
-script. For example, to make future image requests use SDXL:
+script alongside the group. For example, to make future image requests use SDXL:
 
 ```bash
-python scripts/setup_local_ai.py --image-model SDXL-Turbo
+python scripts/setup_local_ai.py image --image-model SDXL-Turbo
 ```
 
 The script will pull the selected model and write that model ID into the
 installed `AGENTS.md` rule. The same pattern works for `--tts-model` and
-`--stt-model`.
+`--stt-model` with the `speech` group.
 
 Each `pull` is idempotent. To verify what is already downloaded:
 
@@ -169,15 +189,16 @@ block to:
 
 The rule's content is identical; only the file location changes.
 
-## Step 4: smoke-test the three modalities
+## Step 4: smoke-test the group(s) you set up
 
-Verify each modality against the live server before declaring success. These
-mirror the inline patterns in the installed rule, so a green pass here means
-the rule will work. If you installed with a model override such as
-`--image-model SDXL-Turbo`, use that model ID in the smoke test and confirm
-the installed `AGENTS.md` rule contains it.
+Verify each modality you set up against the live server before declaring
+success — run only the tests for the group(s) you installed. These mirror the
+inline patterns in the installed rule, so a green pass here means the rule will
+work. If you installed with a model override such as `--image-model SDXL-Turbo`,
+use that model ID in the smoke test and confirm the installed `AGENTS.md` rule
+contains it.
 
-**Image generation** (writes `out.png`):
+**Image generation** — `image` group (writes `out.png`):
 
 ```bash
 curl -sX POST http://localhost:13305/api/v1/images/generations \
@@ -186,7 +207,7 @@ curl -sX POST http://localhost:13305/api/v1/images/generations \
   | python -c "import sys,json,base64; open('out.png','wb').write(base64.b64decode(json.load(sys.stdin)['data'][0]['b64_json']))"
 ```
 
-**Text-to-speech** (writes `out.mp3`):
+**Text-to-speech** — `speech` group (writes `out.mp3`):
 
 ```bash
 curl -sX POST http://localhost:13305/api/v1/audio/speech \
@@ -195,7 +216,7 @@ curl -sX POST http://localhost:13305/api/v1/audio/speech \
   -o out.mp3
 ```
 
-**Speech-to-text** (round-trips `out.mp3` → text via a wav re-encode):
+**Speech-to-text** — `speech` group (round-trips `out.mp3` → text via a wav re-encode):
 
 ```bash
 ffmpeg -y -i out.mp3 -ar 16000 -ac 1 out.wav
@@ -203,29 +224,31 @@ curl -sX POST http://localhost:13305/api/v1/audio/transcriptions \
   -F "file=@out.wav" -F "model=Whisper-Tiny"
 ```
 
-If any of the three returns a non-2xx status, fix it now. The rule we just
-installed sends future requests to these same endpoints, so a broken endpoint
-becomes a broken user experience.
+If a test for a group you set up returns a non-2xx status, fix it now. The rule
+we just installed sends future requests to these same endpoints, so a broken
+endpoint becomes a broken user experience.
 
 ---
 
 ## What changes after this skill runs
 
 From the next turn onward, the agent reads the rule in `AGENTS.md` on every
-message. The rule explicitly tells the agent:
+message. For each group you set up, the rule explicitly tells the agent:
 
-- **For image generation:** call `POST /api/v1/images/generations` on the
-  local server. Do **not** call any cloud image API and do **not** use the
-  built-in `GenerateImage` tool (that path bills tokens to the cloud
-  provider).
-- **For text-to-speech:** call `POST /api/v1/audio/speech`. Do **not** call
-  cloud TTS providers (OpenAI TTS, ElevenLabs, etc.).
-- **For speech-to-text:** call `POST /api/v1/audio/transcriptions`. Do
-  **not** call cloud transcription providers.
-- **Fallback:** only fall back to a cloud API after one local attempt has
-  failed *and* the user has been told the local call failed. Never
-  silently fall back; the whole point of this skill is to keep cost
-  predictable.
+- **image group — image generation:** call `POST /api/v1/images/generations`
+  (or `/images/edits`) on the local server. Do **not** call any cloud image API
+  and do **not** use the built-in `GenerateImage` tool (that path bills tokens
+  to the cloud provider).
+- **speech group — text-to-speech:** call `POST /api/v1/audio/speech`. Do
+  **not** call cloud TTS providers (OpenAI TTS, ElevenLabs, etc.).
+- **speech group — speech-to-text:** call `POST /api/v1/audio/transcriptions`.
+  Do **not** call cloud transcription providers.
+- **Fallback (any group):** only fall back to a cloud API after one local
+  attempt has failed *and* the user has been told the local call failed. Never
+  silently fall back; the whole point of this skill is to keep cost predictable.
+
+A group you did **not** set up is untouched — the agent keeps using its
+configured providers for that modality.
 
 The agent's own text reasoning continues to use whatever LLM Cursor / Claude
 Code / Codex is configured with. This skill does not redirect chat tokens;
@@ -246,20 +269,20 @@ machine.
 
 ## Verification checklist
 
-Mark this skill complete only when **all** of the following are true:
+Mark a group complete only when **all** of the following are true for it:
 
 - [ ] `lemonade status --json` reports the server running on port 13305.
-- [ ] `lemonade list --downloaded` shows `SD-Turbo`, `kokoro-v1`, and
-      `Whisper-Tiny`.
-- [ ] The workspace `AGENTS.md` contains the
-      `amd-skills:local-ai-use` block.
-- [ ] All three smoke tests in Step 4 succeed.
-- [ ] On a follow-up turn, asking the agent to "generate an image of X"
-      causes it to POST to `http://localhost:13305/api/v1/images/generations`
-      rather than calling a cloud tool.
+- [ ] `lemonade list --downloaded` shows the group's model(s): `SD-Turbo` for
+      `image`; `kokoro-v1` and `Whisper-Tiny` for `speech`.
+- [ ] The workspace `AGENTS.md` contains the `amd-skills:local-ai-use` block,
+      and that block includes the group's section (`### Image` and/or
+      `### Speech`).
+- [ ] The group's smoke test(s) in Step 4 succeed.
+- [ ] On a follow-up turn, a request for that modality causes the agent to POST
+      to the local endpoint rather than calling a cloud tool.
 
-If any box is unchecked, the user is still paying cloud cost for at least
-one modality.
+You only need the rows for the group(s) you set up. A group you skipped is
+expected to still use cloud providers.
 
 ---
 
