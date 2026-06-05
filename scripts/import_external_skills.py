@@ -26,9 +26,14 @@ For each source, the script:
 Usage:
     uv run scripts/import_external_skills.py            # write changes
     uv run scripts/import_external_skills.py --dry-run  # report only
+    uv run scripts/import_external_skills.py --resilient --report failures.json
 
-The companion GitHub Actions workflow `import-external-skills` calls this
-script on manual dispatch and opens a pull request with the result.
+The companion GitHub Actions workflow `import-external-skills` runs nightly
+(and on manual dispatch). It calls this script with `--resilient` so a
+single skill that fails per-skill validation is reverted out of the import
+and recorded in the `--report` file (the workflow files a GitHub issue for
+it) instead of blocking every other skill. The surviving skills are opened
+as a pull request that auto-merges once the `validate` checks pass.
 """
 
 from __future__ import annotations
@@ -503,6 +508,83 @@ def prune_orphans(
     return removed
 
 
+def revert_skill(folder: str) -> None:
+    """Restore `skills/<folder>` to its committed state, removing new files.
+
+    `git checkout HEAD` restores tracked files to their last-committed
+    content (a no-op for a brand-new skill that isn't in HEAD), and
+    `git clean -fd` removes any files the import added. Together they undo a
+    failed import whether the skill already existed or is brand new.
+    """
+    rel = f"skills/{folder}"
+    # A brand-new skill has no HEAD entry, so checkout exits non-zero; that's
+    # expected and harmless, hence check=False.
+    subprocess.run(
+        ["git", "checkout", "HEAD", "--", rel],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "clean", "-fd", rel],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def validate_imported(
+    results: list[ImportResult],
+    report_path: Path | None,
+    log: list[str],
+) -> tuple[list[ImportResult], list[dict]]:
+    """Validate each imported skill and drop the ones that fail.
+
+    Uses the same per-skill check the `validate` workflow runs
+    (`validate_skills.py --skill`) so a skill kept here is one the resulting
+    pull request will accept. Failing skills are reverted out of the working
+    tree (see `revert_skill`) and recorded so the workflow can file an issue
+    for each. Returns `(survivors, failures)`.
+    """
+    survivors: list[ImportResult] = []
+    failures: list[dict] = []
+    validator = REPO_ROOT / "scripts" / "validate_skills.py"
+    for result in results:
+        proc = subprocess.run(
+            ["uv", "run", str(validator), "--skill", result.folder],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+        )
+        if proc.returncode == 0:
+            survivors.append(result)
+            log.append(f"[validate] {result.folder}: OK")
+            continue
+
+        output = (proc.stdout + proc.stderr).strip()
+        log.append(
+            f"[validate] {result.folder}: FAILED (reverting; an issue will "
+            "be filed)"
+        )
+        revert_skill(result.folder)
+        failures.append(
+            {
+                "skill": result.folder,
+                "repo": result.source.repo,
+                "ref": result.source.ref,
+                "commit": result.commit,
+                "output": output,
+            }
+        )
+
+    if report_path is not None:
+        report_path.write_text(
+            json.dumps(failures, indent=2) + "\n", encoding="utf-8"
+        )
+    return survivors, failures
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -515,6 +597,21 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=CATALOG_FILE,
         help=f"Path to the catalog file (default: {CATALOG_FILE}).",
+    )
+    parser.add_argument(
+        "--resilient",
+        action="store_true",
+        help="Validate each imported skill and revert (rather than keep) any "
+        "that fail, so one broken skill doesn't block the others. Implies a "
+        "per-skill check identical to the `validate` workflow.",
+    )
+    parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="When used with --resilient, write a JSON array describing the "
+        "skills that failed validation to this path (for the workflow to "
+        "file issues).",
     )
     args = parser.parse_args(argv)
 
@@ -537,6 +634,19 @@ def main(argv: list[str] | None = None) -> int:
         all_results.extend(import_source(source, args.dry_run, log))
 
     pruned = prune_orphans(declared, existing_federated, args.dry_run, log)
+
+    failures: list[dict] = []
+    if args.resilient and not args.dry_run:
+        # Drop skills that fail validation *before* syncing the marketplace
+        # so it never references a reverted skill. update_marketplace prunes
+        # entries whose folder no longer exists, which removes a brand-new
+        # failed skill's entry once revert_skill has deleted its directory.
+        all_results, failures = validate_imported(all_results, args.report, log)
+    elif args.report is not None:
+        # Keep the report file present (empty) even when nothing was checked,
+        # so the workflow can read it unconditionally.
+        args.report.write_text("[]\n", encoding="utf-8")
+
     marketplace_changed = update_marketplace(all_results, args.dry_run)
 
     for line in log:
@@ -544,6 +654,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print("")
     print(f"Imported: {len(all_results)} skill(s)")
+    if args.resilient:
+        print(f"Failed validation (reverted): {len(failures)}")
     print(f"Removed orphans: {pruned}")
     print(
         "Marketplace: "

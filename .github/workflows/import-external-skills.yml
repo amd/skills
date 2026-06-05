@@ -1,15 +1,35 @@
 name: import-external-skills
 
-# Manually-dispatched workflow that refreshes the federated portion of the
-# catalog. It reads `scripts/sources.yml`, shallow-clones each declared
-# source, vendors the named skills into `skills/<name>/`, updates
-# `.claude-plugin/marketplace.json`, regenerates the Cursor manifest, and
-# opens a pull request with the result. Every imported skill goes through
-# the same `validate` checks as in-repo skills before it lands on `main`.
+# Nightly (and manually-dispatchable) workflow that refreshes the federated
+# portion of the catalog. It reads `scripts/sources.yml`, shallow-clones each
+# declared source, vendors the named skills into `skills/<name>/`, updates
+# `.claude-plugin/marketplace.json`, regenerates the Cursor manifest,
+# validates everything in-job, and pushes the result straight to `main` --
+# no pull request and no human approval required.
+#
+# Per-skill resilience: the import runs with `--resilient`, so a skill that
+# fails per-skill validation is reverted out of the import and recorded in
+# `import-report.json`. This workflow then files (or updates) a GitHub issue
+# for each failed skill, while every skill that passed still lands on `main`.
+#
+# Direct-push prerequisites (configured outside this file):
+#   - The job validates the catalog itself (./scripts/check.sh plus the same
+#     offline lychee reference check that `validate.yml` runs), so the push
+#     only happens when the catalog is green. There is therefore no separate
+#     PR/`validate` run to gate on, and no "Allow auto-merge" setting needed.
+#   - `main` is a protected branch that requires pull requests, which the
+#     default GITHUB_TOKEN cannot bypass. The push below therefore uses an
+#     admin Personal Access Token stored in the `CATALOG_PUSH_TOKEN` secret
+#     (fine-grained PAT with Contents: read/write on this repo). The PAT's
+#     owner must be allowed to bypass the branch protection (admin, or added
+#     to the "bypass required pull requests" list).
 #
 # See the "A federated catalog" section of `README.md` for the design.
 
 on:
+  schedule:
+    # 08:00 UTC daily (~01:00 PT). Refreshes vendored skills overnight.
+    - cron: "0 8 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -20,7 +40,7 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
+  issues: write
 
 concurrency:
   group: import-external-skills
@@ -33,71 +53,158 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # Use the admin PAT so the later push can update the protected
+          # `main` branch. checkout persists these credentials for git.
+          token: ${{ secrets.CATALOG_PUSH_TOKEN }}
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Configure git for sparse-checkout
+      - name: Configure git
         run: |
           git --version
           git config --global init.defaultBranch main
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Dry-run import (report only)
+        if: ${{ inputs.dry_run == true }}
+        run: uv run scripts/import_external_skills.py --dry-run
+
+      # Resilient import: skills that fail per-skill validation are reverted
+      # out of the working tree and recorded in import-report.json instead of
+      # failing the whole run. The surviving skills are what gets pushed.
       - name: Import skills declared in scripts/sources.yml
-        id: import
-        run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            uv run scripts/import_external_skills.py --dry-run
-          else
-            uv run scripts/import_external_skills.py
-          fi
+        if: ${{ inputs.dry_run != true }}
+        run: uv run scripts/import_external_skills.py --resilient --report import-report.json
 
       - name: Regenerate Cursor plugin manifest
         if: ${{ inputs.dry_run != true }}
         run: uv run scripts/generate_cursor_plugin.py
 
+      # File (or refresh) one issue per skill that failed validation, mirroring
+      # the issue-filing pattern in external-reference-check.yml. Done before
+      # the repo-wide gate so per-skill failures are reported even if a later
+      # check fails.
+      - name: File issues for skills that failed validation
+        if: ${{ inputs.dry_run != true }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -s import-report.json ]; then
+            echo "No report file; nothing to file."
+            exit 0
+          fi
+
+          count=$(jq 'length' import-report.json)
+          if [ "$count" -eq 0 ]; then
+            echo "No skill validation failures to report."
+            exit 0
+          fi
+
+          # Create the label on first use; ignore if it already exists.
+          gh label create federated-import-failure \
+            --color b60205 \
+            --description "A federated skill failed validation during nightly import" \
+            2>/dev/null || true
+
+          run_url="${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}"
+
+          jq -c '.[]' import-report.json | while read -r entry; do
+            skill=$(echo "$entry" | jq -r '.skill')
+            repo=$(echo "$entry" | jq -r '.repo')
+            ref=$(echo "$entry" | jq -r '.ref')
+            commit=$(echo "$entry" | jq -r '.commit')
+            output=$(echo "$entry" | jq -r '.output')
+
+            title="Federated skill import failed: ${skill}"
+
+            body=$(cat <<EOF
+          The nightly \`import-external-skills\` workflow imported \`${skill}\`
+          from \`${repo}@${ref}\` (commit \`${commit}\`) but it failed per-skill
+          validation, so it was held back from the push to \`main\`. Every other
+          skill that passed still landed.
+
+          Fix the upstream skill (or its \`scripts/sources.yml\` pin) and the
+          next run will pick it up automatically.
+
+          <details><summary>Validation output</summary>
+
+          \`\`\`
+          ${output}
+          \`\`\`
+
+          </details>
+
+          Run: ${run_url}
+          EOF
+          )
+
+            existing=$(gh issue list \
+              --state open \
+              --label federated-import-failure \
+              --search "in:title \"${title}\"" \
+              --json number,title \
+              --jq ".[] | select(.title == \"${title}\") | .number" \
+              | head -n1)
+
+            if [ -n "$existing" ]; then
+              echo "Updating existing issue #$existing for ${skill}"
+              gh issue edit "$existing" --body "$body"
+              gh issue comment "$existing" --body "Still failing as of $run_url"
+            else
+              echo "Filing new issue for ${skill}"
+              gh issue create \
+                --title "$title" \
+                --label federated-import-failure \
+                --body "$body"
+            fi
+          done
+
+      # Repo-wide gate: the same checks `validate.yml` enforces, run here so
+      # the push only happens when the catalog is green. `check.sh` covers
+      # per-skill + marketplace validation and the generated Cursor manifest.
       - name: Validate skills and manifests
         if: ${{ inputs.dry_run != true }}
         run: ./scripts/check.sh
+
+      - name: Check internal references and anchors
+        if: ${{ inputs.dry_run != true }}
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --config .github/lychee.toml --offline --include-fragments --no-progress "./**/*.md"
+          fail: true
 
       - name: Detect changes
         if: ${{ inputs.dry_run != true }}
         id: changes
         run: |
-          if [ -z "$(git status --porcelain)" ]; then
+          if [ -z "$(git status --porcelain -- scripts/sources.yml skills .claude-plugin .cursor-plugin)" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No changes to import. Skipping PR."
+            echo "No changes to import. Nothing to push."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
             git status --short
           fi
 
-      # Use the GitHub-maintained action to push to a dedicated branch and
-      # open a PR. PRs (rather than direct commits to main) keep imported
-      # changes reviewable and let the standard `validate` workflow gate
-      # them.
-      - name: Open pull request with imported skills
+      # Commit the surviving skills and push straight to main. No PR: the
+      # catalog was already validated above.
+      - name: Commit and push to main
         if: ${{ inputs.dry_run != true && steps.changes.outputs.changed == 'true' }}
-        uses: peter-evans/create-pull-request@v7
-        with:
-          branch: bot/import-external-skills
-          delete-branch: true
-          commit-message: "chore(catalog): refresh federated skills from scripts/sources.yml"
-          title: "Refresh federated skills"
-          body: |
-            Automated import driven by `scripts/sources.yml`.
+        run: |
+          set -euo pipefail
+          git add scripts/sources.yml skills .claude-plugin .cursor-plugin
+          git commit -m "chore(catalog): refresh federated skills from scripts/sources.yml
 
-            See the "A federated catalog" section of `README.md` for the
-            design. Each vendored skill includes a `.federated.json` marker
-            recording the source repo, pinned ref, and resolved commit at
-            import time.
+          Automated nightly import driven by scripts/sources.yml. Skills that
+          failed per-skill validation were held back and reported as issues
+          labeled federated-import-failure.
 
-            Triggered by @${{ github.actor }} via the `import-external-skills`
-            workflow ([run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})).
-          labels: |
-            catalog
-            automated
-          add-paths: |
-            scripts/sources.yml
-            skills/**
-            .claude-plugin/**
-            .cursor-plugin/**
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          git push origin "HEAD:${{ github.event.repository.default_branch }}"
