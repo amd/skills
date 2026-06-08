@@ -61,22 +61,38 @@ jobs:
       # supply-chain safety. To bump it, update the SHA below to the desired
       # skillspector commit (e.g. `git ls-remote https://github.com/NVIDIA/skillspector.git main`).
       #
-      # The CLI exits 1 when a skill scores HIGH/CRITICAL (risk score > 50)
-      # and 2 on error; we capture that exit code, still emit the report, and
-      # then re-raise it so the job fails on a risky skill.
+      # The CLI exits 1 when a skill's *aggregate* risk score is HIGH/CRITICAL
+      # (score > 50) and 2 on error. We don't gate on the aggregate score,
+      # because a pile of MEDIUM findings can push the aggregate to HIGH even
+      # when no single finding is HIGH/CRITICAL. Instead we fail only when an
+      # individual finding is HIGH or CRITICAL (and always fail on error).
       - name: Scan skill with SkillSpector
         run: |
           mkdir -p reports
+          report="reports/${{ matrix.skill }}.md"
           set +e
           uvx --python 3.12 \
             --from "git+https://github.com/NVIDIA/skillspector.git@939da7d41eed4282e4d8217fe2254c69f690027e" \
             skillspector scan "skills/${{ matrix.skill }}" \
-              --no-llm --format markdown --output "reports/${{ matrix.skill }}.md"
+              --no-llm --format markdown --output "$report"
           code=$?
           set -e
           echo "----- SkillSpector report: ${{ matrix.skill }} -----"
-          cat "reports/${{ matrix.skill }}.md" || true
-          exit $code
+          cat "$report" || true
+
+          # Exit code 2 means SkillSpector itself errored; surface that.
+          if [ "$code" = "2" ]; then
+            echo "SkillSpector errored (exit code 2)." >&2
+            exit 2
+          fi
+
+          # Per-finding headers look like "### 🟡 MEDIUM: AST4". Fail only when
+          # at least one finding is HIGH or CRITICAL; otherwise pass.
+          if grep -Eq '^###[^:]*(HIGH|CRITICAL):' "$report"; then
+            echo "Found one or more HIGH/CRITICAL findings; failing." >&2
+            exit 1
+          fi
+          echo "No HIGH/CRITICAL findings; passing."
 
       - name: Upload report
         if: always()
