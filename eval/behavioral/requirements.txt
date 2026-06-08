@@ -1,0 +1,5 @@
+# Behavioral tests need pytest. The harness itself uses only the standard
+# library; pytest is the test runner / reporter.
+#
+#   pip install -r eval/behavioral/requirements.txt
+pytest>=8.0
