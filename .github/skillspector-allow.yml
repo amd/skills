@@ -1,0 +1,38 @@
+# SkillSpector false-positive allowlist.
+#
+# SkillSpector's static scan is high-recall / moderate-precision and has no
+# native per-finding suppression. This file is the auditable place to record
+# findings that are genuinely false positives so the CI gate
+# (scripts/skillspector_gate.py) does not fail on them. Everything not listed
+# here still fails the build at HIGH/CRITICAL.
+#
+# Each entry suppresses ONE rule for ONE file within ONE skill:
+#   skill:  skill directory name under skills/
+#   rule:   SkillSpector rule id (e.g. YR1)
+#   file:   path as it appears in the report, relative to the skill dir
+#   match:  (optional) substring that must appear in the finding message, so
+#           the suppression stays scoped to the specific signature
+#   reason: why this is a false positive (keep it accurate and specific)
+#
+# Add entries sparingly and only when the finding is demonstrably benign.
+
+suppressions:
+  - skill: rocm-doctor
+    rule: YR1
+    file: scripts/apply_fix.py
+    match: backdoor_persistence
+    reason: >-
+      False positive. The 'backdoor_persistence' YARA rule's $bashrc_persist
+      string matches any `echo ... >> ~/.bashrc`. Here it is the documented
+      remediation that appends `export PATH="/opt/rocm/bin:$PATH"` so ROCm
+      binaries land on PATH after install. Standard ROCm setup guidance, not a
+      persistence backdoor or payload.
+  - skill: rocm-doctor
+    rule: YR1
+    file: scripts/diagnose.py
+    match: backdoor_persistence
+    reason: >-
+      False positive. Same $bashrc_persist match: diagnose.py prints the
+      remediation command `echo 'export PATH=<bin>:$PATH' >> ~/.bashrc` (or
+      ~/.zshrc) for the user to add ROCm/HIP to PATH. No payload, no SSH key
+      injection, no hidden user.

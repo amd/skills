@@ -86,13 +86,14 @@ jobs:
             exit 2
           fi
 
-          # Per-finding headers look like "### 🟡 MEDIUM: AST4". Fail only when
-          # at least one finding is HIGH or CRITICAL; otherwise pass.
-          if grep -Eq '^###[^:]*(HIGH|CRITICAL):' "$report"; then
-            echo "Found one or more HIGH/CRITICAL findings; failing." >&2
-            exit 1
-          fi
-          echo "No HIGH/CRITICAL findings; passing."
+          # Fail when any individual finding is HIGH or CRITICAL, except for
+          # documented false positives recorded in .github/skillspector-allow.yml.
+          # SkillSpector has no native suppression, so the gate applies the
+          # allowlist here (see scripts/skillspector_gate.py).
+          uv run scripts/skillspector_gate.py \
+            --report "$report" \
+            --skill "${{ matrix.skill }}" \
+            --allowlist .github/skillspector-allow.yml
 
       - name: Upload report
         if: always()
