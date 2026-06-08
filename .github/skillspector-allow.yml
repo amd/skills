@@ -36,3 +36,22 @@ suppressions:
       remediation command `echo 'export PATH=<bin>:$PATH' >> ~/.bashrc` (or
       ~/.zshrc) for the user to add ROCm/HIP to PATH. No payload, no SSH key
       injection, no hidden user.
+  - skill: local-ai-use
+    rule: SC2
+    file: SKILL.md
+    match: External Script Fetching
+    reason: >-
+      False positive. The flagged `curl ... | python -c ...` is not fetching or
+      executing a remote script: `curl` POSTs an image-generation request to the
+      local loopback Lemonade Server, and the piped `python -c` only
+      base64-decodes the JSON response body and writes it to `out.png`. No
+      remote code is downloaded or run.
+  - skill: local-ai-use
+    rule: SC2
+    file: templates/local-ai-rule.md
+    match: External Script Fetching
+    reason: >-
+      False positive. Same pattern as SKILL.md: the `curl ... | python -c ...`
+      in the installable rule template POSTs to the local Lemonade Server and
+      pipes the JSON response into `python -c` purely to base64-decode the image
+      bytes into `out.png`. No remote script is fetched or executed.
