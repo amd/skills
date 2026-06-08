@@ -36,6 +36,40 @@ suppressions:
       remediation command `echo 'export PATH=<bin>:$PATH' >> ~/.bashrc` (or
       ~/.zshrc) for the user to add ROCm/HIP to PATH. No payload, no SSH key
       injection, no hidden user.
+  - skill: rocm-doctor
+    rule: OH1
+    file: scripts/apply_fix.py
+    match: Unvalidated Output Injection
+    reason: >-
+      False positive. The flag is on the generic `_run(cmd: list[str], ...)`
+      helper, which calls `subprocess.run(cmd, ..., shell defaults to False)`
+      with a list-form argv, so there is no shell interpolation. Every `cmd`
+      is a hardcoded argv list assembled in-script (e.g.
+      `["usermod","-a","-G","render,video",user]`, `["modprobe","amdgpu"]`);
+      the only dynamic pieces are the local username from `$USER`/`$LOGNAME`
+      and binary paths resolved via `shutil.which`. No LLM/model output ever
+      reaches this sink, so there is nothing to validate or sanitize.
+  - skill: rocm-doctor
+    rule: OH1
+    file: scripts/examine.py
+    match: Unvalidated Output Injection
+    reason: >-
+      False positive. Same generic `_run(cmd: list[str], ...)` helper as in
+      apply_fix.py: list-form `subprocess.run` with no shell=True. The read-only
+      probes only ever pass fixed argv lists (`["rocminfo"]`,
+      `["lspci","-nn","-D"]`, the PowerShell/CIM `Get-CimInstance` probes, the
+      framework binary from `shutil.which`). No model output flows into the
+      command, and there is no shell to inject into.
+  - skill: rocm-doctor
+    rule: PE3
+    file: scripts/examine.py
+    match: Credential Access
+    reason: >-
+      False positive. Line 493 is a code comment ("Resolve uid/gid to names via
+      /etc/passwd & /etc/group") describing how `_stat_device` maps a device's
+      owner uid/gid to names. The actual resolution uses the stdlib `pwd`/`grp`
+      modules (`pwd.getpwuid` / `grp.getgrgid`), not any read of /etc/passwd,
+      /etc/shadow, .env, or token files. No credential material is accessed.
   - skill: local-ai-use
     rule: SC2
     file: SKILL.md
