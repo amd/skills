@@ -62,7 +62,8 @@ class Config:
 def _run(cmd: list[str], timeout: float = 10.0) -> tuple[int, str, str]:
     try:
         r = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, check=False,
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, timeout=timeout, check=False,
         )
         return r.returncode, r.stdout or "", r.stderr or ""
     except (FileNotFoundError, subprocess.SubprocessError, OSError):

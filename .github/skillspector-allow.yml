@@ -1,0 +1,113 @@
+# SkillSpector false-positive allowlist.
+#
+# SkillSpector's static scan is high-recall / moderate-precision and has no
+# native per-finding suppression. This file is the auditable place to record
+# findings that are genuinely false positives so the CI gate
+# (scripts/skillspector_gate.py) does not fail on them. Everything not listed
+# here still fails the build at HIGH/CRITICAL.
+#
+# Each entry suppresses ONE rule for ONE file within ONE skill:
+#   skill:  skill directory name under skills/
+#   rule:   SkillSpector rule id (e.g. YR1)
+#   file:   path as it appears in the report, relative to the skill dir
+#   match:  (optional) substring that must appear in the finding message, so
+#           the suppression stays scoped to the specific signature
+#   reason: why this is a false positive (keep it accurate and specific)
+#
+# Add entries sparingly and only when the finding is demonstrably benign.
+
+suppressions:
+  - skill: rocm-doctor
+    rule: YR1
+    file: scripts/apply_fix.py
+    match: backdoor_persistence
+    reason: >-
+      False positive. The 'backdoor_persistence' YARA rule's $bashrc_persist
+      string matches any `echo ... >> ~/.bashrc`. Here it is the documented
+      remediation that appends `export PATH="/opt/rocm/bin:$PATH"` so ROCm
+      binaries land on PATH after install. Standard ROCm setup guidance, not a
+      persistence backdoor or payload.
+  - skill: rocm-doctor
+    rule: YR1
+    file: scripts/diagnose.py
+    match: backdoor_persistence
+    reason: >-
+      False positive. Same $bashrc_persist match: diagnose.py prints the
+      remediation command `echo 'export PATH=<bin>:$PATH' >> ~/.bashrc` (or
+      ~/.zshrc) for the user to add ROCm/HIP to PATH. No payload, no SSH key
+      injection, no hidden user.
+  - skill: rocm-doctor
+    rule: OH1
+    file: scripts/apply_fix.py
+    match: Unvalidated Output Injection
+    reason: >-
+      False positive. The flag is on the generic `_run(cmd: list[str], ...)`
+      helper, which calls `subprocess.run(cmd, ..., shell defaults to False)`
+      with a list-form argv, so there is no shell interpolation. Every `cmd`
+      is a hardcoded argv list assembled in-script (e.g.
+      `["usermod","-a","-G","render,video",user]`, `["modprobe","amdgpu"]`);
+      the only dynamic pieces are the local username from `$USER`/`$LOGNAME`
+      and binary paths resolved via `shutil.which`. No LLM/model output ever
+      reaches this sink, so there is nothing to validate or sanitize.
+  - skill: rocm-doctor
+    rule: OH1
+    file: scripts/examine.py
+    match: Unvalidated Output Injection
+    reason: >-
+      False positive. Same generic `_run(cmd: list[str], ...)` helper as in
+      apply_fix.py: list-form `subprocess.run` with no shell=True. The read-only
+      probes only ever pass fixed argv lists (`["rocminfo"]`,
+      `["lspci","-nn","-D"]`, the PowerShell/CIM `Get-CimInstance` probes, the
+      framework binary from `shutil.which`). No model output flows into the
+      command, and there is no shell to inject into.
+  - skill: rocm-doctor
+    rule: PE3
+    file: scripts/examine.py
+    match: Credential Access
+    reason: >-
+      False positive. Line 493 is a code comment ("Resolve uid/gid to names via
+      /etc/passwd & /etc/group") describing how `_stat_device` maps a device's
+      owner uid/gid to names. The actual resolution uses the stdlib `pwd`/`grp`
+      modules (`pwd.getpwuid` / `grp.getgrgid`), not any read of /etc/passwd,
+      /etc/shadow, .env, or token files. No credential material is accessed.
+  - skill: local-ai-use
+    rule: SC2
+    file: SKILL.md
+    match: External Script Fetching
+    reason: >-
+      False positive. The flagged `curl ... | python -c ...` is not fetching or
+      executing a remote script: `curl` POSTs an image-generation request to the
+      local loopback Lemonade Server, and the piped `python -c` only
+      base64-decodes the JSON response body and writes it to `out.png`. No
+      remote code is downloaded or run.
+  - skill: local-ai-use
+    rule: SC2
+    file: templates/local-ai-rule.md
+    match: External Script Fetching
+    reason: >-
+      False positive. Same pattern as SKILL.md: the `curl ... | python -c ...`
+      in the installable rule template POSTs to the local Lemonade Server and
+      pipes the JSON response into `python -c` purely to base64-decode the image
+      bytes into `out.png`. No remote script is fetched or executed.
+  - skill: local-ai-use
+    rule: OH1
+    file: scripts/setup_local_ai.py
+    match: Unvalidated Output Injection
+    reason: >-
+      False positive. Both flagged calls (lines 98 and 128) use list-form
+      subprocess.run argv with no shell=True, so there is no shell
+      interpolation. Line 98 is fully hardcoded (`lemonade list --downloaded
+      --json`); line 128 is `lemonade pull <model>` where `model` comes from
+      argparse defaults / explicit --image-model/--tts-model/--stt-model flags,
+      not from LLM or model output. Nothing here consumes unvalidated model
+      output, so there is no injection sink to sanitize.
+  - skill: local-ai-use
+    rule: P2
+    file: templates/local-ai-rule.md
+    match: Hidden Instructions
+    reason: >-
+      False positive. Line 1 is the `<!-- BEGIN amd-skills:local-ai-use -->`
+      HTML comment, a benign machine-readable marker that setup_local_ai.py uses
+      to locate and replace the rule block in AGENTS.md in place on re-runs. It
+      carries no instructions; the surrounding rule text is plain, reviewable
+      content by design (it is the installable routing rule itself).
