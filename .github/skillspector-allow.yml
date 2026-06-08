@@ -55,3 +55,25 @@ suppressions:
       in the installable rule template POSTs to the local Lemonade Server and
       pipes the JSON response into `python -c` purely to base64-decode the image
       bytes into `out.png`. No remote script is fetched or executed.
+  - skill: local-ai-use
+    rule: OH1
+    file: scripts/setup_local_ai.py
+    match: Unvalidated Output Injection
+    reason: >-
+      False positive. Both flagged calls (lines 98 and 128) use list-form
+      subprocess.run argv with no shell=True, so there is no shell
+      interpolation. Line 98 is fully hardcoded (`lemonade list --downloaded
+      --json`); line 128 is `lemonade pull <model>` where `model` comes from
+      argparse defaults / explicit --image-model/--tts-model/--stt-model flags,
+      not from LLM or model output. Nothing here consumes unvalidated model
+      output, so there is no injection sink to sanitize.
+  - skill: local-ai-use
+    rule: P2
+    file: templates/local-ai-rule.md
+    match: Hidden Instructions
+    reason: >-
+      False positive. Line 1 is the `<!-- BEGIN amd-skills:local-ai-use -->`
+      HTML comment, a benign machine-readable marker that setup_local_ai.py uses
+      to locate and replace the rule block in AGENTS.md in place on re-runs. It
+      carries no instructions; the surrounding rule text is plain, reviewable
+      content by design (it is the installable routing rule itself).
