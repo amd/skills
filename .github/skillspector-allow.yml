@@ -1,0 +1,35 @@
+# SkillSpector allowlist — documented false positives / accepted findings.
+#
+# SkillSpector has no native suppression, so the CI gate (scripts/skillspector_gate.py)
+# applies this allowlist itself. An allowlisted finding is both:
+#   1. ignored when deciding pass/fail (it won't fail the `skillspector` check), AND
+#   2. hidden from the console output, so it never shows up in the CI logs.
+#
+# The raw, unfiltered scan is always uploaded as the per-skill artifact, so the
+# full record (including allowlisted findings) is still available for audit.
+#
+# Only HIGH/CRITICAL findings block CI, so those are what you normally allowlist.
+# Keep entries as specific as possible and always include a human-readable reason.
+#
+# Entry fields:
+#   skill   (required)  Skill directory name under skills/ (must match the scanned skill).
+#   rule    (required)  SkillSpector rule id, e.g. "AST4", "E2". Use "*" to match any rule
+#                       (discouraged; prefer an explicit id).
+#   file    (optional)  Path of the finding relative to the skill root, e.g.
+#                       "scripts/apply_fix.py". Omit to match the rule in any file.
+#   start_line (optional) Exact start line of the finding. Omit to match any line.
+#   severity   (optional) Restrict the entry to one severity (HIGH or CRITICAL).
+#   reason  (required)  Why this finding is a false positive or an accepted risk.
+#
+# Example (commented out — copy and adapt as real findings appear):
+#
+# allow:
+#   - skill: rocm-doctor
+#     rule: AST4            # subprocess Call
+#     file: scripts/apply_fix.py
+#     reason: >
+#       apply_fix.py intentionally shells out to ROCm/amdgpu CLI tooling to apply
+#       fixes; subprocess use is core to the skill and only runs on explicit user
+#       confirmation. Not an exfiltration or RCE vector.
+
+allow: []
