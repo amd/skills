@@ -61,6 +61,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from _sanitize import sanitize_process_output
+
 PAGE_SIZE_BYTES = 4096
 MIN_VRAM_GB = 0.5    # Floor most BIOSes allow for the UMA frame buffer.
 MIN_GTT_GB = 1.0     # Below this, even routine GPU work fails.
@@ -83,9 +85,13 @@ def _run(cmd: list[str], timeout: float = 60.0) -> tuple[int, str, str]:
         r = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, check=False,
         )
-        return r.returncode, r.stdout or "", r.stderr or ""
+        return (
+            r.returncode,
+            sanitize_process_output(r.stdout),
+            sanitize_process_output(r.stderr),
+        )
     except (FileNotFoundError, subprocess.SubprocessError, OSError) as e:
-        return 127, "", str(e)
+        return 127, "", sanitize_process_output(str(e))
 
 
 def _read_text(path: str) -> str:

@@ -36,6 +36,8 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from _sanitize import sanitize_process_output
+
 # Mapping from LLVM gfx target to the marketing-friendly generation bucket
 # the rest of the skill keys off. RDNA3.5 (gfx115x) is the only generation
 # the source ROCm doc describes shared-memory tuning for, so it is the only
@@ -91,7 +93,11 @@ def _run(cmd: list[str], timeout: float = 5.0) -> tuple[int, str, str]:
         r = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, check=False,
         )
-        return r.returncode, r.stdout or "", r.stderr or ""
+        return (
+            r.returncode,
+            sanitize_process_output(r.stdout),
+            sanitize_process_output(r.stderr),
+        )
     except (FileNotFoundError, subprocess.SubprocessError, OSError):
         return 127, "", ""
 

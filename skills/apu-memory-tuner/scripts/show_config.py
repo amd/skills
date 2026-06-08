@@ -36,6 +36,8 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from _sanitize import sanitize_process_output
+
 # 4 KiB is the page size assumed by the amdgpu/TTM accounting on every
 # platform we target. The kernel param is in pages, the user thinks in GB.
 PAGE_SIZE_BYTES = 4096
@@ -64,7 +66,11 @@ def _run(cmd: list[str], timeout: float = 10.0) -> tuple[int, str, str]:
         r = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, check=False,
         )
-        return r.returncode, r.stdout or "", r.stderr or ""
+        return (
+            r.returncode,
+            sanitize_process_output(r.stdout),
+            sanitize_process_output(r.stderr),
+        )
     except (FileNotFoundError, subprocess.SubprocessError, OSError):
         return 127, "", ""
 
