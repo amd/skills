@@ -102,6 +102,18 @@ suppressions:
       not from LLM or model output. Nothing here consumes unvalidated model
       output, so there is no injection sink to sanitize.
   - skill: local-ai-use
+    rule: TM2
+    file: SKILL.md
+    match: Chaining Abuse
+    reason: >-
+      False positive. Line 103 is the documented Ubuntu/Debian install
+      one-liner `sudo add-apt-repository -y ppa:lemonade-team/stable &&
+      sudo apt-get update && sudo apt-get install -y lemonade-server
+      lemonade-desktop`. The `&&` chaining is the standard apt install
+      sequence (add PPA, refresh index, install package), not tool/command
+      chaining of untrusted or model-derived steps. No LLM output feeds the
+      chain and each command is a fixed, reviewable install step.
+  - skill: local-ai-use
     rule: P2
     file: templates/local-ai-rule.md
     match: Hidden Instructions
