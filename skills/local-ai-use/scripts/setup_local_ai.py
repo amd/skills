@@ -5,16 +5,18 @@
 # ///
 """One-shot setup for the `local-ai-use` skill.
 
-Performs the three setup steps from SKILL.md:
+Performs the two setup steps from SKILL.md:
 
   1. Confirms the system-wide Lemonade Server is installed and reachable on
      http://localhost:13305 (override with --host / --port or LEMONADE_HOST /
      LEMONADE_PORT).
-  2. Pulls the three default modality models if they are missing
-     (image: SD-Turbo, TTS: kokoro-v1, STT: Whisper-Tiny).
-  3. Writes the routing rule from `templates/local-ai-rule.md` into
+  2. Writes the routing rule from `templates/local-ai-rule.md` into
      <workspace>/AGENTS.md, between stable BEGIN/END markers so re-runs
      replace the block in place rather than appending.
+
+Setup never downloads models: the default image/TTS/STT models are pulled
+on first use, by the installed AGENTS.md rule (see its failure
+handling). This keeps setup fast and offline-friendly.
 
 The script is idempotent: a second run on a fully configured workspace only
 re-runs the healthcheck. It exits non-zero on any unrecoverable failure.
@@ -25,11 +27,9 @@ Constants are documented inline; nothing is magical.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import shutil
-import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -98,65 +98,6 @@ def check_server_reachable(host: str, port: int) -> bool:
         status, _ = _http_get(url, timeout_s=3.0)
         return status == 200
     except (urllib.error.URLError, OSError):
-        return False
-
-
-def list_downloaded_models(host: str, port: int) -> set[str]:
-    """Return the set of locally downloaded model IDs.
-
-    Uses `lemonade list --downloaded` (CLI) and falls back to
-    GET /api/v1/models when the CLI lacks the flag. Returning an empty set is
-    treated as "could not determine" by the caller, which still attempts the
-    pulls; `lemonade pull` is itself idempotent.
-    """
-    try:
-        out = subprocess.run(
-            ["lemonade", "list", "--downloaded", "--json"],
-            check=True, capture_output=True, text=True, timeout=10,
-        ).stdout
-        data = json.loads(out)
-        return {m.get("id", "") for m in data if isinstance(m, dict)}
-    except (subprocess.SubprocessError, json.JSONDecodeError, FileNotFoundError):
-        pass
-
-    try:
-        status, body = _http_get(
-            f"http://{host}:{port}/api/v1/models",
-            timeout_s=5,
-        )
-        if status == 200:
-            data = json.loads(body)
-            return {
-                m.get("id", "") for m in data.get("data", [])
-                if isinstance(m, dict) and m.get("downloaded")
-            }
-    except (urllib.error.URLError, OSError, json.JSONDecodeError):
-        pass
-
-    return set()
-
-
-def pull_model(model: str) -> bool:
-    """Run `lemonade pull <model>`. Returns True on success."""
-    _print(f"pulling {model}...")
-    try:
-        subprocess.run(
-            ["lemonade", "pull", model],
-            check=True,
-            # Stream output so the user sees the download progress instead of
-            # staring at a frozen prompt; SD-Turbo is several GB.
-            stdout=None, stderr=None,
-            # SD-Turbo is the largest pull at ~5 GB. 30 minutes is generous
-            # for a slow connection; below that we'd false-positive on real
-            # downloads.
-            timeout=30 * 60,
-        )
-        return True
-    except subprocess.CalledProcessError as exc:
-        _print(f"pull failed for {model} (exit {exc.returncode})")
-        return False
-    except subprocess.TimeoutExpired:
-        _print(f"pull timed out for {model} after 30 minutes")
         return False
 
 
@@ -277,24 +218,19 @@ def main(argv: list[str] | None = None) -> int:
         help="Lemonade Server port (default: 13305 / $LEMONADE_PORT).",
     )
     parser.add_argument(
-        "--skip-pull",
-        action="store_true",
-        help="Do not pull missing models; just verify and write AGENTS.md.",
-    )
-    parser.add_argument(
         "--image-model",
         default=DEFAULT_IMAGE_MODEL,
-        help=f"Image generation model to pull and write into AGENTS.md (default: {DEFAULT_IMAGE_MODEL}).",
+        help=f"Image generation model written into AGENTS.md, pulled on first use (default: {DEFAULT_IMAGE_MODEL}).",
     )
     parser.add_argument(
         "--tts-model",
         default=DEFAULT_TTS_MODEL,
-        help=f"Text-to-speech model to pull and write into AGENTS.md (default: {DEFAULT_TTS_MODEL}).",
+        help=f"Text-to-speech model written into AGENTS.md, pulled on first use (default: {DEFAULT_TTS_MODEL}).",
     )
     parser.add_argument(
         "--stt-model",
         default=DEFAULT_STT_MODEL,
-        help=f"Speech-to-text model to pull and write into AGENTS.md (default: {DEFAULT_STT_MODEL}).",
+        help=f"Speech-to-text model written into AGENTS.md, pulled on first use (default: {DEFAULT_STT_MODEL}).",
     )
     args = parser.parse_args(argv)
 
@@ -315,23 +251,6 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     _print(f"server reachable at http://{args.host}:{args.port}")
-
-    if not args.skip_pull:
-        downloaded = list_downloaded_models(args.host, args.port)
-        selected_models = dict.fromkeys(
-            (args.image_model, args.tts_model, args.stt_model)
-        )
-        for model in selected_models:
-            if model in downloaded:
-                _print(f"already downloaded: {model}")
-                continue
-            if not pull_model(model):
-                # Surface the failure but keep going so the user at least gets
-                # the rule installed for the modalities that did succeed.
-                _print(
-                    f"continuing without {model}; the rule will reference it "
-                    "but calls will 404 until you pull it."
-                )
 
     upsert_agents_md(
         args.workspace.resolve(),
