@@ -33,7 +33,7 @@ asks for higher quality or has explicit hardware to spare.
 To upgrade: re-run setup with the target model, for example:
 
 ```bash
-python scripts/setup_local_ai.py image --image-model SDXL-Turbo
+python scripts/setup_local_ai.py --image-model SDXL-Turbo
 ```
 
 The script pulls the model and rewrites the `AGENTS.md` rule in place.
