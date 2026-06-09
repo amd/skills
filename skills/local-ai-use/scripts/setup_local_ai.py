@@ -60,6 +60,21 @@ RULE_TEMPLATE = SKILL_DIR / "templates" / "local-ai-rule.md"
 INSTALL_URL = "https://lemonade-server.ai/install_options.html"
 
 
+def _default_workspace() -> Path:
+    """Workspace root for AGENTS.md.
+
+    Defaults to cwd, but if launched from inside an agent's skill folder
+    (the universal `<.dot-config>/skills/<skill>/` layout used by Claude,
+    Cursor, Codex, Gemini, etc.), climb out to the real workspace root so
+    AGENTS.md is never buried inside the skill folder.
+    """
+    cwd = Path.cwd().resolve()
+    for parent in cwd.parents:
+        if parent.name == "skills" and parent.parent.name.startswith("."):
+            return parent.parent.parent
+    return cwd
+
+
 def _print(msg: str) -> None:
     """Single-line, prefix-tagged status print so the agent's output stays parseable."""
     print(f"[local-ai-use] {msg}", flush=True)
@@ -247,8 +262,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--workspace",
         type=Path,
-        default=Path.cwd(),
-        help="Workspace root where AGENTS.md should be written (default: cwd).",
+        default=_default_workspace(),
+        help="Workspace root where AGENTS.md should be written (default: workspace root, auto-detected).",
     )
     parser.add_argument(
         "--host",

@@ -71,7 +71,7 @@ The single command that does steps 1, 2, and 3 in one shot is:
 python scripts/setup_local_ai.py
 ```
 
-(Run from this skill's folder.) The script is idempotent: re-running it on a
+The script is idempotent: re-running it on a
 fully configured workspace is a no-op apart from a healthcheck. Read the
 sections below for what to do when each step fails.
 

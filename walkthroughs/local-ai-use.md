@@ -6,7 +6,7 @@ The goal of this skill is to teach your AI agent to use image generation, text g
 ## Step 1 - Understanding which skills are available
 
 * Run `claude "Which skills can you see?" --model sonnet`. You should see a list of skills that should not include anythink related to local LLM usage.
-* Make sure there is no `AFENTS.md` file on your local folder.
+* Make sure there is no `AGENTS.md` file on your local folder.
 
 ## Step 2 - Enabling claude to see `local-ai-use`
 
