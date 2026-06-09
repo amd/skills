@@ -45,6 +45,49 @@ DEFAULT_MODEL = os.environ.get("BEHAVIORAL_MODEL", "sonnet")
 DEFAULT_EFFORT = os.environ.get("BEHAVIORAL_EFFORT", "high")
 
 
+def _claude_env() -> dict[str, str]:
+    """Environment for `claude` subprocesses.
+
+    Disable the CLI's internal retry loop by default so a network/auth
+    problem (e.g. not connected to the network that can reach the API)
+    fails fast instead of being retried into a long, confusing hang. The
+    caller can still override by exporting ``CLAUDE_CODE_MAX_RETRIES``.
+    """
+    env = dict(os.environ)
+    env.setdefault("CLAUDE_CODE_MAX_RETRIES", "0")
+    return env
+
+
+def check_api_reachable(model: str | None = DEFAULT_MODEL, timeout: int = 60) -> tuple[bool, str]:
+    """Preflight: confirm the `claude` CLI can actually reach the API.
+
+    Runs a trivial prompt with retries disabled so an unreachable API fails
+    fast. Returns ``(ok, detail)`` where ``detail`` is a short human-readable
+    reason on failure. This is meant to be called once before the (expensive)
+    behavioral runs so the suite can skip cleanly when off-network.
+    """
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        return False, "'claude' CLI not found on PATH"
+
+    cmd = [claude_bin, "-p", "Reply with the single word: ok", "--output-format", "json"]
+    if model:
+        cmd += ["--model", model]
+
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8",
+            stdin=subprocess.DEVNULL, timeout=timeout, env=_claude_env(),
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"API preflight timed out after {timeout}s (is the network reachable?)"
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or f"exit code {proc.returncode}").strip()
+        return False, detail[:500]
+    return True, "ok"
+
+
 def _stage_workspace(skill: str) -> Path:
     """Copy ``skill`` into an isolated temp workspace and return its path."""
     skill_src = SKILLS_DIR / skill
@@ -77,7 +120,7 @@ def _run_agent(prompt_text: str, workspace: Path, model: str | None, effort: str
 
     proc = subprocess.run(
         cmd, cwd=str(workspace), capture_output=True, text=True,
-        encoding="utf-8", stdin=subprocess.DEVNULL,
+        encoding="utf-8", stdin=subprocess.DEVNULL, env=_claude_env(),
     )
 
     events: list[dict] = []
@@ -170,7 +213,7 @@ def _grade_with_llm(statement: str, run: "Run", judge_model: str | None) -> tupl
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8",
-            stdin=subprocess.DEVNULL, timeout=180,
+            stdin=subprocess.DEVNULL, timeout=180, env=_claude_env(),
         )
     except subprocess.TimeoutExpired:
         return False, "llm_judge timed out after 180s"
