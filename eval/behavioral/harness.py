@@ -9,7 +9,7 @@ asserts what the agent *should* and *should not* have done. Tests read like:
         with claude("sonnet", skill="local-ai-use") as agent:
             run = agent.prompt("Use local AI, then generate a cat to out.png.")
 
-            # Programmatic expectations (cheap, deterministic, fail fast).
+            # Deterministic checks (cheap, fail fast).
             run.logs_contains("local-ai-use")
             run.workspace_contains("out.png")
 
@@ -22,18 +22,8 @@ stages an isolated temp workspace (skill copied under
 `<tmp>/.claude/skills/<skill>/`); leaving it deletes that workspace. `prompt()`
 runs the agent once with tool permissions bypassed and returns a `Run`.
 
-Every assertion on `Run` raises `AssertionError` on failure (so the test fails
-at that line) and prints a `[PASS]`/`[FAIL]` line for visibility under `-s`:
-
-  * `logs_contains(text)` / `workspace_contains(path)` -- deterministic checks
-    against the captured transcript and the workspace files.
-  * `should(statement)` / `should_not(statement)` -- a natural-language claim
-    graded by an LLM judge over the captured evidence (transcript, downloaded
-    model deltas, workspace files); polarity lives in the verb.
-
-Lemonade model *downloads* are global to the Lemonade install and are not
-isolated -- that is intentional, since "did the agent download model X?" is
-part of what we grade.
+Every assertion on `Run` raises `AssertionError` on failure and prints a
+`[PASS]`/`[FAIL]` line for visibility under `-s`.
 """
 
 from __future__ import annotations
@@ -45,81 +35,21 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
-# Reuse the skill location + listing helpers from the existing eval harness.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from claude_eval import SKILLS_DIR, list_available_skills  # noqa: E402
+from claude_eval import SKILLS_DIR  # noqa: E402
 
 DEFAULT_SKILL = os.environ.get("BEHAVIORAL_SKILL", "local-ai-use")
 DEFAULT_MODEL = os.environ.get("BEHAVIORAL_MODEL", "sonnet")
 DEFAULT_EFFORT = os.environ.get("BEHAVIORAL_EFFORT", "high")
-DEFAULT_JUDGE_MODEL = os.environ.get("BEHAVIORAL_JUDGE_MODEL") or DEFAULT_MODEL
-
-LEMONADE_HOST = os.environ.get("LEMONADE_HOST", "127.0.0.1")
-LEMONADE_PORT = int(os.environ.get("LEMONADE_PORT", "13305"))
 
 
-# --------------------------------------------------------------------------- #
-# Lemonade state + prerequisites                                              #
-# --------------------------------------------------------------------------- #
-def _http_get(url: str, timeout_s: float) -> tuple[int, bytes]:
-    req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=timeout_s) as r:  # noqa: S310
-        return r.status, r.read()
-
-
-def claude_available() -> bool:
-    return shutil.which("claude") is not None
-
-
-def lemonade_server_reachable(host: str = LEMONADE_HOST, port: int = LEMONADE_PORT) -> bool:
-    try:
-        status, _ = _http_get(f"http://{host}:{port}/api/v1/health", timeout_s=3.0)
-        return status == 200
-    except (urllib.error.URLError, OSError):
-        return False
-
-
-def lemonade_downloaded_models(host: str = LEMONADE_HOST, port: int = LEMONADE_PORT) -> set[str]:
-    """Set of locally-downloaded model IDs (CLI first, HTTP fallback)."""
-    try:
-        out = subprocess.run(
-            ["lemonade", "list", "--downloaded", "--json"],
-            check=True, capture_output=True, text=True, timeout=15,
-        ).stdout
-        data = json.loads(out)
-        if isinstance(data, list):
-            return {m.get("id", "") for m in data if isinstance(m, dict) and m.get("id")}
-    except (subprocess.SubprocessError, json.JSONDecodeError, FileNotFoundError, OSError):
-        pass
-
-    try:
-        status, body = _http_get(f"http://{host}:{port}/api/v1/models", timeout_s=5)
-        if status == 200:
-            data = json.loads(body)
-            return {
-                m.get("id", "") for m in data.get("data", [])
-                if isinstance(m, dict) and m.get("downloaded") and m.get("id")
-            }
-    except (urllib.error.URLError, OSError, json.JSONDecodeError):
-        pass
-
-    return set()
-
-
-# --------------------------------------------------------------------------- #
-# Workspace staging + agent run                                               #
-# --------------------------------------------------------------------------- #
 def _stage_workspace(skill: str) -> Path:
+    """Copy ``skill`` into an isolated temp workspace and return its path."""
     skill_src = SKILLS_DIR / skill
     if not (skill_src / "SKILL.md").is_file():
-        available = list_available_skills()
-        hint = f" Available: {', '.join(available)}." if available else ""
-        raise FileNotFoundError(f"skill '{skill}' not found at {skill_src / 'SKILL.md'}.{hint}")
+        raise FileNotFoundError(f"skill '{skill}' not found at {skill_src / 'SKILL.md'}")
 
     workspace = Path(tempfile.mkdtemp(prefix=f"behavioral-{skill}-"))
     dest = workspace / ".claude" / "skills" / skill
@@ -128,13 +58,8 @@ def _stage_workspace(skill: str) -> Path:
     return workspace
 
 
-def _run_agent(
-    prompt_text: str,
-    workspace: Path,
-    model: str | None,
-    effort: str | None,
-) -> tuple[float, list[dict]]:
-    """Run the agent once in ``workspace``; return (wall_s, stream-json events)."""
+def _run_agent(prompt_text: str, workspace: Path, model: str | None, effort: str | None) -> list[dict]:
+    """Run the agent once in ``workspace`` and return the stream-json events."""
     claude_bin = shutil.which("claude")
     if not claude_bin:
         raise RuntimeError("'claude' CLI not found on PATH")
@@ -150,12 +75,10 @@ def _run_agent(
     if effort:
         cmd += ["--effort", effort]
 
-    start = time.perf_counter()
     proc = subprocess.run(
         cmd, cwd=str(workspace), capture_output=True, text=True,
         encoding="utf-8", stdin=subprocess.DEVNULL,
     )
-    elapsed = time.perf_counter() - start
 
     events: list[dict] = []
     for line in (proc.stdout or "").splitlines():
@@ -172,13 +95,11 @@ def _run_agent(
             f"claude exited with code {proc.returncode} and produced no "
             f"parseable stream-json output. stderr:\n{proc.stderr}"
         )
-    return elapsed, events
+    return events
 
 
-# --------------------------------------------------------------------------- #
-# Transcript parsing                                                          #
-# --------------------------------------------------------------------------- #
-def _walk(obj, tool_uses, tool_results, texts) -> None:
+def _walk(obj, tool_uses, tool_results) -> None:
+    """Collect (tool name, tool input) pairs and tool-result text from events."""
     if isinstance(obj, dict):
         otype = obj.get("type")
         if otype == "tool_use":
@@ -191,13 +112,11 @@ def _walk(obj, tool_uses, tool_results, texts) -> None:
                 for c in content:
                     if isinstance(c, dict) and isinstance(c.get("text"), str):
                         tool_results.append(c["text"])
-        elif otype == "text" and isinstance(obj.get("text"), str):
-            texts.append(obj["text"])
         for v in obj.values():
-            _walk(v, tool_uses, tool_results, texts)
+            _walk(v, tool_uses, tool_results)
     elif isinstance(obj, list):
         for v in obj:
-            _walk(v, tool_uses, tool_results, texts)
+            _walk(v, tool_uses, tool_results)
 
 
 def _list_workspace_files(workspace: Path) -> list[str]:
@@ -210,9 +129,6 @@ def _list_workspace_files(workspace: Path) -> list[str]:
     return files
 
 
-# --------------------------------------------------------------------------- #
-# LLM-judge                                                                   #
-# --------------------------------------------------------------------------- #
 def _grade_with_llm(statement: str, run: "Run", judge_model: str | None) -> tuple[bool, str]:
     """Ask a grader LLM whether ``statement`` is TRUE given the run's evidence.
 
@@ -227,11 +143,8 @@ def _grade_with_llm(statement: str, run: "Run", judge_model: str | None) -> tupl
     if len(cmd_text) > 4000:
         cmd_text = cmd_text[:4000] + "\n...[truncated]..."
     evidence = (
-        f"Downloaded models before run: {sorted(run.pre_models) or 'unknown'}\n"
-        f"Downloaded models after run:  {sorted(run.post_models) or 'unknown'}\n"
-        f"Newly downloaded this run:    {sorted(run.new_models) or 'none'}\n"
-        f"Files in workspace:           {run.files or 'none'}\n"
-        f"Tools the agent used:         {sorted(run.tool_names) or 'none'}\n"
+        f"Files in workspace:   {run.files or 'none'}\n"
+        f"Tools the agent used: {sorted(run.tool_names) or 'none'}\n"
         f"--- Agent final message ---\n{run.result_text[:1500]}\n"
         f"--- Transcript commands/outputs (truncated) ---\n{cmd_text}\n"
     )
@@ -281,9 +194,6 @@ def _grade_with_llm(statement: str, run: "Run", judge_model: str | None) -> tupl
     return passed, f"llm_judge: {reason}"
 
 
-# --------------------------------------------------------------------------- #
-# Run: the assertion surface                                                  #
-# --------------------------------------------------------------------------- #
 class Run:
     """The captured result of one agent run, with inline-asserting checks.
 
@@ -291,21 +201,11 @@ class Run:
     on failure, so the owning pytest test fails at that line.
     """
 
-    def __init__(
-        self,
-        *,
-        workspace: Path,
-        events: list[dict],
-        pre_models: set[str],
-        post_models: set[str],
-        wall_time_s: float,
-        judge_model: str | None,
-    ) -> None:
+    def __init__(self, *, workspace: Path, events: list[dict], judge_model: str | None) -> None:
         tool_uses: list[tuple[str, str]] = []
         tool_results: list[str] = []
-        texts: list[str] = []
         for ev in events:
-            _walk(ev, tool_uses, tool_results, texts)
+            _walk(ev, tool_uses, tool_results)
 
         result_text = ""
         for ev in events:
@@ -313,17 +213,10 @@ class Run:
                 result_text = ev["result"]
 
         self.workspace = workspace
-        self.wall_time_s = wall_time_s
         self.judge_model = judge_model
-
-        self.pre_models = pre_models
-        self.post_models = post_models
-        self.new_models = post_models - pre_models
-
         self.files = _list_workspace_files(workspace)
         self.tool_names = {name for name, _ in tool_uses if name}
         self.result_text = result_text
-        self.assistant_text = "\n".join(texts)
 
         # `command_text` is what the agent actually did (tool inputs + outputs),
         # used by the judge so the agent's prose ("I won't call DALL-E") cannot
@@ -334,7 +227,6 @@ class Run:
         # tool names, command strings, etc.
         self.logs = "\n".join(json.dumps(ev, ensure_ascii=False) for ev in events)
 
-    # -- deterministic checks ------------------------------------------------ #
     def logs_contains(self, text: str) -> "Run":
         ok = text.lower() in self.logs.lower()
         self._report(ok, "logs_contains", f"transcript contains '{text}'")
@@ -348,7 +240,6 @@ class Run:
         self._report(ok, "workspace_contains", detail)
         return self
 
-    # -- LLM-judged checks --------------------------------------------------- #
     def should(self, statement: str) -> "Run":
         observed, reason = _grade_with_llm(statement, self, self.judge_model)
         self._report(observed, "should", f"{statement} -- {reason}")
@@ -359,15 +250,11 @@ class Run:
         self._report(not observed, "should_not", f"{statement} -- {reason}")
         return self
 
-    # -- internals ----------------------------------------------------------- #
     def _report(self, passed: bool, kind: str, detail: str) -> None:
         print(f"  [{'PASS' if passed else 'FAIL'}] ({kind}) {detail}", flush=True)
         assert passed, f"({kind}) {detail}"
 
 
-# --------------------------------------------------------------------------- #
-# Agent: the context manager that owns an isolated workspace                  #
-# --------------------------------------------------------------------------- #
 class Agent:
     """A single agent session bound to an isolated, skill-staged workspace.
 
@@ -383,12 +270,10 @@ class Agent:
         *,
         skill: str = DEFAULT_SKILL,
         effort: str | None = DEFAULT_EFFORT,
-        judge_model: str | None = DEFAULT_JUDGE_MODEL,
     ) -> None:
         self.model = model
         self.skill = skill
         self.effort = effort
-        self.judge_model = judge_model
         self.workspace: Path | None = None
 
     def __enter__(self) -> "Agent":
@@ -406,18 +291,8 @@ class Agent:
             raise RuntimeError("Agent.prompt() must be called inside a 'with' block")
 
         print(f"\n[behavioral] skill='{self.skill}' model='{self.model}': {text}", flush=True)
-        pre_models = lemonade_downloaded_models()
-        wall_s, events = _run_agent(text, self.workspace, self.model, self.effort)
-        post_models = lemonade_downloaded_models()
-
-        return Run(
-            workspace=self.workspace,
-            events=events,
-            pre_models=pre_models,
-            post_models=post_models,
-            wall_time_s=wall_s,
-            judge_model=self.judge_model,
-        )
+        events = _run_agent(text, self.workspace, self.model, self.effort)
+        return Run(workspace=self.workspace, events=events, judge_model=self.model)
 
 
 def claude(
@@ -425,7 +300,6 @@ def claude(
     *,
     skill: str = DEFAULT_SKILL,
     effort: str | None = DEFAULT_EFFORT,
-    judge_model: str | None = DEFAULT_JUDGE_MODEL,
 ) -> Agent:
     """Factory for a Claude-backed `Agent` (the only agent backend today)."""
-    return Agent(model, skill=skill, effort=effort, judge_model=judge_model)
+    return Agent(model, skill=skill, effort=effort)
