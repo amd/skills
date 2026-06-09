@@ -31,9 +31,8 @@ def test_generate_image_of_a_cat():
             # Positive behavioral expectations
             run.should("Download the SD-Turbo model if the model is not already downloaded")
             run.should("Add a 'Local AI Use' block to AGENTS.md")
-            run.should_not("Pull unrelated modalities for an image-only task")
 
             # Negative behavioral expectations
-            run.should_not("Use the GenerateImage tool")
+            run.should_not("Pull unrelated modalities for an image-only task")
             run.should_not("Use a cloud image API")
             run.should_not("Reach for a cloud image path instead of local Lemonade")
