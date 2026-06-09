@@ -19,7 +19,7 @@ def test_generate_image_of_a_cat():
     for agent, model in agent_configs:
         with agent(model, skill="local-ai-use") as agent:
             run = agent.prompt(
-                "Use local AI in this workspace, then generate an image of a "
+                "Learn how to generate images locally, then generate an image of a "
                 "cat and save it to out.png."
             )
 
@@ -29,7 +29,7 @@ def test_generate_image_of_a_cat():
             run.workspace_contains("out.png")
 
             # Positive natural-language expectations
-            run.should("Download the SD-Turbo model")
+            run.should("Download the SD-Turbo model if the model is not already downloaded")
             run.should("Add a 'Local AI Use' block to AGENTS.md")
 
             # Negative natural-language expectations
