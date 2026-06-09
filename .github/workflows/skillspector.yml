@@ -1,0 +1,124 @@
+name: skillspector
+
+# Statically scan every skill under skills/ with SkillSpector to catch malicious patterns and
+# security risks before they land on main. LLM semantic analysis is
+# intentionally disabled (--no-llm): the scan is fully static, needs no API
+# key, and runs in an isolated environment via uvx.
+#
+# Mirrors the discover-matrix-aggregate shape of validate.yml so each skill
+# is its own pass/fail and a single aggregate check (the `skillspector` job)
+# can be marked required in branch protection.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "skills/**"
+      - ".github/workflows/skillspector.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Enumerate the skills so the scan job can fan out over them with a matrix,
+  # reusing the same discovery script that validate.yml relies on.
+  discover-skills:
+    name: Discover skills
+    runs-on: ubuntu-latest
+    outputs:
+      skills: ${{ steps.discover.outputs.skills }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: List skills
+        id: discover
+        run: echo "skills=$(uv run scripts/validate_skills.py --list)" >> "$GITHUB_OUTPUT"
+
+  scan-skill:
+    name: Scan skill
+    needs: discover-skills
+    runs-on: ubuntu-latest
+    strategy:
+      # Don't cancel the other skills when one fails; we want to see every
+      # skill's scan result in a single run.
+      fail-fast: false
+      matrix:
+        skill: ${{ fromJson(needs.discover-skills.outputs.skills) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      # Run SkillSpector pinned to a specific commit for reproducibility and
+      # supply-chain safety. To bump it, update the SHA below to the desired
+      # skillspector commit (e.g. `git ls-remote https://github.com/NVIDIA/skillspector.git main`).
+      #
+      # The CLI exits 1 when a skill's *aggregate* risk score is HIGH/CRITICAL
+      # (score > 50) and 2 on error. We don't gate on the aggregate score,
+      # because a pile of MEDIUM findings can push the aggregate to HIGH even
+      # when no single finding is HIGH/CRITICAL. Instead we fail only when an
+      # individual finding is HIGH or CRITICAL (and always fail on error).
+      - name: Scan skill with SkillSpector
+        run: |
+          mkdir -p reports
+          report="reports/${{ matrix.skill }}.md"
+          set +e
+          uvx --python 3.12 \
+            --from "git+https://github.com/NVIDIA/skillspector.git@939da7d41eed4282e4d8217fe2254c69f690027e" \
+            skillspector scan "skills/${{ matrix.skill }}" \
+              --no-llm --format markdown --output "$report"
+          code=$?
+          set -e
+          echo "----- SkillSpector report: ${{ matrix.skill }} -----"
+          cat "$report" || true
+
+          # Exit code 2 means SkillSpector itself errored; surface that.
+          if [ "$code" = "2" ]; then
+            echo "SkillSpector errored (exit code 2)." >&2
+            exit 2
+          fi
+
+          # Fail when any individual finding is HIGH or CRITICAL, except for
+          # documented false positives recorded in .github/skillspector-allow.yml.
+          # SkillSpector has no native suppression, so the gate applies the
+          # allowlist here (see scripts/skillspector_gate.py).
+          uv run scripts/skillspector_gate.py \
+            --report "$report" \
+            --skill "${{ matrix.skill }}" \
+            --allowlist .github/skillspector-allow.yml
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skillspector-report-${{ matrix.skill }}
+          path: reports/${{ matrix.skill }}.md
+          if-no-files-found: warn
+
+  # Single gate that aggregates the per-skill matrix. Branch protection can
+  # require just this one check: it only passes when every skill scan
+  # succeeded. Because matrix jobs run independently under `fail-fast: false`,
+  # we inspect the job result explicitly rather than relying on `needs`
+  # short-circuiting.
+  skillspector:
+    name: SkillSpector security scan
+    needs: scan-skill
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all skill scans passed
+        run: |
+          echo "scan-skill result: ${{ needs.scan-skill.result }}"
+          if [ "${{ needs.scan-skill.result }}" != "success" ]; then
+            echo "One or more skills failed the SkillSpector scan." >&2
+            exit 1
+          fi
+          echo "All skills passed the SkillSpector scan."

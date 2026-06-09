@@ -11,3 +11,6 @@ __pycache__/
 
 # Eval run artifacts
 eval/runs/
+
+# Behavioral matrix results
+eval/behavioral/results/

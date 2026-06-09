@@ -86,7 +86,7 @@ python scripts/setup_local_ai.py speech    # TTS + STT only
 python scripts/setup_local_ai.py all       # both (only if the user wants both)
 ```
 
-(Run from this skill's folder.) The script pulls only the selected group's
+The script pulls only the selected group's
 models and writes only that group's rule section. It is idempotent: re-running
 with the same group is a no-op apart from a healthcheck. To add a group later,
 re-run with the full set you want (e.g. `all`). Read the sections below for what
