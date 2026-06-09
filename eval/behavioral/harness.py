@@ -3,33 +3,37 @@
 A behavioral test runs a skill-driven prompt through the agent **once**, then
 asserts what the agent *should* and *should not* have done. Tests read like:
 
-    from harness import prompt, model_downloaded, file_is_png
+    from harness import claude
 
     def test_image_generation():
-        run = prompt("Use local AI, then generate an image of a cat to out.png.")
-        run.should(model_downloaded("SD-Turbo"))
-        run.should_not(model_newly_downloaded("kokoro-v1"))
-        run.should(file_is_png("out.png"))
-        run.should("the generated image actually depicts a cat")
+        with claude("sonnet", skill="local-ai-use") as agent:
+            run = agent.prompt("Use local AI, then generate a cat to out.png.")
 
-`should(...)` / `should_not(...)` accept either:
+            # Programmatic expectations (cheap, deterministic, fail fast).
+            run.logs_contains("local-ai-use")
+            run.workspace_contains("out.png")
 
-  * a natural-language string -> graded by an LLM judge over the captured
-    evidence (transcript, downloaded-model deltas, workspace files, ...), or
-  * a deterministic `Check` helper (model_downloaded, file_is_png, tool_used,
-    transcript_matches, ...) -> graded by inspecting real state.
+            # Natural-language expectations (graded by an LLM judge).
+            run.should("Download the SD-Turbo model")
+            run.should_not("Use the GenerateImage tool")
 
-Grading polarity lives in the verb: `should(x)` passes when x is true,
-`should_not(x)` passes when x is false. Each call records a result; the
-`conftest.py` finalizer prints a per-item table, writes a results JSON, and
-fails the test if any item failed.
+`claude(model, skill=...)` returns an `Agent` context manager. Entering it
+stages an isolated temp workspace (skill copied under
+`<tmp>/.claude/skills/<skill>/`); leaving it deletes that workspace. `prompt()`
+runs the agent once with tool permissions bypassed and returns a `Run`.
 
-The agent runs in an **isolated temp workspace** (skill staged under
-`<tmp>/.claude/skills/<skill>/`) with tool permissions bypassed, so the work
-actually happens and any AGENTS.md edits / generated assets stay out of the
-repo. Lemonade model *downloads* are global to the Lemonade install and are not
-isolated -- that is intentional, since "did the agent download model X?" is part
-of what we grade.
+Every assertion on `Run` raises `AssertionError` on failure (so the test fails
+at that line) and prints a `[PASS]`/`[FAIL]` line for visibility under `-s`:
+
+  * `logs_contains(text)` / `workspace_contains(path)` -- deterministic checks
+    against the captured transcript and the workspace files.
+  * `should(statement)` / `should_not(statement)` -- a natural-language claim
+    graded by an LLM judge over the captured evidence (transcript, downloaded
+    model deltas, workspace files); polarity lives in the verb.
+
+Lemonade model *downloads* are global to the Lemonade install and are not
+isolated -- that is intentional, since "did the agent download model X?" is
+part of what we grade.
 """
 
 from __future__ import annotations
@@ -44,27 +48,19 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 
 # Reuse the skill location + listing helpers from the existing eval harness.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from claude_eval import SKILLS_DIR, list_available_skills  # noqa: E402
 
-DEFAULT_SKILL = "local-ai-use"
+DEFAULT_SKILL = os.environ.get("BEHAVIORAL_SKILL", "local-ai-use")
 DEFAULT_MODEL = os.environ.get("BEHAVIORAL_MODEL", "sonnet")
 DEFAULT_EFFORT = os.environ.get("BEHAVIORAL_EFFORT", "high")
 DEFAULT_JUDGE_MODEL = os.environ.get("BEHAVIORAL_JUDGE_MODEL") or DEFAULT_MODEL
 
 LEMONADE_HOST = os.environ.get("LEMONADE_HOST", "127.0.0.1")
 LEMONADE_PORT = int(os.environ.get("LEMONADE_PORT", "13305"))
-
-PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-
-# Runs created during the currently-executing test. The conftest autouse fixture
-# resets this at setup and drains it (evaluate + report + assert) at teardown.
-_ACTIVE_RUNS: list["Run"] = []
 
 
 # --------------------------------------------------------------------------- #
@@ -76,16 +72,16 @@ def _http_get(url: str, timeout_s: float) -> tuple[int, bytes]:
         return r.status, r.read()
 
 
+def claude_available() -> bool:
+    return shutil.which("claude") is not None
+
+
 def lemonade_server_reachable(host: str = LEMONADE_HOST, port: int = LEMONADE_PORT) -> bool:
     try:
         status, _ = _http_get(f"http://{host}:{port}/api/v1/health", timeout_s=3.0)
         return status == 200
     except (urllib.error.URLError, OSError):
         return False
-
-
-def claude_available() -> bool:
-    return shutil.which("claude") is not None
 
 
 def lemonade_downloaded_models(host: str = LEMONADE_HOST, port: int = LEMONADE_PORT) -> set[str]:
@@ -113,16 +109,6 @@ def lemonade_downloaded_models(host: str = LEMONADE_HOST, port: int = LEMONADE_P
         pass
 
     return set()
-
-
-def _model_matches(target: str, models: set[str]) -> bool:
-    """Case-insensitive match of ``target`` against model IDs (exact or substring)."""
-    t = target.lower()
-    for m in models:
-        ml = m.lower()
-        if t == ml or t in ml or ml in t:
-            return True
-    return False
 
 
 # --------------------------------------------------------------------------- #
@@ -190,7 +176,7 @@ def _run_agent(
 
 
 # --------------------------------------------------------------------------- #
-# Transcript parsing + evidence                                               #
+# Transcript parsing                                                          #
 # --------------------------------------------------------------------------- #
 def _walk(obj, tool_uses, tool_results, texts) -> None:
     if isinstance(obj, dict):
@@ -224,147 +210,11 @@ def _list_workspace_files(workspace: Path) -> list[str]:
     return files
 
 
-@dataclass
-class Evidence:
-    workspace: Path
-    pre_models: set[str]
-    post_models: set[str]
-    new_models: set[str]
-    files: list[str]
-    agents_md_text: str
-    tool_names: set[str]
-    command_text: str
-    result_text: str
-    assistant_text: str
-
-
-def _build_evidence(
-    workspace: Path,
-    pre_models: set[str],
-    post_models: set[str],
-    events: list[dict],
-) -> Evidence:
-    tool_uses: list[tuple[str, str]] = []
-    tool_results: list[str] = []
-    texts: list[str] = []
-    for ev in events:
-        _walk(ev, tool_uses, tool_results, texts)
-
-    result_text = ""
-    for ev in events:
-        if ev.get("type") == "result" and isinstance(ev.get("result"), str):
-            result_text = ev["result"]
-
-    agents_md = workspace / "AGENTS.md"
-    # command_text is what the agent actually did (tool inputs + outputs) so the
-    # agent's prose ("I won't call DALL-E") doesn't create false signals.
-    command_text = "\n".join([inp for _, inp in tool_uses] + tool_results)
-    return Evidence(
-        workspace=workspace,
-        pre_models=pre_models,
-        post_models=post_models,
-        new_models=post_models - pre_models,
-        files=_list_workspace_files(workspace),
-        agents_md_text=agents_md.read_text(encoding="utf-8", errors="replace") if agents_md.is_file() else "",
-        tool_names={name for name, _ in tool_uses if name},
-        command_text=command_text,
-        result_text=result_text,
-        assistant_text="\n".join(texts),
-    )
-
-
 # --------------------------------------------------------------------------- #
-# Deterministic checks (positive predicates: True == "the thing is true")     #
+# LLM-judge                                                                   #
 # --------------------------------------------------------------------------- #
-@dataclass
-class Check:
-    """A deterministic expectation: ``fn(evidence) -> (observed_true, reason)``."""
-    description: str
-    fn: Callable[[Evidence], tuple[bool, str]]
-
-
-def model_downloaded(model: str) -> Check:
-    def fn(ev: Evidence) -> tuple[bool, str]:
-        ok = _model_matches(model, ev.post_models)
-        return ok, f"{model} {'present' if ok else 'absent'} in downloaded models"
-    return Check(f"model '{model}' is downloaded locally", fn)
-
-
-def model_newly_downloaded(model: str) -> Check:
-    def fn(ev: Evidence) -> tuple[bool, str]:
-        ok = _model_matches(model, ev.new_models)
-        return ok, (
-            f"{model} {'was' if ok else 'was not'} newly downloaded "
-            f"(new this run: {sorted(ev.new_models) or 'none'})"
-        )
-    return Check(f"model '{model}' was downloaded during the run", fn)
-
-
-def file_exists(path: str) -> Check:
-    def fn(ev: Evidence) -> tuple[bool, str]:
-        ok = (ev.workspace / path).is_file()
-        return ok, f"{path} {'exists' if ok else 'missing'}"
-    return Check(f"file '{path}' exists", fn)
-
-
-def file_is_png(path: str) -> Check:
-    def fn(ev: Evidence) -> tuple[bool, str]:
-        target = ev.workspace / path
-        if not target.is_file():
-            return False, f"{path} missing"
-        try:
-            head = target.read_bytes()[:8]
-        except OSError as exc:
-            return False, f"{path} unreadable: {exc}"
-        ok = head == PNG_MAGIC
-        return ok, f"{path} {'is a valid PNG' if ok else 'is not a PNG (bad magic bytes)'}"
-    return Check(f"file '{path}' is a valid PNG", fn)
-
-
-def agents_md_contains(text: str) -> Check:
-    def fn(ev: Evidence) -> tuple[bool, str]:
-        ok = text in ev.agents_md_text
-        return ok, f"AGENTS.md {'contains' if ok else 'missing'} '{text}'"
-    return Check(f"AGENTS.md contains '{text}'", fn)
-
-
-def tool_used(tool: str) -> Check:
-    def fn(ev: Evidence) -> tuple[bool, str]:
-        ok = any(tool.lower() == t.lower() for t in ev.tool_names)
-        return ok, (
-            f"tool '{tool}' {'was used' if ok else 'not used'} "
-            f"(tools seen: {sorted(ev.tool_names) or 'none'})"
-        )
-    return Check(f"tool '{tool}' was used", fn)
-
-
-def transcript_matches(pattern: str) -> Check:
-    def fn(ev: Evidence) -> tuple[bool, str]:
-        ok = re.search(pattern, ev.command_text, re.IGNORECASE) is not None
-        return ok, f"pattern /{pattern}/ {'found' if ok else 'not found'} in transcript commands"
-    return Check(f"transcript commands match /{pattern}/", fn)
-
-
-# --------------------------------------------------------------------------- #
-# LLM-judge fallback                                                          #
-# --------------------------------------------------------------------------- #
-def _evidence_summary(ev: Evidence, max_chars: int = 4000) -> str:
-    cmd = ev.command_text
-    if len(cmd) > max_chars:
-        cmd = cmd[:max_chars] + "\n...[truncated]..."
-    return (
-        f"Downloaded models before run: {sorted(ev.pre_models) or 'unknown'}\n"
-        f"Downloaded models after run:  {sorted(ev.post_models) or 'unknown'}\n"
-        f"Newly downloaded this run:    {sorted(ev.new_models) or 'none'}\n"
-        f"Files in workspace:           {ev.files or 'none'}\n"
-        f"Tools the agent used:         {sorted(ev.tool_names) or 'none'}\n"
-        f"--- Agent final message ---\n{ev.result_text[:1500]}\n"
-        f"--- Transcript commands/outputs (truncated) ---\n{cmd}\n"
-    )
-
-
-def _grade_with_llm(statement: str, ev: Evidence, judge_model: str | None) -> tuple[bool, str]:
-    """Ask a grader LLM whether ``statement`` is TRUE given the evidence.
+def _grade_with_llm(statement: str, run: "Run", judge_model: str | None) -> tuple[bool, str]:
+    """Ask a grader LLM whether ``statement`` is TRUE given the run's evidence.
 
     The grader may read files in the workspace (e.g. open out.png), so the
     workspace is added and tool permissions are bypassed for the grader too.
@@ -373,14 +223,25 @@ def _grade_with_llm(statement: str, ev: Evidence, judge_model: str | None) -> tu
     if not claude_bin:
         return False, "llm_judge skipped: 'claude' CLI not on PATH"
 
-    workspace = ev.workspace
+    cmd_text = run.command_text
+    if len(cmd_text) > 4000:
+        cmd_text = cmd_text[:4000] + "\n...[truncated]..."
+    evidence = (
+        f"Downloaded models before run: {sorted(run.pre_models) or 'unknown'}\n"
+        f"Downloaded models after run:  {sorted(run.post_models) or 'unknown'}\n"
+        f"Newly downloaded this run:    {sorted(run.new_models) or 'none'}\n"
+        f"Files in workspace:           {run.files or 'none'}\n"
+        f"Tools the agent used:         {sorted(run.tool_names) or 'none'}\n"
+        f"--- Agent final message ---\n{run.result_text[:1500]}\n"
+        f"--- Transcript commands/outputs (truncated) ---\n{cmd_text}\n"
+    )
     prompt_text = (
         "You are grading whether a coding agent's run satisfied a specific "
         "expectation. Decide if the following statement is TRUE based on the "
         "evidence and (if needed) by reading files in the provided workspace "
-        f"directory: {workspace}\n\n"
+        f"directory: {run.workspace}\n\n"
         f"STATEMENT TO EVALUATE:\n{statement}\n\n"
-        f"EVIDENCE:\n{_evidence_summary(ev)}\n\n"
+        f"EVIDENCE:\n{evidence}\n\n"
         "Respond with ONLY a single-line JSON object and nothing else: "
         '{"pass": true|false, "reason": "<one short sentence>"}'
     )
@@ -388,7 +249,7 @@ def _grade_with_llm(statement: str, ev: Evidence, judge_model: str | None) -> tu
         claude_bin, "-p", prompt_text,
         "--output-format", "json",
         "--dangerously-skip-permissions",
-        "--add-dir", str(workspace),
+        "--add-dir", str(run.workspace),
     ]
     if judge_model:
         cmd += ["--model", judge_model]
@@ -421,95 +282,150 @@ def _grade_with_llm(statement: str, ev: Evidence, judge_model: str | None) -> tu
 
 
 # --------------------------------------------------------------------------- #
-# Results + Run                                                               #
+# Run: the assertion surface                                                  #
 # --------------------------------------------------------------------------- #
-@dataclass
-class Result:
-    kind: str          # "should" | "should_not"
-    description: str
-    method: str        # "deterministic" | "llm_judge"
-    status: str        # "pass" | "fail"
-    reason: str
-
-
-@dataclass
 class Run:
-    prompt_text: str
-    skill: str
-    model: str | None
-    effort: str | None
-    judge_model: str | None
-    evidence: Evidence
-    wall_time_s: float
-    results: list[Result] = field(default_factory=list)
+    """The captured result of one agent run, with inline-asserting checks.
 
-    def _expect(self, kind: str, expectation: "str | Check") -> Result:
-        if isinstance(expectation, Check):
-            observed, reason = expectation.fn(self.evidence)
-            description, method = expectation.description, "deterministic"
-        else:
-            observed, reason = _grade_with_llm(expectation, self.evidence, self.judge_model)
-            description, method = expectation, "llm_judge"
+    Each check prints a ``[PASS]``/``[FAIL]`` line and raises ``AssertionError``
+    on failure, so the owning pytest test fails at that line.
+    """
 
-        # Polarity from the verb: should -> pass if true; should_not -> pass if false.
-        passed = observed if kind == "should" else (not observed)
-        result = Result(kind, description, method, "pass" if passed else "fail", reason)
-        self.results.append(result)
-        mark = "PASS" if passed else "FAIL"
-        print(f"  [{mark}] ({'judge' if method == 'llm_judge' else kind}) {description}: {reason}", flush=True)
-        return result
+    def __init__(
+        self,
+        *,
+        workspace: Path,
+        events: list[dict],
+        pre_models: set[str],
+        post_models: set[str],
+        wall_time_s: float,
+        judge_model: str | None,
+    ) -> None:
+        tool_uses: list[tuple[str, str]] = []
+        tool_results: list[str] = []
+        texts: list[str] = []
+        for ev in events:
+            _walk(ev, tool_uses, tool_results, texts)
 
-    def should(self, expectation: "str | Check") -> Result:
-        return self._expect("should", expectation)
+        result_text = ""
+        for ev in events:
+            if ev.get("type") == "result" and isinstance(ev.get("result"), str):
+                result_text = ev["result"]
 
-    def should_not(self, expectation: "str | Check") -> Result:
-        return self._expect("should_not", expectation)
+        self.workspace = workspace
+        self.wall_time_s = wall_time_s
+        self.judge_model = judge_model
 
-    def cleanup(self) -> None:
-        shutil.rmtree(self.evidence.workspace, ignore_errors=True)
+        self.pre_models = pre_models
+        self.post_models = post_models
+        self.new_models = post_models - pre_models
+
+        self.files = _list_workspace_files(workspace)
+        self.tool_names = {name for name, _ in tool_uses if name}
+        self.result_text = result_text
+        self.assistant_text = "\n".join(texts)
+
+        # `command_text` is what the agent actually did (tool inputs + outputs),
+        # used by the judge so the agent's prose ("I won't call DALL-E") cannot
+        # create false signals.
+        self.command_text = "\n".join([inp for _, inp in tool_uses] + tool_results)
+
+        # `logs` is the full raw transcript, searchable for skill activation,
+        # tool names, command strings, etc.
+        self.logs = "\n".join(json.dumps(ev, ensure_ascii=False) for ev in events)
+
+    # -- deterministic checks ------------------------------------------------ #
+    def logs_contains(self, text: str) -> "Run":
+        ok = text.lower() in self.logs.lower()
+        self._report(ok, "logs_contains", f"transcript contains '{text}'")
+        return self
+
+    def workspace_contains(self, path: str) -> "Run":
+        ok = (self.workspace / path).is_file()
+        detail = f"workspace contains '{path}'"
+        if not ok:
+            detail += f" (files: {self.files or 'none'})"
+        self._report(ok, "workspace_contains", detail)
+        return self
+
+    # -- LLM-judged checks --------------------------------------------------- #
+    def should(self, statement: str) -> "Run":
+        observed, reason = _grade_with_llm(statement, self, self.judge_model)
+        self._report(observed, "should", f"{statement} -- {reason}")
+        return self
+
+    def should_not(self, statement: str) -> "Run":
+        observed, reason = _grade_with_llm(statement, self, self.judge_model)
+        self._report(not observed, "should_not", f"{statement} -- {reason}")
+        return self
+
+    # -- internals ----------------------------------------------------------- #
+    def _report(self, passed: bool, kind: str, detail: str) -> None:
+        print(f"  [{'PASS' if passed else 'FAIL'}] ({kind}) {detail}", flush=True)
+        assert passed, f"({kind}) {detail}"
 
 
-def prompt(
-    text: str,
+# --------------------------------------------------------------------------- #
+# Agent: the context manager that owns an isolated workspace                  #
+# --------------------------------------------------------------------------- #
+class Agent:
+    """A single agent session bound to an isolated, skill-staged workspace.
+
+    Use as a context manager so the temp workspace is always cleaned up::
+
+        with claude("sonnet", skill="local-ai-use") as agent:
+            run = agent.prompt("...")
+    """
+
+    def __init__(
+        self,
+        model: str | None = DEFAULT_MODEL,
+        *,
+        skill: str = DEFAULT_SKILL,
+        effort: str | None = DEFAULT_EFFORT,
+        judge_model: str | None = DEFAULT_JUDGE_MODEL,
+    ) -> None:
+        self.model = model
+        self.skill = skill
+        self.effort = effort
+        self.judge_model = judge_model
+        self.workspace: Path | None = None
+
+    def __enter__(self) -> "Agent":
+        self.workspace = _stage_workspace(self.skill)
+        return self
+
+    def __exit__(self, *exc) -> None:
+        if self.workspace is not None:
+            shutil.rmtree(self.workspace, ignore_errors=True)
+            self.workspace = None
+
+    def prompt(self, text: str) -> Run:
+        """Run ``text`` through the agent once and return a Run to assert on."""
+        if self.workspace is None:
+            raise RuntimeError("Agent.prompt() must be called inside a 'with' block")
+
+        print(f"\n[behavioral] skill='{self.skill}' model='{self.model}': {text}", flush=True)
+        pre_models = lemonade_downloaded_models()
+        wall_s, events = _run_agent(text, self.workspace, self.model, self.effort)
+        post_models = lemonade_downloaded_models()
+
+        return Run(
+            workspace=self.workspace,
+            events=events,
+            pre_models=pre_models,
+            post_models=post_models,
+            wall_time_s=wall_s,
+            judge_model=self.judge_model,
+        )
+
+
+def claude(
+    model: str | None = DEFAULT_MODEL,
     *,
     skill: str = DEFAULT_SKILL,
-    model: str | None = DEFAULT_MODEL,
     effort: str | None = DEFAULT_EFFORT,
     judge_model: str | None = DEFAULT_JUDGE_MODEL,
-) -> Run:
-    """Run ``text`` through the agent once with ``skill`` staged, return a Run.
-
-    Snapshots downloaded models before/after, executes in an isolated workspace,
-    and captures evidence. The returned Run is registered for the current test;
-    the conftest finalizer evaluates its expectations, reports, and cleans up.
-    """
-    print(f"\n[behavioral] running skill='{skill}' model='{model}': {text}", flush=True)
-    pre_models = lemonade_downloaded_models()
-    workspace = _stage_workspace(skill)
-    try:
-        wall_s, events = _run_agent(text, workspace, model, effort)
-    except BaseException:
-        shutil.rmtree(workspace, ignore_errors=True)
-        raise
-    post_models = lemonade_downloaded_models()
-    evidence = _build_evidence(workspace, pre_models, post_models, events)
-
-    run = Run(
-        prompt_text=text, skill=skill, model=model, effort=effort,
-        judge_model=judge_model, evidence=evidence, wall_time_s=wall_s,
-    )
-    _ACTIVE_RUNS.append(run)
-    return run
-
-
-# --------------------------------------------------------------------------- #
-# Registry helpers (used by conftest)                                         #
-# --------------------------------------------------------------------------- #
-def reset_runs() -> None:
-    _ACTIVE_RUNS.clear()
-
-
-def drain_runs() -> list[Run]:
-    runs = list(_ACTIVE_RUNS)
-    _ACTIVE_RUNS.clear()
-    return runs
+) -> Agent:
+    """Factory for a Claude-backed `Agent` (the only agent backend today)."""
+    return Agent(model, skill=skill, effort=effort, judge_model=judge_model)
