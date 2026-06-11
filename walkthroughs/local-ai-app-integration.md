@@ -21,7 +21,7 @@ cd dictate
 
 ## Step 2 - Understanding which skills are available
 
-* Run `claude "Which skills can you see?" --model sonnet`. You should see a list of skills that should *not* include anything related to local AI app integration.
+* Run `claude "Which skills can you see?" --model opus`. You should see a list of skills that should *not* include anything related to local AI app integration.
 
 ## Step 3 - Enabling claude to see `local-ai-app-integration`
 
@@ -29,11 +29,11 @@ In the future this will be enabled directly through claude's marketplace. For no
 
 * Clone `https://github.com/amd/skills`
 * Move the `local-ai-app-integration` skill from the repo to `.claude/skills/`
-* Run `claude "Which skills can you see?" --model sonnet`. You should see a list of skills that includes `local-ai-app-integration`.
+* Run `claude "Which skills can you see?" --model opus`. You should see a list of skills that includes `local-ai-app-integration`.
 
 ## Step 4 - Running the skill
 
-Open Claude inside the `dictate` repo and run the prompt:
+Run `claude --model opus` inside the `dictate` repo run the prompt:
 
 ```
 This app sends my dictation audio to cloud speech-to-text providers.
