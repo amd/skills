@@ -13,7 +13,6 @@
     "rocm",
     "hip",
     "ryzen-ai",
-    "migraphx",
     "vllm",
     "lemonade",
     "local-ai"

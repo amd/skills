@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Regenerate every committed artifact derived from skills/ and the
-# Claude plugin manifest.
+# canonical marketplace + metadata sources.
 #
 # Usage:
 #   ./scripts/publish.sh            Regenerate all derived artifacts.
@@ -8,12 +8,13 @@
 #   ./scripts/publish.sh -h|--help  Print this help.
 #
 # Currently regenerates:
-#   - .cursor-plugin/plugin.json    (from .claude-plugin/plugin.json + skills/)
+#   - .cursor-plugin/marketplace.json   (mirror of .claude-plugin/marketplace.json
+#                                        + plugin-metadata.json)
 #
-# `.claude-plugin/marketplace.json` and `.cursor-plugin/marketplace.json`
-# are hand-maintained because their human-facing descriptions intentionally
-# differ from the SKILL.md routing descriptions; ./scripts/check.sh enforces
-# that the marketplace listing matches skills/ on disk.
+# `.claude-plugin/marketplace.json` is hand-maintained because its
+# human-facing plugin descriptions intentionally differ from the SKILL.md
+# routing descriptions; ./scripts/check.sh enforces that the marketplace
+# listing matches skills/ on disk.
 #
 # Requires `uv` (https://github.com/astral-sh/uv).
 
@@ -28,11 +29,11 @@ usage() {
 
 case "${1:-}" in
   "")
-    uv run scripts/generate_cursor_plugin.py
+    uv run scripts/generate_cursor_marketplace.py
     echo "Publish artifacts generated successfully."
     ;;
   --check)
-    uv run scripts/generate_cursor_plugin.py --check
+    uv run scripts/generate_cursor_marketplace.py --check
     ;;
   -h|--help)
     usage

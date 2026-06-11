@@ -380,7 +380,6 @@ def update_marketplace(results: Iterable[ImportResult], dry_run: bool) -> bool:
         expected = {
             "name": name,
             "source": f"./skills/{name}",
-            "skills": "./",
             "description": result.marketplace_description,
         }
         if entry is None:
@@ -388,6 +387,12 @@ def update_marketplace(results: Iterable[ImportResult], dry_run: bool) -> bool:
             by_name[name] = expected
             changed = True
             continue
+        # Drop the legacy `skills` key: each skill directory ships its
+        # SKILL.md at the plugin root, so a single-skill plugin auto-loads
+        # without an explicit skills path.
+        if "skills" in entry:
+            del entry["skills"]
+            changed = True
         for key, value in expected.items():
             if entry.get(key) != value:
                 entry[key] = value

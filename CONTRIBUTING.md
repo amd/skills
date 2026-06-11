@@ -20,7 +20,7 @@ Best for cross-cutting skills that do not have a natural product home.
 4. Register the skill in `.claude-plugin/marketplace.json` with a human-readable description (the marketplace description is for humans browsing the catalog; the `SKILL.md` description is what the agent uses for routing).
 5. Regenerate the Cursor manifest so it tracks the new skill:
    ```bash
-   ./scripts/publish.sh   # writes .cursor-plugin/plugin.json
+   ./scripts/publish.sh   # writes .cursor-plugin/marketplace.json
    ```
 6. Validate the skill locally before pushing:
    ```bash
@@ -202,4 +202,4 @@ The validator checks every skill under `skills/` for:
 It also checks the plugin manifests:
 
 - every skill under `skills/` has a matching entry in `.claude-plugin/marketplace.json` (and vice versa), with `source` set to `./skills/<name>` and a non-empty human-readable `description`
-- `.cursor-plugin/plugin.json` is up to date with `.claude-plugin/plugin.json` and the discovered skills (regenerate with `./scripts/publish.sh`)
+- `.cursor-plugin/marketplace.json` is up to date — it mirrors `.claude-plugin/marketplace.json` and pulls shared identity (name, description, version, author) from `plugin-metadata.json` (regenerate with `./scripts/publish.sh`)

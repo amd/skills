@@ -51,9 +51,9 @@ jobs:
             uv run scripts/import_external_skills.py
           fi
 
-      - name: Regenerate Cursor plugin manifest
+      - name: Regenerate Cursor marketplace manifest
         if: ${{ inputs.dry_run != true }}
-        run: uv run scripts/generate_cursor_plugin.py
+        run: uv run scripts/generate_cursor_marketplace.py
 
       - name: Validate skills and manifests
         if: ${{ inputs.dry_run != true }}
