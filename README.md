@@ -128,8 +128,9 @@ This repo also acts as an **incubator**: a skill can start under `skills/` to it
 
 ```
 skills/                  # All skills the agent can load (in-repo + vendored copies of federated)
-.cursor-plugin/          # Cursor plugin manifest
-.claude-plugin/          # Claude Code marketplace manifest
+.claude-plugin/          # Claude Code marketplace manifest (one installable plugin per skill)
+.cursor-plugin/          # Cursor marketplace manifest (generated mirror of the Claude catalog)
+plugin-metadata.json     # Shared, vendor-neutral identity/discovery metadata for all manifests
 .github/workflows/       # CI for validating skills and the `import-external-skills` workflow
 scripts/                 # Tooling for publishing, regenerating manifests, and importing
 scripts/sources.yml      # Master list of external skill sources for federation
@@ -149,7 +150,7 @@ AMD Skills are compatible with Cursor, Claude Code, OpenAI Codex, and Gemini CLI
 
 ### Cursor
 
-Install the AMD plugin from this repository through the Cursor plugin flow. The repo ships a `.cursor-plugin/plugin.json` so skills are discoverable as soon as the plugin is enabled.
+Add this repository as a plugin marketplace through the Cursor plugin flow, then enable the skills you want. The repo ships a `.cursor-plugin/marketplace.json` that lists every skill as its own installable plugin, mirroring the Claude Code catalog.
 
 ### Claude Code
 

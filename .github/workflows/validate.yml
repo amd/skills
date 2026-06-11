@@ -71,7 +71,7 @@ jobs:
         run: uv run scripts/validate_skills.py --marketplace-only
 
       - name: Validate generated Cursor manifest
-        run: uv run scripts/generate_cursor_plugin.py --check
+        run: uv run scripts/generate_cursor_marketplace.py --check
 
       # Deterministic, offline-only reference check: relative paths and
       # heading anchors. External URLs are intentionally not checked here

@@ -3,16 +3,36 @@
   "owner": {
     "name": "AMD"
   },
+  "description": "Agent Skills for AMD-optimized workflows.",
   "metadata": {
     "description": "Agent Skills for AMD-optimized workflows.",
     "version": "0.1.0"
   },
   "plugins": [
     {
-      "name": "amd-skills",
-      "source": ".",
-      "skills": "skills",
-      "description": "Agent Skills for AMD-optimized workflows."
+      "name": "apu-memory-tuner",
+      "source": "./skills/apu-memory-tuner",
+      "description": "Inspect and tune the shared-vs-dedicated memory split (GTT / UMA Frame Buffer) on AMD Ryzen APUs so larger LLMs and image models fit on the iGPU."
+    },
+    {
+      "name": "local-ai-app-integration",
+      "source": "./skills/local-ai-app-integration",
+      "description": "Integrate local AI into cloud LLM apps for offline support, better privacy, and lower API costs."
+    },
+    {
+      "name": "local-ai-use",
+      "source": "./skills/local-ai-use",
+      "description": "Route image generation, text-to-speech, and speech-to-text through a local AI Server to reduce token/cost usage."
+    },
+    {
+      "name": "magpie",
+      "source": "./skills/magpie",
+      "description": "Performs GPU kernel correctness and performance evaluation and LLM inference benchmarking with Magpie. Analyzes single or multiple kernels (HIP/CUDA/PyTorch), compares kernel implementations, runs vLLM/SGLang benchmarks with profiling and TraceLens, and runs gap analysis on torch traces."
+    },
+    {
+      "name": "rocm-doctor",
+      "source": "./skills/rocm-doctor",
+      "description": "Diagnose why ROCm, PyTorch, or llama.cpp isn't working on an AMD GPU. Matches the symptom against a fixed list of twelve known misconfigurations and proposes the next step."
     }
   ]
 }
