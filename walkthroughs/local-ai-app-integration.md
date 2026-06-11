@@ -10,6 +10,8 @@ speech-to-text providers (Groq, Deepgram, Cartesia, Gemini, Mistral, etc.).
 ## Prerequiresites
 This sample app used here requires the Rust toolchain (install from https://rustup.rs/).
 
+Because this walkthrough runs transcription on the NPU, you need a Ryzen AI PC with an XDNA2 NPU (Strix, Strix Halo, Kraken, or Gorgon Point) running Windows.
+
 ## Step 1 - Get the target app
 
 * Clone the cloud-only app you want to upgrade:
