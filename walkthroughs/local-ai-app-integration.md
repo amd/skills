@@ -59,8 +59,7 @@ Dictate is a Tauri (Rust + Node) app. From the repo root:
 npm install
 npm run tauri dev
 ```
-Once the window opens, press `Ctrl+Shift+D`, speak, and confirm transcription now runs through
-your local device instead of a cloud provider.
+Once the window opens, press the microphone button to speak, and confirm that transcription is now running through your local device instead of a cloud provider. The transcribed text should appear where your cursor was last located.
 
 ## Step 6 - (Optional) Going beyond
 
