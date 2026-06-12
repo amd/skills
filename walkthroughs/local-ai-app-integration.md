@@ -40,16 +40,18 @@ Run `claude --model opus` inside the `dictate` repo run the prompt:
 ```
 This app sends my dictation audio to cloud speech-to-text providers.
 Add a local AI mode that runs transcription on my machine instead by default.
-I want it to run using the NPU. Keep the cloud providers as an option.
+I want it to run using the NPU. Keep the cloud providers as an option and minimize code changes.
 ```
 
 Claude should:
 
 1. Survey where the app calls its cloud transcription APIs.
-2. Pick a local speech-to-text model + backend (e.g. `Whisper-Large-v3-Turbo` on `whispercpp`).
+2. Pick a local speech-to-text model + backend (e.g. `whisper-v3-turbo-FLM` using the `FLM` NPU backend).
 3. Vendor the Embeddable Lemonade (`lemond`) binary into the app tree.
-4. Add a launcher that spawns `lemond` with a fresh API key on a free port.
+4. Add a launcher that spawns `lemond` on a free port.
 5. Re-point the app's existing client at the local endpoint and wait for `/v1/health`.
+
+Please note this may take several minutes as this app has a fairly large codebase.
 
 ## Step 5 - Running the modified app
 
