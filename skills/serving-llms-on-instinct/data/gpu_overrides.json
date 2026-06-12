@@ -1,0 +1,147 @@
+{
+  "docker_flags": [
+    "--group-add=video",
+    "--group-add=render",
+    "--cap-add=SYS_PTRACE",
+    "--security-opt seccomp=unconfined",
+    "--device /dev/kfd",
+    "--device /dev/dri",
+    "--ipc=host"
+  ],
+  "gpu_configs": {
+    "gfx950": {
+      "gpu_family": "AMD Instinct MI350X / MI355X",
+      "vram_gb": 288,
+      "env_defaults": {
+        "VLLM_ROCM_USE_AITER": "1",
+        "VLLM_ROCM_USE_AITER_FP4BMM": "1"
+      },
+      "precision": {
+        "native": ["bf16", "fp16", "fp8_ocp", "int8", "mxfp4", "mxfp6"],
+        "emulated": ["fp8_fnuz"],
+        "unsupported": ["nvfp4"],
+        "notes": "MXFP4/MXFP6 are hardware-native on gfx950. FP8 uses OCP (E4M3FN) standard, not FNUZ. NVFP4 is NVIDIA-specific and will not load on ROCm."
+      },
+      "workarounds": []
+    },
+    "gfx942": {
+      "gpu_family": "AMD Instinct MI300X / MI325X / MI300A",
+      "vram_gb_note": "Varies: MI300X=192, MI325X=256, MI300A=128. Use detect.py vram_gb for actual value.",
+      "vram_gb": 192,
+      "env_defaults": {
+        "VLLM_ROCM_USE_AITER": "1",
+        "VLLM_ROCM_USE_AITER_FP4BMM": "0"
+      },
+      "precision": {
+        "native": ["bf16", "fp16", "fp8_fnuz", "int8"],
+        "emulated": ["mxfp4", "mxfp6"],
+        "unsupported": ["nvfp4"],
+        "notes": "FP8 uses FNUZ (E4M3FNUZ) dialect, not OCP. vLLM auto-converts OCP checkpoints. MXFP4/MXFP6 compute is emulated (dequant to BF16 during matmul), but weights stay compressed in VRAM. NVFP4 is NVIDIA-specific and will not load on ROCm."
+      },
+      "workarounds": [
+        {"id": "vllm-34641", "description": "FP4BMM=0 mandatory on gfx942 (MI300X crash bug)"}
+      ]
+    }
+  },
+  "legacy_models": {
+    "Qwen/Qwen3-0.6B": {
+      "vram_fp16_gb": 2, "min_tp": 1,
+      "tool_call_parser": "hermes",
+      "env_vars": {}, "vllm_args": []
+    },
+    "Qwen/Qwen3-1.7B": {
+      "vram_fp16_gb": 4, "min_tp": 1,
+      "tool_call_parser": "hermes",
+      "env_vars": {}, "vllm_args": []
+    },
+    "Qwen/Qwen3-4B": {
+      "vram_fp16_gb": 9, "min_tp": 1,
+      "tool_call_parser": "hermes",
+      "env_vars": {}, "vllm_args": []
+    },
+    "Qwen/Qwen3-8B": {
+      "vram_fp16_gb": 18, "min_tp": 1,
+      "tool_call_parser": "hermes",
+      "env_vars": {}, "vllm_args": []
+    },
+    "Qwen/Qwen3-14B": {
+      "vram_fp16_gb": 30, "min_tp": 1,
+      "tool_call_parser": "hermes",
+      "env_vars": {}, "vllm_args": []
+    },
+    "Qwen/Qwen3-32B": {
+      "vram_fp16_gb": 66, "min_tp": 1,
+      "tool_call_parser": "hermes",
+      "env_vars": {}, "vllm_args": []
+    },
+    "Qwen/Qwen3-72B": {
+      "vram_fp16_gb": 148, "min_tp": 1,
+      "tool_call_parser": "hermes",
+      "env_vars": {}, "vllm_args": []
+    },
+    "Qwen/Qwen3-235B-A22B": {
+      "vram_fp16_gb": 564, "min_tp": 4,
+      "tool_call_parser": "hermes", "reasoning_parser": "qwen3",
+      "env_vars": {
+        "VLLM_USE_V1": "1",
+        "VLLM_ROCM_USE_AITER_MHA": "0",
+        "VLLM_V1_USE_PREFILL_DECODE_ATTENTION": "1",
+        "VLLM_USE_TRITON_FLASH_ATTN": "0",
+        "SAFETENSORS_FAST_GPU": "1"
+      },
+      "vllm_args": [
+        "--distributed-executor-backend mp",
+        "--max-num-batched-tokens 32768",
+        "--max-model-len 32768",
+        "--no-enable-prefix-caching",
+        "--gpu-memory-utilization 0.8",
+        "--swap-space 32"
+      ]
+    },
+    "Qwen/Qwen3-VL-7B-Instruct": {
+      "vram_fp16_gb": 18, "min_tp": 1,
+      "tool_call_parser": "hermes",
+      "env_vars": {
+        "MIOPEN_USER_DB_PATH": "$(pwd)/miopen",
+        "MIOPEN_FIND_MODE": "FAST",
+        "SAFETENSORS_FAST_GPU": "1"
+      },
+      "vllm_args": ["--mm-encoder-tp-mode data"]
+    },
+    "Qwen/Qwen3-VL-32B-Instruct": {
+      "vram_fp16_gb": 70, "min_tp": 1,
+      "tool_call_parser": "hermes",
+      "env_vars": {
+        "MIOPEN_USER_DB_PATH": "$(pwd)/miopen",
+        "MIOPEN_FIND_MODE": "FAST",
+        "SAFETENSORS_FAST_GPU": "1"
+      },
+      "vllm_args": ["--mm-encoder-tp-mode data"]
+    },
+    "Qwen/Qwen2.5-VL-7B-Instruct": {
+      "vram_fp16_gb": 18, "min_tp": 1,
+      "tool_call_parser": "hermes",
+      "env_vars": {}, "vllm_args": ["--mm-encoder-tp-mode data"]
+    },
+    "google/gemma-4-2B-it": {
+      "vram_fp16_gb": 5, "min_tp": 1,
+      "tool_call_parser": "hermes",
+      "env_vars": {}, "vllm_args": []
+    },
+    "google/gemma-4-4B-it": {
+      "vram_fp16_gb": 9, "min_tp": 1,
+      "tool_call_parser": "hermes",
+      "env_vars": {}, "vllm_args": []
+    },
+    "google/gemma-4-27B-it": {
+      "vram_fp16_gb": 56, "min_tp": 1,
+      "tool_call_parser": "hermes",
+      "env_vars": {}, "vllm_args": []
+    },
+    "google/gemma-4-31B-it": {
+      "vram_fp16_gb": 64, "min_tp": 1,
+      "tool_call_parser": "hermes",
+      "env_vars": {}, "vllm_args": []
+    }
+  }
+}

@@ -33,6 +33,11 @@
       "name": "rocm-doctor",
       "source": "./skills/rocm-doctor",
       "description": "Diagnose why ROCm, PyTorch, or llama.cpp isn't working on an AMD GPU. Matches the symptom against a fixed list of twelve known misconfigurations and proposes the next step."
+    },
+    {
+      "name": "serving-llms-on-instinct",
+      "source": "./skills/serving-llms-on-instinct",
+      "description": "Serve LLMs on AMD Instinct GPUs (MI300X/MI325X/MI350X/MI355X) with vLLM on ROCm. Handles GPU detection, environment validation, vLLM configuration, launch, and health verification."
     }
   ]
 }

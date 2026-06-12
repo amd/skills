@@ -1,0 +1,59 @@
+{
+  "_comment": "Models in vLLM recipes that cannot be served as LLM endpoints on AMD Instinct. The agent should refuse these and explain why.",
+
+  "not_an_llm": {
+    "_comment": "Non-LLM models: diffusion, image gen, audio gen, embeddings, rerankers. These are not chat/completion endpoints.",
+    "models": [
+      "stabilityai/stable-diffusion-3.5-medium",
+      "stabilityai/stable-audio-open-1.0",
+      "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+      "Wan-AI/Wan2.2-T2V-A14B",
+      "Qwen/Qwen-Image",
+      "zai-org/GLM-Image",
+      "zai-org/Glyph",
+      "meituan-longcat/LongCat-Image-Edit",
+      "jinaai/jina-embeddings-v5-text-small",
+      "jinaai/jina-reranker-m0",
+      "black-forest-labs/FLUX.1-dev",
+      "black-forest-labs/FLUX.2-dev",
+      "black-forest-labs/FLUX.2-klein-9B",
+      "Tongyi-MAI/Z-Image-Turbo",
+      "openai/whisper-large-v3-turbo",
+      "neuphonic/neutts-air"
+    ]
+  },
+
+  "needs_audio_pipeline": {
+    "_comment": "Models that require audio input/output streaming. vLLM can load them but they need a specialized audio pipeline, not a standard chat endpoint.",
+    "models": [
+      "Qwen/Qwen3-ASR-1.7B",
+      "zai-org/GLM-ASR-Nano-2512",
+      "mistralai/Voxtral-Mini-4B-Realtime-2602",
+      "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16"
+    ]
+  },
+
+  "needs_vllm_nightly": {
+    "_comment": "Models that require unreleased vLLM nightly. Will break on any stable Docker image. Re-check when vLLM cuts a new release.",
+    "models": [
+      "internlm/Intern-S2-Preview",
+      "mistralai/Mistral-Medium-3.5-128B",
+      "poolside/Laguna-XS.2",
+      "stepfun-ai/Step-3.7-Flash"
+    ]
+  },
+
+  "translation_only": {
+    "_comment": "Translation-only models with no chat or tool-calling support.",
+    "models": [
+      "Google/translategemma-27b-it"
+    ]
+  },
+
+  "incompatible_weights": {
+    "_comment": "Models whose weight naming or architecture is incompatible with current vLLM stable (v0.22.0). Crashes during weight loading.",
+    "models": [
+      "thu-pacman/PCMind-2.1-Kaiyuan-2B"
+    ]
+  }
+}
