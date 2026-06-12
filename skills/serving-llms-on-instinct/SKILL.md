@@ -267,10 +267,27 @@ curl -s http://localhost:<port>/v1/chat/completions \
   -d '{"model":"<model_id>","messages":[{"role":"user","content":"say hi"}],"max_tokens":5}'
 ```
 
-Return to the user:
-- `base_url`: `http://<host>:8000/v1`
-- `api_key`: none required for local
-- `model`: the model ID used
+After the warmup succeeds, present a connection table so the user can call
+the endpoint immediately:
+
+| Field | Value |
+|-------|-------|
+| Model | `<model_id>` |
+| Served model name | `<served-model-name or model_id>` |
+| Base URL | `http://<host>:<port>/v1` |
+| API key | none (local) |
+| Port | `<port>` |
+| Tensor parallel | `<tp>` |
+| Max context | `<context>` |
+| GPU | `<detected GPU>` |
+
+Then give a ready-to-run example using those exact values:
+
+```bash
+curl -s http://<host>:<port>/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"<model_id>","messages":[{"role":"user","content":"Hello"}]}'
+```
 
 ## Remote vs. local
 
