@@ -39,18 +39,16 @@ hardware-optimized one at first run after a system probe.
 | `flm` | `npu` | XDNA2 NPU | Cannot be packaging-time bundled on Linux. |
 | `ryzenai-llm` | `npu` | XDNA2 NPU | Windows only. Best for the Hybrid model family. |
 
-### Speech-to-text (`whispercpp`)
+### Speech-to-text
 
-| Backend | Hardware | OS |
-|---|---|---|
-| `npu` | XDNA2 NPU | Windows |
-| `vulkan` | x86_64 CPU | Linux |
-| `cpu` | x86_64 CPU | Windows, Linux |
+Two NPU paths exist. **Prefer `flm` for NPU**.
 
-### Speech-to-text on NPU (`flm` recipe)
-
-For NPU-accelerated transcription on Ryzen AI, use the `flm` (FastFlowLM)
-recipe with `whisper-v3-turbo-FLM`. XDNA2 NPU, Windows only.
+| Recipe | Backend | Model | Hardware | OS |
+|---|---|---|---|---|
+| `flm` | `npu` | `whisper-v3-turbo-FLM` | XDNA2 NPU | Windows |
+| `whispercpp` | `cpu` | `Whisper-Large-v3-Turbo` | x86_64 CPU | Windows, Linux |
+| `whispercpp` | `vulkan` | `Whisper-Large-v3-Turbo` | x86_64 CPU | Linux |
+| `whispercpp` | `npu` | `.rai`-cached whisper model | XDNA2 NPU | Windows (avoid) |
 
 ### Text-to-speech
 
@@ -199,7 +197,7 @@ hand-editing `config.json`, or at runtime via `POST /internal/set`.
 | `llamacpp_backend` | string | Pin to `rocm` / `vulkan` / `cpu` / `metal`; leave unset for auto |
 | `llamacpp_args` | string | Raw args appended to `llama-server` |
 | `sdcpp_backend` | string | `rocm` / `cpu` |
-| `whispercpp_backend` | string | `npu` / `vulkan` / `cpu` |
+| `whispercpp_backend` | string | `npu`/`cpu` (Windows), `cpu`/`vulkan` (Linux). For NPU prefer the `flm` recipe instead |
 | `whispercpp_args` | string | Raw whisper.cpp args |
 | `flm_args` | string | Raw FastFlowLM args |
 | `steps` | int | SD step count |
