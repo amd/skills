@@ -98,7 +98,7 @@ unset. Override only if the app has hard hardware requirements.
 
 For more options and tradeoffs, see [reference.md](reference.md).
 
-## Step 3: Place Embeddable Lemonade in the app's tree
+## Step 3: Place Embeddable Lemonade in the app's tree and install backends
 
 Get the embeddable artifact from the latest Lemonade release:
 
@@ -136,9 +136,11 @@ vendor/lemonade/
   private to the app. Leave as `auto` only if the user explicitly wants to
   share weights with other apps.
 
-Strip what you don't ship: delete the `lemonade` CLI and
-`resources/defaults.json` from the shipping artifact once `config.json` is
-initialized.
+**Install the backend before running any model.** Right after placing
+`lemond`, install the backend your chosen recipe needs — a model won't load
+without it. Use the CLI at packaging time, e.g. `lemonade backends install
+flm:npu` (or `llamacpp:vulkan`, `sd-cpp:cpu`, etc.), or `POST /v1/install`
+at first run for hardware-specific backends like `llamacpp:rocm`.
 
 ## Step 4: Add a `lemond` launcher
 
