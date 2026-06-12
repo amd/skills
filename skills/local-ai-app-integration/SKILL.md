@@ -84,7 +84,7 @@ it.
 | Vision / multimodal chat | `Gemma-4-E2B-it-GGUF` | `llamacpp` | Small multimodal default |
 | NPU-first on Ryzen AI | `Llama-3.2-3B-Instruct-Hybrid` | `ryzenai-llm` | XDNA2 NPU on Windows |
 | CPU Speech-to-text | `Whisper-Large-v3-Turbo` | `whispercpp` | Best quality/speed |
-| NPU speech-to-text | `whisper-v3-turbo-FLM` | `flm` | XDNA2 NPU on Windows; `flm` must also load an LLM alongside ASR |
+| NPU speech-to-text | `whisper-v3-turbo-FLM` | `flm` | XDNA2 NPU on Windows |
 | Text-to-speech | `kokoro-v1` | `kokoro` | CPU-only, low latency |
 | Image generation | `SDXL-Turbo` | `sd-cpp` | Single-step generation |
 
