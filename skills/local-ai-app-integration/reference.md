@@ -12,7 +12,6 @@ by the default-path tables.
 - [Endpoint reference](#endpoint-reference)
 - [Config keys you may need to set](#config-keys-you-may-need-to-set)
 - [Per-model tuning via recipe_options.json](#per-model-tuning-via-recipe_optionsjson)
-- [Trimming the bundled artifact](#trimming-the-bundled-artifact)
 - [Linux packaging notes](#linux-packaging-notes)
 
 ---
