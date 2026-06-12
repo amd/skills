@@ -88,7 +88,9 @@ ship a default and document how to override.
 For a catalog with more models, fetch `GET /v1/models` after starting `lemond`.
 This is the **only** trusted source of available models. Never read or trust
 `vendor/lemonade/resources/server_models.json` (or any other static file) as a
-model catalog; it can be stale or incomplete.
+model catalog; it can be stale or incomplete. A model only appears in
+`GET /v1/models` once its backend is installed (see Step 3), so install the
+backend first or the list will look empty/incomplete.
 
 ---
 
