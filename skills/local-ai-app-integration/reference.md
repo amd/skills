@@ -81,12 +81,14 @@ ship a default and document how to override.
 | Multimodal (vision) chat | `Gemma-4-E2B-it-GGUF` | 2.0 GB | `llamacpp` |
 | Hybrid NPU chat (Ryzen AI) | `Llama-3.2-3B-Instruct-Hybrid` | 2.0 GB | `ryzenai-llm` |
 | Speech-to-text | `Whisper-Large-v3-Turbo` | 1.6 GB | `whispercpp` |
-| NPU speech-to-text (Ryzen AI) | `whisper-v3-turbo-FLM` | 0.6 GB | `flm` (needs a concurrent LLM) |
+| NPU speech-to-text (Ryzen AI) | `whisper-v3-turbo-FLM` | 0.6 GB | `flm` |
 | Text-to-speech | `kokoro-v1` | 0.3 GB | `kokoro` |
 | Image generation | `SDXL-Turbo` | 6.9 GB | `sd-cpp` |
 
-For the full catalog, fetch `GET /v1/models` after starting `lemond`, or
-read `vendor/lemonade/resources/server_models.json`.
+For a catalog with more models, fetch `GET /v1/models` after starting `lemond`.
+This is the **only** trusted source of available models. Never read or trust
+`vendor/lemonade/resources/server_models.json` (or any other static file) as a
+model catalog; it can be stale or incomplete.
 
 ---
 
@@ -141,7 +143,7 @@ All endpoints require `Authorization: Bearer {key}` when
 | Endpoint | Purpose |
 |---|---|
 | `GET  /api/v1/health` | Readiness probe and loaded-model list |
-| `GET  /api/v1/models` | List available models (filtered by `server_models.json`) |
+| `GET  /api/v1/models` | List available models |
 | `POST /api/v1/chat/completions` | OpenAI Chat Completions (text + vision + tool calls) |
 | `POST /api/v1/embeddings` | OpenAI Embeddings |
 | `POST /api/v1/audio/transcriptions` | OpenAI Whisper-style transcription |
@@ -233,25 +235,6 @@ next to `config.json`. Example:
 ```
 
 This file is consulted on every model load. No restart required.
-
----
-
-## Trimming the bundled artifact
-
-The shipping artifact should be the smallest possible footprint. Strip:
-
-| File / dir | Keep? | Reason |
-|---|---|---|
-| `lemond[.exe]` | Yes | The only required binary |
-| `lemonade[.exe]` (CLI) | **No** | Only useful for packaging-time config; remove from installer |
-| `LICENSE` | Yes | Required by Apache 2.0 |
-| `resources/server_models.json` | Yes | Trim to only the models the app exposes |
-| `resources/backend_versions.json` | Yes | Pins backend versions for reproducibility |
-| `resources/defaults.json` | **No** (after first launch) | Only consumed once to seed `config.json` |
-| `bin/<recipe>/<backend>/` | Yes (one) | Bundle just the universal fallback (e.g. `llamacpp/vulkan`) |
-| `bin/<recipe>/<other backends>/` | **No** | Install on demand via `/v1/install` |
-| `models/` | Optional | Bundle one default model for offline install, or pull on first run |
-
 ---
 
 ## Linux packaging notes
