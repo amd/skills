@@ -70,6 +70,10 @@ Record three things before continuing:
 3. **One single place** where the base URL and API key are constructed. If
    there isn't one, refactor to one before going further. Local-mode toggling
    must flip exactly one config object.
+4. **Any API-key gating** that blocks the app before a key is entered
+   (onboarding walls, validators that reject empty keys, startup checks that
+   disable AI until a key exists). Note each one — Step 5 bypasses them in
+   local mode.
 
 ## Step 2: Pick a model + backend profile
 
@@ -243,6 +247,15 @@ and the API key. Nothing else.
 The model identifier on requests stays a Lemonade model name (e.g.
 `Qwen3-4B-GGUF`), not the cloud name.
 
+**Bypass the app's API-key gate in local mode.** A local backend needs no
+cloud key, so any onboarding wall, validator, or startup check that demands
+one must not block local-mode users. Skip or auto-satisfy the key-entry
+screen, treat local mode as already-authorized in validation logic, and
+re-enable the gate only for cloud mode. The `lemond` key from Step 4 is set
+internally by the launcher, so the user never enters one and any UI
+placeholder (e.g. `"local"`) is fine. Flipping into local mode should never
+strand the user on a key-entry wall.
+
 **Python (openai) example:**
 
 ```python
@@ -304,6 +317,8 @@ The integration is done when **all** of these are true:
 - [ ] The default model loads successfully via `POST /v1/load`.
 - [ ] The existing client's chat / image / speech call returns a valid
       response with the base URL and key swapped, with no other code changed.
+- [ ] In local mode the app's API-key gate is bypassed: no onboarding wall,
+      validator, or startup check blocks the user for lacking a cloud key.
 - [ ] Killing the parent process leaves no `lemond` subprocess behind.
 - [ ] On a fresh machine without the optimal backend, the app still works
       via the Vulkan fallback bundled in `bin/`.
