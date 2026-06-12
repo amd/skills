@@ -60,7 +60,7 @@ npm install
 npm run tauri dev
 ```
 Once the window opens, press `Ctrl+Shift+D`, speak, and confirm transcription now runs through
-your local `lemond` instead of a cloud provider.
+your local device instead of a cloud provider.
 
 ## Step 6 - (Optional) Going beyond
 

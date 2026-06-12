@@ -50,7 +50,7 @@ hardware-optimized one at first run after a system probe.
 ### Speech-to-text on NPU (`flm` recipe)
 
 For NPU-accelerated transcription on Ryzen AI, use the `flm` (FastFlowLM)
-recipe with `Whisper-Medium`. XDNA2 NPU, Windows only.
+recipe with `whisper-v3-turbo-FLM`. XDNA2 NPU, Windows only.
 
 ### Text-to-speech
 
@@ -81,7 +81,7 @@ ship a default and document how to override.
 | Multimodal (vision) chat | `Gemma-4-E2B-it-GGUF` | 2.0 GB | `llamacpp` |
 | Hybrid NPU chat (Ryzen AI) | `Llama-3.2-3B-Instruct-Hybrid` | 2.0 GB | `ryzenai-llm` |
 | Speech-to-text | `Whisper-Large-v3-Turbo` | 1.6 GB | `whispercpp` |
-| NPU speech-to-text (Ryzen AI) | `Whisper-Medium` | 1.5 GB | `flm` (needs a concurrent LLM) |
+| NPU speech-to-text (Ryzen AI) | `whisper-v3-turbo-FLM` | 0.6 GB | `flm` (needs a concurrent LLM) |
 | Text-to-speech | `kokoro-v1` | 0.3 GB | `kokoro` |
 | Image generation | `SDXL-Turbo` | 6.9 GB | `sd-cpp` |
 
