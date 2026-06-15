@@ -111,13 +111,13 @@ The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integr
 This repo also acts as an **incubator**: a skill can start under `skills/` to iterate quickly, then graduate to its product repo and be re-pointed from `scripts/sources.yml` once it has a clear owner, with no change for installed users.
 
 ```
-skills/                  # All skills the agent can load (in-repo + vendored copies of federated)
-.claude-plugin/          # Claude Code marketplace manifest (one installable plugin per skill)
-.cursor-plugin/          # Cursor marketplace manifest (generated mirror of the Claude catalog)
-plugin-metadata.json     # Shared, vendor-neutral identity/discovery metadata for all manifests
-.github/workflows/       # CI for validating skills and the `import-external-skills` workflow
-scripts/                 # Tooling for publishing, regenerating manifests, and importing
-scripts/sources.yml      # Master list of external skill sources for federation
+skills/                  # All skills the agent can load
+.claude-plugin/          # Claude Code marketplace manifest
+.cursor-plugin/          # Cursor marketplace manifest 
+plugin-metadata.json     # Vendor-neutral identity/discovery metadata
+.github/workflows/       # CI for validating skills
+scripts/                 # Internal repo scripts
+scripts/sources.yml      # External skill sources for federation
 ```
 
 In-repo skills are authored directly under `skills/`. Federated skills are
