@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **Tech Preview: Catalog under active development.** This is an early public iteration of the catalog. We are sharing progress openly while the foundations are being built. Expect frequent changes as skills, categories, and descriptions evolve. Entries may be added, moved, renamed, or removed without notice.
+
 # AMD Skills
 
 <div align="center">
@@ -24,11 +27,9 @@ Skills in this repository follow the standardized [Agent Skills](https://github.
 
 ## Installation
 
-AMD Skills is built directly into Claude and Cursor. **No install. No setup**
+AMD Skills is will soon be built directly into Claude/Cursor/Codex and other agents through marketplace integration.
 
-Just ask something like: `"Use AMD Skills to integrate local AI into my app"`.
-
-> For other agents, see [Manual installation](#manual-installation).
+While we work marketplace integration, please refer to our [Manual installation steps](#manual-installation).
 
 ## What is a skill?
 
@@ -52,11 +53,6 @@ Skills earn their keep on repeated, opinionated workflows, exactly where the AMD
 
 ## The catalog
 
-> [!IMPORTANT]
-> **The catalog is under active development.** Skills, categories, and descriptions are changing fast. Expect entries to appear, move, and get renamed without notice.
->
-> **Target: ready for testing by June 12.** Until then, treat anything below as a preview.
-
 The initial catalog is organized into four focus areas.
 
 
@@ -66,8 +62,18 @@ Embed AMD-optimized AI into end-user applications.
 
 | Skill | What it does | Source |
 | --- | --- | --- |
-| [`local-ai-app-integration`](skills/local-ai-app-integration/SKILL.md) | Integrate local AI into cloud LLM apps for offline support, better privacy, and lower API costs. | in-repo |
 | [`local-ai-use`](skills/local-ai-use/SKILL.md) | Route image generation, text-to-speech, and speech-to-text through a local AI server to reduce token cost. | in-repo |
+| [`local-ai-app-integration`](skills/local-ai-app-integration/SKILL.md) | Integrate local AI into cloud LLM apps for offline support, better privacy, and lower API costs. | in-repo |
+
+### Cross-stack porting
+
+Bring existing workloads onto AMD.
+
+| Skill | What it does | Source |
+| [`serving-llms-on-instinct`](skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine/backend selection in later phases. | in-repo |
+| --- | --- | --- |
+| `cuda-to-hip` | Port CUDA kernels with `hipify` and flag anything that needs manual review. | _planned_ |
+| `vllm-rocm` | Stand up vLLM on AMD with the right environment variables and model configurations. | _planned_ |
 
 ### Platform readiness
 
@@ -75,21 +81,10 @@ Diagnose, configure, and ready AMD systems for AI workloads: drivers, BIOS, memo
 
 | Skill | What it does | Source |
 | --- | --- | --- |
-| [`apu-memory-tuner`](skills/apu-memory-tuner/SKILL.md) | Inspect and tune the shared-vs-dedicated memory split (GTT / UMA Frame Buffer) on AMD Ryzen APUs. | in-repo |
-| [`rocm-doctor`](skills/rocm-doctor/SKILL.md) | Diagnose ROCm / PyTorch / llama.cpp failures on AMD GPUs against a fixed list of known misconfigurations. | in-repo |
+| `apu-memory-tuner` | Inspect and tune the shared-vs-dedicated memory split (GTT / UMA Frame Buffer) on AMD Ryzen APUs. | _planned_ |
+| `rocm-doctor` | Diagnose ROCm / PyTorch / llama.cpp failures on AMD GPUs against a fixed list of known misconfigurations. | _planned_ |
 | `gfx-target-chooser` | Pick the right `gfx942` / `gfx90a` / `gfx1100` target and matching compiler flags. | _planned_ |
 | `pytorch-rocm-setup` | Get a known-good PyTorch + ROCm stack running on a target node, end to end. | _planned_ |
-
-### Cross-stack porting
-
-Bring existing workloads onto AMD.
-
-| Skill | What it does | Source |
-| --- | --- | --- |
-| `cuda-to-hip` | Port CUDA kernels with `hipify` and flag anything that needs manual review. | _planned_ |
-| `vllm-rocm` | Stand up vLLM on AMD with the right environment variables and model configurations. | _planned_ |
-| [`serving-llms-on-instinct`](skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine/backend selection in later phases. | in-repo |
-
 ### Performance & delivery
 
 Close the loop from trace to fix to ship.
