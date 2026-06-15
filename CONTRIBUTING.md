@@ -2,7 +2,7 @@
 
 This guide covers everything you need to ship a skill: how to choose a contribution path, what to validate locally, and the writing conventions every AMD skill should follow.
 
-For repository structure and the broader catalog model, see the [README](README.md). For the upstream reference, see Anthropic's [Skill authoring best practices](https://docs.anthropic.com/en/docs/agents-and-tools/agent-skills/best-practices).
+For repository structure and the broader catalog model, see the [README](README.md). For the upstream reference, see Anthropic's [Skill authoring best practices](https://docs.anthropic.com/en/docs/agents-and-tools/agent-skills/best-practices) and [The Complete Guide to Building Skills for Claude](https://resources.anthropic.com/hubfs/The-Complete-Guide-to-Building-Skill-for-Claude.pdf).
 
 We welcome contributions from AMD engineers and selected partners.
 
@@ -48,6 +48,7 @@ Skills earn their keep on repeated, opinionated workflows. Before writing one, c
 - **Short execution path.** Few steps, low latency, low token cost. Long workflows belong in a checklist or split skills.
 - **Recoverable failures.** Detects errors and either retries or exits cleanly with a useful message, and never leaves the user mid-state.
 - **Context-light.** Works from the user's prompt and the skill body. Doesn't require long conversation history or hidden setup.
+- **Composable.** Plays well with other skills loaded at the same time. Don't assume yours is the only capability available.
 
 If the task fails several of these, it is probably documentation, a runbook, or a one-off prompt, not a skill.
 
@@ -190,6 +191,7 @@ The validator fails any skill whose card is missing or whose required sections a
 
 Test the skill the way users will hit it:
 
+0. Prototype first. Get the agent through one hard, real instance of the task *before* writing the skill, then extract the winning approach. This gives faster signal than authoring against an untested idea.
 1. Run a fresh agent against ~10 prompts that *should* trigger the skill and ~10 that *shouldn't*. The description should route both sets correctly.
 2. Run the skill end-to-end on a real machine. Watch where the agent hesitates, asks unnecessary questions, or goes off-script.
 3. Bring those observations back into the skill, usually as a sharper description, a clearer default, or a missing prerequisite, rather than adding more prose.
