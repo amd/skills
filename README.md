@@ -27,7 +27,7 @@ Skills in this repository follow the standardized [Agent Skills](https://github.
 
 ## Installation
 
-AMD Skills is will soon be built directly into Claude/Cursor/Codex and other agents through marketplace integration.
+AMD Skills will soon be installable directly in Claude/Cursor/Codex and other agents through marketplace integration.
 
 While we work marketplace integration, please refer to our [Manual installation steps](#manual-installation).
 
@@ -141,32 +141,18 @@ in-repo skills.
 
 ## Manual Installation
 
-AMD Skills are compatible with Cursor, Claude Code, OpenAI Codex, and Gemini CLI. The general flow:
-
-### Cursor
-
-Add this repository as a plugin marketplace through the Cursor plugin flow, then enable the skills you want. The repo ships a `.cursor-plugin/marketplace.json` that lists every skill as its own installable plugin, mirroring the Claude Code catalog.
-
-### Claude Code
-
-Register this repository as a plugin marketplace, then install individual skills:
+Until marketplace integration lands, install skills manually: clone this repo, then copy (or symlink) the skill folders you want from `skills/` into your agent's skills directory. Each agent discovers `SKILL.md` automatically.
 
 ```bash
-/plugin marketplace add amd/skills
-/plugin install <skill-name>@amd/skills
+git clone https://github.com/amd/skills.git amd-skills
+cp -r amd-skills/skills/local-ai-use <agent-skills-dir>/
 ```
 
-### OpenAI Codex
-
-Copy or symlink the desired folders from `skills/` into one of Codex's standard skill locations (for example `$REPO_ROOT/.agents/skills` or `$HOME/.agents/skills`). Codex will discover the `SKILL.md` files automatically.
-
-### Gemini CLI
-
-A `gemini-extension.json` will be provided so the repo can be installed as a Gemini CLI extension:
-
-```bash
-gemini extensions install https://github.com/amd/skills.git --consent
-```
+| Agent | Skills directory (personal / project) |
+| --- | --- |
+| Cursor | `~/.cursor/skills/` / `.cursor/skills/` |
+| Claude Code | `~/.claude/skills/` / `.claude/skills/` |
+| Codex | `$HOME/.agents/skills` / `$REPO_ROOT/.agents/skills` |
 
 ## Using a skill
 
@@ -177,12 +163,14 @@ Once a skill is installed, reference it in plain language while talking to your 
 
 In most cases the agent picks the right skill on its own from the description; explicit invocation is a fallback, not a requirement.
 
+For hands-on, step-by-step guides that show a skill in action, see the [walkthroughs](walkthroughs/README.md).
+
 ## Contributing a skill
 
 We welcome contributions from AMD engineers and selected partners. Two paths, matching how the catalog is organized:
 
-- **Path A — In-repo skills.** Authored directly under `skills/`. Best for cross-cutting workflows without a natural product home.
-- **Path B — Product-repo skills.** Authored in a product repository and registered here through [`scripts/sources.yml`](scripts/sources.yml) with a pinned tag. Best for skills that should ship and version with a specific product.
+- **Path A: In-repo skills.** Authored directly under `skills/`. Best for cross-cutting workflows without a natural product home.
+- **Path B: Product-repo skills.** Authored in a product repository and registered here through [`scripts/sources.yml`](scripts/sources.yml) with a pinned tag. Best for skills that should ship and version with a specific product.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for step-by-step instructions and the rules CI enforces.
 
