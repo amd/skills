@@ -123,3 +123,15 @@ suppressions:
       to locate and replace the rule block in AGENTS.md in place on re-runs. It
       carries no instructions; the surrounding rule text is plain, reviewable
       content by design (it is the installable routing rule itself).
+  - skill: serving-llms-on-instinct
+    rule: SC2
+    file: data/recipes_cache.json
+    match: External Script Fetching
+    reason: >-
+      False positive. The flag is on a `"guide"` markdown string (a recipe doc
+      embedded in this JSON cache, not runnable code). Its shell snippets are
+      illustrative: `uv pip install ... --extra-index-url https://wheels.vllm.ai/nightly`
+      installs vLLM from an HTTPS package index (the recommended-safe pattern),
+      and `curl http://localhost:8000/... | python3 -m json.tool` pipes a
+      localhost API response into a JSON pretty-printer. There is no
+      download-and-execute of a remote script (no `curl ... | bash`/`sh`).
