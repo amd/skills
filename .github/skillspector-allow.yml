@@ -135,3 +135,67 @@ suppressions:
       and `curl http://localhost:8000/... | python3 -m json.tool` pipes a
       localhost API response into a JSON pretty-printer. There is no
       download-and-execute of a remote script (no `curl ... | bash`/`sh`).
+  - skill: serving-llms-on-instinct
+    rule: P6
+    file: data/recipes_cache.json
+    match: Direct Prompt Extraction
+    reason: >-
+      False positive. The flag is on a `"guide"` markdown string (the
+      Ministral-3-Instruct recipe doc, not runnable code). The matched Python
+      example downloads the model's own publicly published `SYSTEM_PROMPT.txt`
+      via `hf_hub_download` and passes it as the `system` role of a chat request
+      (Mistral's documented setup) — it constructs a prompt, it does not reveal
+      or extract any hidden system prompt. The only output printed is the
+      model's answer (`response.choices[0].message.content`). The trigger is
+      merely the literal token `SYSTEM_PROMPT` in benign example code.
+  - skill: serving-llms-on-instinct
+    rule: TM2
+    file: reference.md
+    match: Chaining Abuse
+    reason: >-
+      False positive. Line 92 is a Troubleshooting one-liner that disables
+      kernel NUMA balancing for GPU workloads:
+      `echo 0 | sudo tee /proc/sys/kernel/numa_balancing`. The `|` is just the
+      idiomatic way to write a root-owned /proc file (echo piped into `sudo
+      tee`), not multi-step tool/command chaining of untrusted or model-derived
+      steps. It is a single fixed, reviewable, human-run sysctl write — no LLM
+      output feeds the pipe and there is no chain depth to bound.
+  - skill: serving-llms-on-instinct
+    rule: TM1
+    file: scripts/detect.py
+    match: Tool Parameter Abuse
+    reason: >-
+      False positive. Line 32 uses `subprocess.run(cmd, shell=True, ...)`, but
+      `shell=True` is intentional and safe here: every `cmd` passed to `_run`
+      is a fixed in-script literal (`amd-smi static --asic --vram --json`,
+      `amd-smi version --json`, and their `sudo` retries) that relies on no
+      shell metacharacters from user input. The only user-controlled values
+      (`--host`/`--user`/`--port`) never enter the shell string — they flow
+      solely into the SSH branch as list-form argv (`ssh ... ssh_target cmd`,
+      no shell), and `port` is int-coerced by argparse. No untrusted or model
+      output reaches the shell, so there is no parameter abuse to reject.
+  - skill: serving-llms-on-instinct
+    rule: TM1
+    file: scripts/validate.py
+    match: Tool Parameter Abuse
+    reason: >-
+      False positive. Same `_run` helper as detect.py: line 33 uses
+      `subprocess.run(cmd, shell=True, ...)` where every `cmd` is a hardcoded
+      diagnostic literal (`test -e /dev/kfd ...`, `ls /dev/dri/renderD* ...`,
+      `cat /proc/sys/kernel/numa_balancing ...`, `printenv HF_TOKEN ...`, etc.)
+      that deliberately uses shell pipes/redirects/globs. The dynamic inputs
+      (`--host`/`--user`/`--port`) only reach the SSH branch as list-form argv,
+      never the shell string, and `port` is int-coerced. No untrusted/model
+      output is interpolated into the command.
+  - skill: serving-llms-on-instinct
+    rule: TM2
+    file: scripts/validate.py
+    match: Chaining Abuse
+    reason: >-
+      False positive. The flagged lines are the NUMA-balancing fix
+      `echo 0 | sudo tee /proc/sys/kernel/numa_balancing`. Line 122 only runs
+      it under the explicit opt-in `--auto-fix` flag (user-approved), while
+      lines 130 and 137 are human-readable `"fix"` advisory strings that are
+      never executed. The `|` is the idiomatic root-owned /proc write (echo
+      into `sudo tee`), a single fixed sysctl command — not multi-step tool
+      chaining of untrusted or model-derived steps.
