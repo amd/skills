@@ -170,3 +170,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for step-by-step instructions and the rul
 ## License
 
 Released under the MIT License. See [LICENSE](LICENSE) for details.
+
+Copyright(C) 2026 Advanced Micro Devices, Inc. All rights reserved. 
