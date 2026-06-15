@@ -17,16 +17,17 @@ Best for cross-cutting skills that do not have a natural product home.
 1. Copy an existing skill folder under `skills/` as a starting point and rename it.
 2. Update the `SKILL.md` frontmatter so the `name` and `description` clearly explain *what* the skill does and *when* an agent should reach for it.
 3. Add the supporting scripts, templates, and reference docs your instructions point to. Keep skills focused: one well-scoped task per skill is better than one mega-skill.
-4. Register the skill in `.claude-plugin/marketplace.json` with a human-readable description (the marketplace description is for humans browsing the catalog; the `SKILL.md` description is what the agent uses for routing).
-5. Regenerate the Cursor manifest so it tracks the new skill:
+4. Add a `skill-card.md` at the skill root with `## Description`, `## Owner`, and `## License` sections. This is the skill's governance card; see [Skill cards](#skill-cards) and [docs/skill-cards.md](docs/skill-cards.md).
+5. Register the skill in `.claude-plugin/marketplace.json` with a human-readable description (the marketplace description is for humans browsing the catalog; the `SKILL.md` description is what the agent uses for routing).
+6. Regenerate the Cursor manifest so it tracks the new skill:
    ```bash
    ./.github/scripts/publish.sh   # writes .cursor-plugin/marketplace.json
    ```
-6. Validate the skill locally before pushing:
+7. Validate the skill locally before pushing:
    ```bash
    ./.github/scripts/check.sh   # validates every SKILL.md and that manifests are in sync
    ```
-7. Open a pull request. The `validate` GitHub Actions workflow runs `./.github/scripts/check.sh` and must pass before merge. See [Validating locally](#validating-locally) for the full set of enforced rules.
+8. Open a pull request. The `validate` GitHub Actions workflow runs `./.github/scripts/check.sh` and must pass before merge. See [Validating locally](#validating-locally) for the full set of enforced rules.
 
 ### Path B: Skills authored in a product repository
 
@@ -114,6 +115,7 @@ Link from `SKILL.md` directly to reference files. Do not chain references throug
 ```
 skill-name/
   SKILL.md          # overview, quick start, links
+  skill-card.md     # governance card (Description, Owner, License)
   reference.md      # full API / flag reference
   examples.md       # worked examples
   scripts/          # executable utilities
@@ -153,6 +155,30 @@ Pre-made scripts beat generated code: more reliable, fewer tokens, consistent ac
 - **Make execution intent explicit.** Write *"Run `analyze.py`..."* (execute) or *"See `analyze.py` for the algorithm"* (read), never both.
 - **Use fully qualified MCP tool names.** `ServerName:tool_name`, e.g. `BigQuery:bigquery_schema`. Bare names fail when multiple servers are registered.
 
+## Skill cards
+
+Every skill ships a `skill-card.md` at its root: a short, human-facing governance record that tells a reviewer what the skill does, who owns it, and under what license it ships, without reading the source. It is not loaded by the agent.
+
+The AMD card is intentionally minimal. Three required sections, each a `##` heading with non-empty body text:
+
+```markdown
+# Skill Card
+
+## Description
+
+<one sentence: what the skill does, for whom>
+
+## Owner
+
+<team or org accountable for maintenance, e.g. AMD>
+
+## License
+
+<SPDX identifier or link, e.g. MIT>
+```
+
+The validator fails any skill whose card is missing or whose required sections are absent or empty. For the full guide, examples, and how federated skills get cards, see [docs/skill-cards.md](docs/skill-cards.md).
+
 ## AMD-specific guidance
 
 - **State prerequisites up front.** ROCm version, kernel version, GPU architecture (`gfx942`, `gfx90a`, `gfx1100`, ...), container image, driver branch.
@@ -172,6 +198,7 @@ Test the skill the way users will hit it:
 
 - [ ] Description states the user's goal and includes likely trigger phrases
 - [ ] Description is third person and under 1024 characters
+- [ ] `skill-card.md` exists with non-empty Description, Owner, and License sections
 - [ ] Skill name is lowercase-with-hyphens and ties to the outcome
 - [ ] `SKILL.md` body is under 500 lines
 - [ ] Reference files are linked one level deep from `SKILL.md`
@@ -198,6 +225,7 @@ The validator checks every skill under `skills/` for:
 - `name`: lowercase-with-hyphens, ≤ 64 characters, no `anthropic` / `claude` substrings, matches the directory name
 - `description`: non-empty, ≤ 1024 characters
 - `SKILL.md` body: ≤ 500 lines
+- `skill-card.md`: present at the skill root with non-empty `## Description`, `## Owner`, and `## License` sections
 
 It also checks the plugin manifests:
 

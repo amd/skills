@@ -17,10 +17,14 @@ For each source, the script:
    github.com URLs pinned to the imported commit, so the offline link
    checker doesn't flag them as missing local files. Links to files that
    were actually copied into the skill folder are left untouched.
-5. Updates `.claude-plugin/marketplace.json` with an entry per imported
+5. Synthesizes a minimal `skill-card.md` (Description, Owner, License)
+   from the source metadata when the upstream copy doesn't already ship
+   one, so the imported skill satisfies the card validation gate (see
+   docs/skill-cards.md).
+6. Updates `.claude-plugin/marketplace.json` with an entry per imported
    skill (using the SKILL.md `description` as the marketplace blurb,
    unless the source declares an override).
-6. Removes any previously imported skill (one with a `.federated.json`)
+7. Removes any previously imported skill (one with a `.federated.json`)
    that is no longer listed in `.github/scripts/sources.yml`.
 
 Usage:
@@ -53,6 +57,7 @@ CATALOG_FILE = Path(__file__).resolve().parent / "sources.yml"
 SKILLS_DIR = REPO_ROOT / "skills"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 MARKER_FILENAME = ".federated.json"
+CARD_FILENAME = "skill-card.md"
 
 FRONTMATTER_RE = re.compile(
     r"\A---\s*\n(?P<frontmatter>.*?)\n---\s*\n?(?P<body>.*)\Z",
@@ -363,6 +368,32 @@ def write_marker(
     )
 
 
+def write_card(skill_dir: Path, source: Source, description: str) -> None:
+    """Write a minimal skill-card.md unless the upstream copy shipped one.
+
+    Federated skills are copied wholesale (`copy_skill` does rmtree +
+    copytree), so any card authored here would be wiped on re-import. When
+    upstream doesn't provide a card, synthesize one from the source metadata
+    so the imported skill still satisfies the card validation gate.
+    """
+    card = skill_dir / CARD_FILENAME
+    if card.exists():
+        return
+    owner_org = source.repo.split("/")[0]
+    license_text = source.license or f"See [{source.repo}](https://github.com/{source.repo})"
+    card.write_text(
+        "# Skill Card\n\n"
+        "## Description\n\n"
+        f"{description}\n\n"
+        "## Owner\n\n"
+        f"{owner_org} (federated from "
+        f"[{source.repo}](https://github.com/{source.repo}))\n\n"
+        "## License\n\n"
+        f"{license_text}\n",
+        encoding="utf-8",
+    )
+
+
 def update_marketplace(results: Iterable[ImportResult], dry_run: bool) -> bool:
     """Sync `.claude-plugin/marketplace.json` with the imported skills.
 
@@ -467,6 +498,7 @@ def import_source(
             if not dry_run:
                 copy_skill(src_skill, dest_skill)
                 write_marker(dest_skill, source, commit, relative_path)
+                write_card(dest_skill, source, marketplace_description)
                 rewrite_external_references(
                     dest_skill,
                     relative_path,
