@@ -73,7 +73,7 @@ Cross-stack skills, from client to cloud.
 | --- | --- | --- |
 | `rocm-doctor` | Diagnose ROCm / PyTorch / llama.cpp failures on AMD GPUs against a fixed list of known misconfigurations. | _planned_ |
 | `llm-kernel-optimizer` (`hyperloom`) | Autonomously optimizes LLM inference on AMD GPUs. | _planned_ |
-| `llvm-semantic-router` | Setup a vLLM router that semantically maps your request to the best available platform. | _planned_ |
+| `vllm-semantic-router` | Setup a vLLM router that semantically maps your request to the best available platform. | _planned_ |
 
 ### Server-Native
 
