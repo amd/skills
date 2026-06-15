@@ -3,7 +3,7 @@
 # SkillSpector's static scan is high-recall / moderate-precision and has no
 # native per-finding suppression. This file is the auditable place to record
 # findings that are genuinely false positives so the CI gate
-# (scripts/skillspector_gate.py) does not fail on them. Everything not listed
+# (.github/scripts/skillspector_gate.py) does not fail on them. Everything not listed
 # here still fails the build at HIGH/CRITICAL.
 #
 # Each entry suppresses ONE rule for ONE file within ONE skill:

@@ -1,7 +1,7 @@
 name: import-external-skills
 
 # Manually-dispatched workflow that refreshes the federated portion of the
-# catalog. It reads `scripts/sources.yml`, shallow-clones each declared
+# catalog. It reads `.github/scripts/sources.yml`, shallow-clones each declared
 # source, vendors the named skills into `skills/<name>/`, updates
 # `.claude-plugin/marketplace.json`, regenerates the Cursor manifest, and
 # opens a pull request with the result. Every imported skill goes through
@@ -42,22 +42,22 @@ jobs:
           git --version
           git config --global init.defaultBranch main
 
-      - name: Import skills declared in scripts/sources.yml
+      - name: Import skills declared in .github/scripts/sources.yml
         id: import
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            uv run scripts/import_external_skills.py --dry-run
+            uv run .github/scripts/import_external_skills.py --dry-run
           else
-            uv run scripts/import_external_skills.py
+            uv run .github/scripts/import_external_skills.py
           fi
 
       - name: Regenerate Cursor marketplace manifest
         if: ${{ inputs.dry_run != true }}
-        run: uv run scripts/generate_cursor_marketplace.py
+        run: uv run .github/scripts/generate_cursor_marketplace.py
 
       - name: Validate skills and manifests
         if: ${{ inputs.dry_run != true }}
-        run: ./scripts/check.sh
+        run: ./.github/scripts/check.sh
 
       - name: Detect changes
         if: ${{ inputs.dry_run != true }}
@@ -81,10 +81,10 @@ jobs:
         with:
           branch: bot/import-external-skills
           delete-branch: true
-          commit-message: "chore(catalog): refresh federated skills from scripts/sources.yml"
+          commit-message: "chore(catalog): refresh federated skills from .github/scripts/sources.yml"
           title: "Refresh federated skills"
           body: |
-            Automated import driven by `scripts/sources.yml`.
+            Automated import driven by `.github/scripts/sources.yml`.
 
             See the "A federated catalog" section of `README.md` for the
             design. Each vendored skill includes a `.federated.json` marker
@@ -97,7 +97,7 @@ jobs:
             catalog
             automated
           add-paths: |
-            scripts/sources.yml
+            .github/scripts/sources.yml
             skills/**
             .claude-plugin/**
             .cursor-plugin/**

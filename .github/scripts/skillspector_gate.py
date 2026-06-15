@@ -23,7 +23,7 @@ scanned skill just to dodge a regex.
 
 Usage:
 
-    uv run scripts/skillspector_gate.py \
+    uv run .github/scripts/skillspector_gate.py \
         --report reports/rocm-doctor.md \
         --skill rocm-doctor \
         --allowlist .github/skillspector-allow.yml
@@ -156,7 +156,7 @@ def main() -> int:
     parser.add_argument(
         "--allowlist",
         type=Path,
-        default=Path(__file__).resolve().parent.parent / ".github" / "skillspector-allow.yml",
+        default=Path(__file__).resolve().parent.parent / "skillspector-allow.yml",
         help="Path to the suppression allowlist (YAML).",
     )
     args = parser.parse_args()

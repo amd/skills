@@ -93,7 +93,7 @@ The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integr
                 ┌─────────────────────────────────────────────────────┐
                 │                amd/skills (this repo)               │
                 │                                                     │
-                │   skills/         scripts/         .*-plugin/       │
+                │   skills/         .github/scripts/ .*-plugin/       │
                 │   in-repo skills  sources.yml      agent manifests  │
                 └──────────────────────┬──────────────────────────────┘
                                        │  one install
@@ -108,7 +108,7 @@ The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integr
    gfx-target-...  triton-amd-...  ...               integration/    repos
 ```
 
-This repo also acts as an **incubator**: a skill can start under `skills/` to iterate quickly, then graduate to its product repo and be re-pointed from `scripts/sources.yml` once it has a clear owner, with no change for installed users.
+This repo also acts as an **incubator**: a skill can start under `skills/` to iterate quickly, then graduate to its product repo and be re-pointed from `.github/scripts/sources.yml` once it has a clear owner, with no change for installed users.
 
 ```
 skills/                  # All skills the agent can load
@@ -116,12 +116,12 @@ skills/                  # All skills the agent can load
 .cursor-plugin/          # Cursor marketplace manifest 
 plugin-metadata.json     # Vendor-neutral identity/discovery metadata
 .github/workflows/       # CI for validating skills
-scripts/                 # Internal repo scripts
-scripts/sources.yml      # External skill sources for federation
+.github/scripts/         # Internal repo scripts
+.github/scripts/sources.yml  # External skill sources for federation
 ```
 
 In-repo skills are authored directly under `skills/`. Federated skills are
-declared in [`scripts/sources.yml`](scripts/sources.yml) and vendored into
+declared in [`.github/scripts/sources.yml`](.github/scripts/sources.yml) and vendored into
 `skills/` by the manually-dispatched `import-external-skills` workflow,
 which opens a pull request with the imported copies. Each vendored skill
 carries a `.federated.json` marker that records the upstream repo and
@@ -159,7 +159,7 @@ For hands-on, step-by-step guides that show a skill in action, see the [walkthro
 We welcome contributions from AMD engineers and selected partners. Two paths, matching how the catalog is organized:
 
 - **Path A: In-repo skills.** Authored directly under `skills/`. Best for cross-cutting workflows without a natural product home.
-- **Path B: Product-repo skills.** Authored in a product repository and registered here through [`scripts/sources.yml`](scripts/sources.yml) with a pinned tag. Best for skills that should ship and version with a specific product.
+- **Path B: Product-repo skills.** Authored in a product repository and registered here through [`.github/scripts/sources.yml`](.github/scripts/sources.yml) with a pinned tag. Best for skills that should ship and version with a specific product.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for step-by-step instructions and the rules CI enforces.
 

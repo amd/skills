@@ -3,9 +3,9 @@
 # canonical marketplace + metadata sources.
 #
 # Usage:
-#   ./scripts/publish.sh            Regenerate all derived artifacts.
-#   ./scripts/publish.sh --check    Verify derived artifacts are up to date.
-#   ./scripts/publish.sh -h|--help  Print this help.
+#   ./.github/scripts/publish.sh            Regenerate all derived artifacts.
+#   ./.github/scripts/publish.sh --check    Verify derived artifacts are up to date.
+#   ./.github/scripts/publish.sh -h|--help  Print this help.
 #
 # Currently regenerates:
 #   - .cursor-plugin/marketplace.json   (mirror of .claude-plugin/marketplace.json
@@ -13,14 +13,14 @@
 #
 # `.claude-plugin/marketplace.json` is hand-maintained because its
 # human-facing plugin descriptions intentionally differ from the SKILL.md
-# routing descriptions; ./scripts/check.sh enforces that the marketplace
+# routing descriptions; ./.github/scripts/check.sh enforces that the marketplace
 # listing matches skills/ on disk.
 #
 # Requires `uv` (https://github.com/astral-sh/uv).
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 usage() {
@@ -29,11 +29,11 @@ usage() {
 
 case "${1:-}" in
   "")
-    uv run scripts/generate_cursor_marketplace.py
+    uv run .github/scripts/generate_cursor_marketplace.py
     echo "Publish artifacts generated successfully."
     ;;
   --check)
-    uv run scripts/generate_cursor_marketplace.py --check
+    uv run .github/scripts/generate_cursor_marketplace.py --check
     ;;
   -h|--help)
     usage

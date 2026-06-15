@@ -23,8 +23,8 @@ Output:
   Cursor exposes exactly the same skills as Claude.
 
 Usage:
-    uv run scripts/generate_cursor_marketplace.py            # write
-    uv run scripts/generate_cursor_marketplace.py --check    # validate only
+    uv run .github/scripts/generate_cursor_marketplace.py            # write
+    uv run .github/scripts/generate_cursor_marketplace.py --check    # validate only
 
 `--check` fails if the generated file is stale or if the Claude marketplace
 top-level identity has drifted from `plugin-metadata.json`.
@@ -37,7 +37,7 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 PLUGIN_METADATA = ROOT / "plugin-metadata.json"
 CLAUDE_MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
 CURSOR_MARKETPLACE = ROOT / ".cursor-plugin" / "marketplace.json"
@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             print(
-                "Run: uv run scripts/generate_cursor_marketplace.py",
+                "Run: uv run .github/scripts/generate_cursor_marketplace.py",
                 file=sys.stderr,
             )
             return 1
