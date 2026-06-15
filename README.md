@@ -70,8 +70,8 @@ Embed AMD-optimized AI into end-user applications.
 Bring existing workloads onto AMD.
 
 | Skill | What it does | Source |
-| [`serving-llms-on-instinct`](skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine/backend selection in later phases. | in-repo |
 | --- | --- | --- |
+| [`serving-llms-on-instinct`](skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine/backend selection in later phases. | in-repo |
 | `cuda-to-hip` | Port CUDA kernels with `hipify` and flag anything that needs manual review. | _planned_ |
 | `vllm-rocm` | Stand up vLLM on AMD with the right environment variables and model configurations. | _planned_ |
 
