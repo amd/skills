@@ -1,5 +1,5 @@
 > [!IMPORTANT]
-> **Tech Preview: Catalog under active development.** This is an early public iteration of the catalog. We are sharing progress openly while the foundations are being built. Expect frequent changes as skills, categories, and descriptions evolve. Entries may be added, moved, renamed, or removed without notice.
+> **Tech Preview: Catalog under active development.** We’re building the catalog in the open, sharing progress as the foundations take shape. Expect frequent changes as skills, categories, and descriptions evolve.
 
 # AMD Skills
 
