@@ -39,11 +39,14 @@ A skill is a self-contained folder that bundles everything an agent needs to per
 skills/
   rocm-doctor/
     SKILL.md
+    skill-card.md
     scripts/
     references/
 ```
 
 When an agent decides a skill is relevant (or you invoke it explicitly), it loads that `SKILL.md` and follows the instructions inside. Descriptions stay in context cheaply; the full body of a skill only loads when the task actually matches.
+
+Every skill also ships a `skill-card.md`: a short, human-facing governance card (Description, Owner, License) that tells a reviewer what the skill is and who stands behind it without reading the source. See [docs/skill-cards.md](docs/skill-cards.md).
 
 ## Why a skill, not a doc?
 
@@ -112,6 +115,7 @@ This repo also acts as an **incubator**: a skill can start under `skills/` to it
 
 ```
 skills/                  # All skills the agent can load
+docs/                    # Long-form documentation (e.g. skill-cards.md)
 .claude-plugin/          # Claude Code marketplace manifest
 .cursor-plugin/          # Cursor marketplace manifest 
 plugin-metadata.json     # Vendor-neutral identity/discovery metadata

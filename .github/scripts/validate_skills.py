@@ -13,6 +13,8 @@ Enforces the rules documented in CONTRIBUTING.md:
     substrings, and matches the directory name
   - `description` is a non-empty string <=1024 chars
   - SKILL.md body is <=500 lines
+  - skill-card.md exists at the skill root and has non-empty
+    `## Description`, `## Owner`, and `## License` sections
 
 Also validates that `.claude-plugin/marketplace.json` is in sync with the
 skills on disk: every skill must have a marketplace entry, and every
@@ -61,6 +63,11 @@ FRONTMATTER_RE = re.compile(
 )
 RESERVED_NAME_SUBSTRINGS = ("anthropic", "claude")
 
+# Per-skill governance card (see docs/skill-cards.md). Each section must be a
+# top-level `##` heading followed by some non-empty body text.
+CARD_FILENAME = "skill-card.md"
+REQUIRED_CARD_SECTIONS = ("Description", "Owner", "License")
+
 
 @dataclass
 class SkillReport:
@@ -102,6 +109,7 @@ def validate_skill(skill_dir: Path) -> SkillReport:
     _validate_name(frontmatter.get("name"), skill_dir.name, report)
     _validate_description(frontmatter.get("description"), report)
     _validate_body(match.group("body"), report)
+    _validate_card(skill_dir, report)
     return report
 
 
@@ -155,6 +163,47 @@ def _validate_body(body: str, report: SkillReport) -> None:
             "Move reference material into sibling files (reference.md, "
             "examples.md, ...) and link to them from SKILL.md."
         )
+
+
+def _validate_card(skill_dir: Path, report: SkillReport) -> None:
+    """Require a skill-card.md with non-empty Description, Owner, License."""
+    card = skill_dir / CARD_FILENAME
+    if not card.exists():
+        report.errors.append(
+            f"Missing {CARD_FILENAME} (governance card). See docs/skill-cards.md; "
+            "it needs `## Description`, `## Owner`, and `## License` sections."
+        )
+        return
+
+    sections = _parse_card_sections(card.read_text(encoding="utf-8"))
+    for name in REQUIRED_CARD_SECTIONS:
+        body = sections.get(name.lower())
+        if body is None:
+            report.errors.append(f"{CARD_FILENAME} is missing a `## {name}` section.")
+        elif not body.strip():
+            report.errors.append(f"{CARD_FILENAME} `## {name}` section is empty.")
+
+
+def _parse_card_sections(text: str) -> dict[str, str]:
+    """Map each `##` heading (lowercased) to the text until the next heading."""
+    sections: dict[str, str] = {}
+    current: str | None = None
+    buffer: list[str] = []
+
+    def flush() -> None:
+        if current is not None:
+            sections[current] = "\n".join(buffer).strip()
+
+    for line in text.splitlines():
+        heading = re.match(r"^##\s+(?P<title>.+?)\s*$", line)
+        if heading:
+            flush()
+            current = heading.group("title").lower()
+            buffer = []
+        elif current is not None:
+            buffer.append(line)
+    flush()
+    return sections
 
 
 def discover_skills(root: Path) -> list[Path]:
