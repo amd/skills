@@ -199,3 +199,37 @@ suppressions:
       never executed. The `|` is the idiomatic root-owned /proc write (echo
       into `sudo tee`), a single fixed sysctl command — not multi-step tool
       chaining of untrusted or model-derived steps.
+  - skill: serving-llms-on-instinct
+    rule: E2
+    file: scripts/estimate_vram.py
+    match: Env Variable Harvesting
+    reason: >-
+      False positive. Line 175 reads `HF_TOKEN` via `os.environ.get`, which is
+      strictly required: it is passed only to `_fetch`, which sets it as the
+      `Authorization: Bearer` header on requests to `https://huggingface.co`
+      (the token's intended recipient) so the tool can read safetensors/config
+      metadata for gated or private models. The token is never logged, printed,
+      or transmitted anywhere else — the emitted JSON contains only model and
+      VRAM fields.
+  - skill: serving-llms-on-instinct
+    rule: E2
+    file: scripts/validate.py
+    match: Env Variable Harvesting
+    reason: >-
+      False positive. Line 151 runs `printenv HF_TOKEN | head -c 4` purely as a
+      presence check; the captured 4-char value is never emitted — only
+      `out.strip()` truthiness is tested to decide whether to advise the user
+      that HF_TOKEN is unset (needed for gated models). No credential is logged
+      or transmitted.
+  - skill: serving-llms-on-instinct
+    rule: P5
+    file: data/recipes_cache.json
+    match: Harmful Content Injection
+    reason: >-
+      False positive. Line 3524 is the `"guide"` for Qwen3Guard-Gen, a
+      text-only safety/guardrail classifier model. The matched string
+      ("Tell me how to make a bomb.") is the demo *input* used to show the
+      moderation model correctly classifying the request as unsafe — the
+      documented output is `# Safety: Unsafe` / `# Categories: Violent`. No
+      harmful instructions are present; it is content-moderation documentation,
+      the opposite of harmful-content injection.
