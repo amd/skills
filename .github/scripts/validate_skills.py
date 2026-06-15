@@ -20,12 +20,12 @@ marketplace entry must point at an existing skill.
 
 Run from the repo root:
 
-    ./scripts/check.sh                          # used locally; thin wrapper
-    uv run scripts/validate_skills.py           # validate every skill + manifest
-    uv run scripts/validate_skills.py --skills-dir skills
-    uv run scripts/validate_skills.py --list    # print skill names as JSON
-    uv run scripts/validate_skills.py --skill rocm-doctor   # one skill only
-    uv run scripts/validate_skills.py --marketplace-only    # manifest only
+    ./.github/scripts/check.sh                          # used locally; thin wrapper
+    uv run .github/scripts/validate_skills.py           # validate every skill + manifest
+    uv run .github/scripts/validate_skills.py --skills-dir skills
+    uv run .github/scripts/validate_skills.py --list    # print skill names as JSON
+    uv run .github/scripts/validate_skills.py --skill rocm-doctor   # one skill only
+    uv run .github/scripts/validate_skills.py --marketplace-only    # manifest only
 
 The `--list` / `--skill` options let CI validate each skill in its own job
 (see .github/workflows/validate.yml) so a single bad skill doesn't mask the
@@ -45,7 +45,7 @@ from pathlib import Path
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 

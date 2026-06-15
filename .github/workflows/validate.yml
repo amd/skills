@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
     paths:
-      - "scripts/**"
+      - ".github/scripts/**"
       - "**/*.md"
       - "skills/**"
       - ".claude-plugin/**"
@@ -33,7 +33,7 @@ jobs:
 
       - name: List skills
         id: discover
-        run: echo "skills=$(uv run scripts/validate_skills.py --list)" >> "$GITHUB_OUTPUT"
+        run: echo "skills=$(uv run .github/scripts/validate_skills.py --list)" >> "$GITHUB_OUTPUT"
 
   validate-skill:
     name: Validate skill
@@ -53,7 +53,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Validate skill
-        run: uv run scripts/validate_skills.py --skill "${{ matrix.skill }}"
+        run: uv run .github/scripts/validate_skills.py --skill "${{ matrix.skill }}"
 
   # Repo-wide checks that aren't tied to a single skill: the generated plugin
   # manifests and internal markdown references.
@@ -68,10 +68,10 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Validate marketplace manifest
-        run: uv run scripts/validate_skills.py --marketplace-only
+        run: uv run .github/scripts/validate_skills.py --marketplace-only
 
       - name: Validate generated Cursor manifest
-        run: uv run scripts/generate_cursor_marketplace.py --check
+        run: uv run .github/scripts/generate_cursor_marketplace.py --check
 
       # Deterministic, offline-only reference check: relative paths and
       # heading anchors. External URLs are intentionally not checked here

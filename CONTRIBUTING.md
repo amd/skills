@@ -20,20 +20,20 @@ Best for cross-cutting skills that do not have a natural product home.
 4. Register the skill in `.claude-plugin/marketplace.json` with a human-readable description (the marketplace description is for humans browsing the catalog; the `SKILL.md` description is what the agent uses for routing).
 5. Regenerate the Cursor manifest so it tracks the new skill:
    ```bash
-   ./scripts/publish.sh   # writes .cursor-plugin/marketplace.json
+   ./.github/scripts/publish.sh   # writes .cursor-plugin/marketplace.json
    ```
 6. Validate the skill locally before pushing:
    ```bash
-   ./scripts/check.sh   # validates every SKILL.md and that manifests are in sync
+   ./.github/scripts/check.sh   # validates every SKILL.md and that manifests are in sync
    ```
-7. Open a pull request. The `validate` GitHub Actions workflow runs `./scripts/check.sh` and must pass before merge. See [Validating locally](#validating-locally) for the full set of enforced rules.
+7. Open a pull request. The `validate` GitHub Actions workflow runs `./.github/scripts/check.sh` and must pass before merge. See [Validating locally](#validating-locally) for the full set of enforced rules.
 
 ### Path B: Skills authored in a product repository
 
 Best for skills that should ship and version with a product (HIP, MIGraphX, Ryzen AI, Lemonade, etc.).
 
 1. Add the skill folder to your product repository; a common location is `.agents/skills/<skill-name>/`.
-2. Open a pull request here that adds (or extends) an entry in [`scripts/sources.yml`](scripts/sources.yml) — the master list — naming your repo, a pinned ref, the sub-path that holds skill folders, and your skill's folder name.
+2. Open a pull request here that adds (or extends) an entry in [`.github/scripts/sources.yml`](.github/scripts/sources.yml) — the master list — naming your repo, a pinned ref, the sub-path that holds skill folders, and your skill's folder name.
 3. Once the catalog change merges, dispatch the **Import external skills** workflow from the Actions tab. It shallow-clones your repo at the pinned ref, vendors the skill into `skills/<name>/`, updates `.claude-plugin/marketplace.json`, and opens a follow-up pull request. Validation then runs against the same rules as in-repo skills before merge.
 
 ## Is this task a good fit for a skill?
@@ -182,14 +182,14 @@ Test the skill the way users will hit it:
 - [ ] Scripts handle expected errors and document their constants and dependencies
 - [ ] Prerequisites (ROCm version, GPU arch, container, env vars) are stated explicitly
 - [ ] Tested end-to-end on the target hardware against real prompts
-- [ ] `./scripts/check.sh` passes (CI runs this on every PR)
+- [ ] `./.github/scripts/check.sh` passes (CI runs this on every PR)
 
 ## Validating locally
 
-The structural rules from this guide (frontmatter shape, name format, description length, and `SKILL.md` body size) are enforced by `scripts/validate_skills.py` and run on every pull request. Run them locally before pushing:
+The structural rules from this guide (frontmatter shape, name format, description length, and `SKILL.md` body size) are enforced by `.github/scripts/validate_skills.py` and run on every pull request. Run them locally before pushing:
 
 ```bash
-./scripts/check.sh   # validates every skill and plugin manifests (same command CI runs)
+./.github/scripts/check.sh   # validates every skill and plugin manifests (same command CI runs)
 ```
 
 The validator checks every skill under `skills/` for:
@@ -202,4 +202,4 @@ The validator checks every skill under `skills/` for:
 It also checks the plugin manifests:
 
 - every skill under `skills/` has a matching entry in `.claude-plugin/marketplace.json` (and vice versa), with `source` set to `./skills/<name>` and a non-empty human-readable `description`
-- `.cursor-plugin/marketplace.json` is up to date — it mirrors `.claude-plugin/marketplace.json` and pulls shared identity (name, description, version, author) from `plugin-metadata.json` (regenerate with `./scripts/publish.sh`)
+- `.cursor-plugin/marketplace.json` is up to date — it mirrors `.claude-plugin/marketplace.json` and pulls shared identity (name, description, version, author) from `plugin-metadata.json` (regenerate with `./.github/scripts/publish.sh`)

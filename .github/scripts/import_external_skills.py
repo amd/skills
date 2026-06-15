@@ -3,7 +3,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["pyyaml>=6.0"]
 # ///
-"""Import skills from external repositories listed in `scripts/sources.yml`.
+"""Import skills from external repositories listed in `.github/scripts/sources.yml`.
 
 For each source, the script:
 
@@ -21,11 +21,11 @@ For each source, the script:
    skill (using the SKILL.md `description` as the marketplace blurb,
    unless the source declares an override).
 6. Removes any previously imported skill (one with a `.federated.json`)
-   that is no longer listed in `scripts/sources.yml`.
+   that is no longer listed in `.github/scripts/sources.yml`.
 
 Usage:
-    uv run scripts/import_external_skills.py            # write changes
-    uv run scripts/import_external_skills.py --dry-run  # report only
+    uv run .github/scripts/import_external_skills.py            # write changes
+    uv run .github/scripts/import_external_skills.py --dry-run  # report only
 
 The companion GitHub Actions workflow `import-external-skills` calls this
 script on manual dispatch and opens a pull request with the result.
@@ -48,7 +48,7 @@ from typing import Iterable
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CATALOG_FILE = Path(__file__).resolve().parent / "sources.yml"
 SKILLS_DIR = REPO_ROOT / "skills"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
@@ -400,7 +400,7 @@ def update_marketplace(results: Iterable[ImportResult], dry_run: bool) -> bool:
 
     # Drop entries that point at skills that no longer exist on disk so
     # the importer also cleans up the marketplace when an entry is
-    # removed from `scripts/sources.yml`.
+    # removed from `.github/scripts/sources.yml`.
     existing_dirs = {p.name for p in SKILLS_DIR.iterdir() if p.is_dir()}
     pruned = [p for p in plugins if not isinstance(p, dict) or p.get("name") in existing_dirs]
     if len(pruned) != len(plugins):
@@ -536,7 +536,7 @@ def main(argv: list[str] | None = None) -> int:
             if spec.folder in declared:
                 raise ValueError(
                     f"Skill name collision: {spec.folder!r} is listed by "
-                    "more than one source in scripts/sources.yml."
+                    "more than one source in .github/scripts/sources.yml."
                 )
             declared.add(spec.folder)
         all_results.extend(import_source(source, args.dry_run, log))

@@ -2,14 +2,14 @@
 # Validate every SKILL.md and that generated plugin manifests are up to date.
 #
 # Usage:
-#   ./scripts/check.sh              Validate every skill and check manifests.
-#   ./scripts/check.sh -h|--help    Print this help.
+#   ./.github/scripts/check.sh              Validate every skill and check manifests.
+#   ./.github/scripts/check.sh -h|--help    Print this help.
 #
 # Requires `uv` (https://github.com/astral-sh/uv).
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 usage() {
@@ -18,8 +18,8 @@ usage() {
 
 case "${1:-}" in
   "")
-    uv run scripts/validate_skills.py
-    uv run scripts/generate_cursor_marketplace.py --check
+    uv run .github/scripts/validate_skills.py
+    uv run .github/scripts/generate_cursor_marketplace.py --check
     ;;
   -h|--help)
     usage
