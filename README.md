@@ -55,25 +55,6 @@ Skills earn their keep on repeated, opinionated workflows, exactly where the AMD
 
 The initial catalog is organized into three focus areas, spanning the full stack from client to cloud. This catalog is expected to grow significantly as more skills land.
 
-### Server-Native
-
-Run and optimize on AMD Instinct.
-
-| Skill | What it does | Source |
-| --- | --- | --- |
-| [`serving-llms-on-instinct`](skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine/backend selection in later phases. | in-repo |
-| [`magpie`](skills/magpie/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM / SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
-
-### Cross-Stack
-
-Cross-stack skills, from client to cloud.
-
-| Skill | What it does | Source |
-| --- | --- | --- |
-| `hyperloom` | Autonomously optimizes LLM inference on AMD GPUs. | _planned_ |
-| `llvm-semantic-router` | Setup a vLLM router that semantically maps your request to the best available platform. | _planned_ |
-| `rocm-doctor` | Diagnose ROCm / PyTorch / llama.cpp failures on AMD GPUs against a fixed list of known misconfigurations. | _planned_ |
-
 ### Client-Native
 
 Run and optimize on Ryzen AI.
@@ -83,6 +64,26 @@ Run and optimize on Ryzen AI.
 | [`local-ai-use`](skills/local-ai-use/SKILL.md) | Route image generation, text-to-speech, and speech-to-text through a local AI server to reduce token cost. | in-repo |
 | [`local-ai-app-integration`](skills/local-ai-app-integration/SKILL.md) | Integrate local AI into cloud LLM apps for offline support, better privacy, and lower API costs. | in-repo |
 | `apu-memory-tuner` | Inspect and tune the shared-vs-dedicated memory split (GTT / UMA Frame Buffer) on AMD Ryzen APUs. | _planned_ |
+
+### Cross-Stack
+
+Cross-stack skills, from client to cloud.
+
+| Skill | What it does | Source |
+| --- | --- | --- |
+| `rocm-doctor` | Diagnose ROCm / PyTorch / llama.cpp failures on AMD GPUs against a fixed list of known misconfigurations. | _planned_ |
+| `llm-kernel-optimizer` (`hyperloom`) | Autonomously optimizes LLM inference on AMD GPUs. | _planned_ |
+| `llvm-semantic-router` | Setup a vLLM router that semantically maps your request to the best available platform. | _planned_ |
+
+### Server-Native
+
+Run and optimize on AMD Instinct.
+
+| Skill | What it does | Source |
+| --- | --- | --- |
+| [`serving-llms-on-instinct`](skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine/backend selection in later phases. | in-repo |
+| [`llm-kernel-evaluator` (`magpie`)](skills/magpie/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM / SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
+
 
 ## A federated catalog
 
