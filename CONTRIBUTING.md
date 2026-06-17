@@ -196,6 +196,34 @@ Test the skill the way users will hit it:
 2. Run the skill end-to-end on a real machine. Watch where the agent hesitates, asks unnecessary questions, or goes off-script.
 3. Bring those observations back into the skill, usually as a sharper description, a clearer default, or a missing prerequisite, rather than adding more prose.
 
+## Behavioral tests
+
+Structural validation proves a skill is *well-formed*; behavioral tests prove it
+*works*. A behavioral test runs a real agent against the skill once and grades
+what the agent did — see the harness in [`eval/behavioral/`](eval/behavioral/).
+
+Conventions:
+
+- **One file per skill, centralized.** Put the test at
+  `eval/behavioral/tests/test_<skill>.py`, swapping the skill name's hyphens for
+  underscores (`local-ai-use` → `test_local_ai_use.py`). Tests live here, not
+  inside `skills/<name>/`, because the harness copies the skill folder into the
+  agent's sandbox at runtime — test files in there would pollute the workspace.
+- **Write checks against behavior.** Combine deterministic assertions
+  (`logs_contains`, `workspace_contains`) with LLM-judged expectations
+  (`should`, `should_not`). See `test_local_ai_use.py` for the pattern.
+
+Run one locally (needs the `claude` CLI authenticated and any per-skill
+prerequisites, e.g. a reachable Lemonade Server for `local-ai-use`):
+
+```bash
+pip install -r eval/behavioral/requirements.txt
+cd eval/behavioral && pytest tests/test_local_ai_use.py
+```
+
+In CI, the `behavioral` workflow runs these tests, but **only** when a
+maintainer adds the `run_behavioral` label to a PR for safety.
+
 ## Pre-publish checklist
 
 - [ ] Description states the user's goal and includes likely trigger phrases

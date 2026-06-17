@@ -1,0 +1,199 @@
+name: behavioral
+
+# Behavioral tests run a real agent against a skill and grade what it did (see
+# eval/behavioral/). They cost real API tokens and, for some skills, install
+# and exercise local models, so the actual test job is opt-in. The design:
+#
+#   * selective -- only the skills whose folder or test changed are run (the
+#     whole suite runs when the shared harness changes). See
+#     .github/scripts/select_behavioral.py.
+#   * label-gated execution -- the test job (which holds ANTHROPIC_API_KEY)
+#     only runs on manual dispatch or when a maintainer adds the
+#     `run_behavioral` label, keeping the secret away from untrusted / fork
+#     code that runs with tool permissions bypassed.
+#   * required when relevant -- when a PR changes a skill or test that maps to a
+#     behavioral test, the `behavioral` gate FAILS until the label is added and
+#     the tests pass. A PR that touches nothing testable passes neutrally.
+#   * dispatchable -- run any subset by hand from the Actions tab.
+#
+# Shape mirrors validate.yml: discover -> matrix -> single aggregate gate, so
+# branch protection can require just the `behavioral` check. `discover` is
+# secret-free, so it runs on every matching PR to decide whether the label is
+# required; only `behavioral` is gated on the label.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - "skills/**"
+      - "eval/behavioral/**"
+      - "eval/claude_eval.py"
+      - ".github/workflows/behavioral.yml"
+      - ".github/scripts/select_behavioral.py"
+  workflow_dispatch:
+    inputs:
+      skills:
+        description: "Comma-separated skill names to test (blank = every skill that has a behavioral test)."
+        required: false
+        default: ""
+
+concurrency:
+  group: behavioral-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BEHAVIORAL_LABEL: run_behavioral
+
+jobs:
+  # Decide which skills the change affects. This is secret-free (just git diff +
+  # a Python mapping), so it runs on every matching PR regardless of the label;
+  # the label only gates the test job below. Its `any` output drives whether the
+  # label is required for this PR.
+  discover:
+    name: Select behavioral tests
+    runs-on: ubuntu-latest
+    outputs:
+      skills: ${{ steps.select.outputs.skills }}
+      any: ${{ steps.select.outputs.any }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # Need the merge base so `git diff` can see what the PR changed.
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Select skills
+        id: select
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "${{ github.event.inputs.skills }}" ]; then
+              skills=$(uv run .github/scripts/select_behavioral.py --names "${{ github.event.inputs.skills }}")
+            else
+              skills=$(uv run .github/scripts/select_behavioral.py --all)
+            fi
+          else
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+            skills=$(git diff --name-only "$base" "$head" \
+              | uv run .github/scripts/select_behavioral.py --changed)
+          fi
+          echo "Selected skills: $skills"
+          echo "skills=$skills" >> "$GITHUB_OUTPUT"
+          if [ "$skills" = "[]" ]; then
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  behavioral:
+    name: Behavioral (${{ matrix.skill }})
+    needs: discover
+    # Run only when something testable changed AND the run is authorized:
+    # manual dispatch, or a maintainer added the `run_behavioral` label. This is
+    # the gate that protects the ANTHROPIC_API_KEY secret.
+    if: >-
+      needs.discover.outputs.any == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       contains(github.event.pull_request.labels.*.name, 'run_behavioral'))
+    runs-on: ubuntu-latest
+    # Behavioral runs install local models and can take a while; cap it so a
+    # hung agent or stalled model pull fails the job instead of burning minutes.
+    timeout-minutes: 45
+    strategy:
+      # One skill failing should not hide the others' results.
+      fail-fast: false
+      matrix:
+        skill: ${{ fromJson(needs.discover.outputs.skills) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install the claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install behavioral test dependencies
+        run: pip install -r eval/behavioral/requirements.txt
+
+      - name: Run behavioral test for ${{ matrix.skill }}
+        working-directory: eval/behavioral
+        env:
+          # The CLI authenticates from this key. This job only runs on labeled
+          # PRs and manual dispatch (see this job's `if:` above).
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Lets the harness default to this skill if a test relies on the env.
+          BEHAVIORAL_SKILL: ${{ matrix.skill }}
+        run: |
+          set -euo pipefail
+          test_file="tests/test_$(echo '${{ matrix.skill }}' | tr '-' '_').py"
+          echo "Running $test_file"
+          pytest "$test_file"
+
+  # Single aggregate gate. Mark THIS check required in branch protection.
+  #
+  #   * nothing testable changed       -> pass (neutral).
+  #   * testable change, label missing -> FAIL, asking for the label.
+  #   * testable change, authorized    -> pass iff the behavioral job passed.
+  behavioral-gate:
+    name: behavioral
+    needs: [discover, behavioral]
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      DISCOVER_RESULT: ${{ needs.discover.result }}
+      BEHAVIORAL_RESULT: ${{ needs.behavioral.result }}
+      AFFECTED: ${{ needs.discover.outputs.any }}
+      SKILLS: ${{ needs.discover.outputs.skills }}
+      # 'true' only on a PR that carries the label; '' / 'false' otherwise.
+      LABEL_PRESENT: ${{ contains(github.event.pull_request.labels.*.name, 'run_behavioral') }}
+    steps:
+      - name: Verify behavioral results
+        run: |
+          echo "discover:    $DISCOVER_RESULT"
+          echo "behavioral:  $BEHAVIORAL_RESULT"
+          echo "affected:    $AFFECTED ($SKILLS)"
+          echo "label:       $LABEL_PRESENT"
+
+          # If discovery itself failed, surface that rather than guessing.
+          if [ "$DISCOVER_RESULT" != "success" ]; then
+            echo "The discover job did not succeed ($DISCOVER_RESULT)." >&2
+            exit 1
+          fi
+
+          # No skill or behavioral test changed: nothing to gate on.
+          if [ "$AFFECTED" != "true" ]; then
+            echo "No behavioral tests affected by this change."
+            exit 0
+          fi
+
+          # Something testable changed. Manual dispatch and labeled PRs are
+          # authorized to run the tests, so the gate reflects the test result.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$LABEL_PRESENT" = "true" ]; then
+            if [ "$BEHAVIORAL_RESULT" = "success" ]; then
+              echo "All affected behavioral tests passed."
+              exit 0
+            fi
+            echo "One or more behavioral tests failed ($BEHAVIORAL_RESULT)." >&2
+            exit 1
+          fi
+
+          # Testable change on a PR with no label: require it.
+          echo "::error::This PR changes a skill or behavioral test ($SKILLS) but the '${BEHAVIORAL_LABEL}' label is not set." >&2
+          echo "Add the '${BEHAVIORAL_LABEL}' label to run the required behavioral tests for these changes." >&2
+          exit 1
