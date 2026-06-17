@@ -2,20 +2,24 @@ name: behavioral
 
 # Behavioral tests run a real agent against a skill and grade what it did (see
 # eval/behavioral/). They cost real API tokens and, for some skills, install
-# and exercise local models, so they are NOT part of the always-on PR gate.
-# Instead they are:
+# and exercise local models, so the actual test job is opt-in. The design:
 #
-#   * label-gated on PRs -- a maintainer adds the `run-behavioral` label to opt
-#     a PR in. This keeps the ANTHROPIC_API_KEY secret away from untrusted /
-#     fork code, which runs with tool permissions bypassed.
 #   * selective -- only the skills whose folder or test changed are run (the
 #     whole suite runs when the shared harness changes). See
 #     .github/scripts/select_behavioral.py.
+#   * label-gated execution -- the test job (which holds ANTHROPIC_API_KEY)
+#     only runs on manual dispatch or when a maintainer adds the
+#     `run-behavioral` label, keeping the secret away from untrusted / fork
+#     code that runs with tool permissions bypassed.
+#   * required when relevant -- when a PR changes a skill or test that maps to a
+#     behavioral test, the `behavioral` gate FAILS until the label is added and
+#     the tests pass. A PR that touches nothing testable passes neutrally.
 #   * dispatchable -- run any subset by hand from the Actions tab.
 #
 # Shape mirrors validate.yml: discover -> matrix -> single aggregate gate, so
-# branch protection can require just the `behavioral` check. That gate passes
-# (neutral) when the label is absent, so it never blocks an unlabeled PR.
+# branch protection can require just the `behavioral` check. `discover` is
+# secret-free, so it runs on every matching PR to decide whether the label is
+# required; only `behavioral` is gated on the label.
 
 on:
   pull_request:
@@ -44,15 +48,12 @@ env:
   BEHAVIORAL_LABEL: run-behavioral
 
 jobs:
-  # Decide which skills to run. On PRs this is gated on the `run-behavioral`
-  # label so the secret is never exposed to code that a maintainer hasn't
-  # vouched for.
+  # Decide which skills the change affects. This is secret-free (just git diff +
+  # a Python mapping), so it runs on every matching PR regardless of the label;
+  # the label only gates the test job below. Its `any` output drives whether the
+  # label is required for this PR.
   discover:
     name: Select behavioral tests
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' &&
-       contains(github.event.pull_request.labels.*.name, 'run-behavioral'))
     runs-on: ubuntu-latest
     outputs:
       skills: ${{ steps.select.outputs.skills }}
@@ -94,7 +95,13 @@ jobs:
   behavioral:
     name: Behavioral (${{ matrix.skill }})
     needs: discover
-    if: needs.discover.outputs.any == 'true'
+    # Run only when something testable changed AND the run is authorized:
+    # manual dispatch, or a maintainer added the `run-behavioral` label. This is
+    # the gate that protects the ANTHROPIC_API_KEY secret.
+    if: >-
+      needs.discover.outputs.any == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       contains(github.event.pull_request.labels.*.name, 'run-behavioral'))
     runs-on: ubuntu-latest
     # Behavioral runs install local models and can take a while; cap it so a
     # hung agent or stalled model pull fails the job instead of burning minutes.
@@ -127,8 +134,8 @@ jobs:
       - name: Run behavioral test for ${{ matrix.skill }}
         working-directory: eval/behavioral
         env:
-          # The CLI authenticates from this key; it is only present on labeled
-          # PRs and manual dispatch (see the `discover` gate above).
+          # The CLI authenticates from this key. This job only runs on labeled
+          # PRs and manual dispatch (see this job's `if:` above).
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # Lets the harness default to this skill if a test relies on the env.
           BEHAVIORAL_SKILL: ${{ matrix.skill }}
@@ -139,33 +146,54 @@ jobs:
           pytest "$test_file"
 
   # Single aggregate gate. Mark THIS check required in branch protection.
-  # It passes when behavioral tests were not requested (no label) and when
-  # every selected behavioral job succeeded, so it never blocks an unlabeled PR.
+  #
+  #   * nothing testable changed       -> pass (neutral).
+  #   * testable change, label missing -> FAIL, asking for the label.
+  #   * testable change, authorized    -> pass iff the behavioral job passed.
   behavioral-gate:
     name: behavioral
     needs: [discover, behavioral]
     if: always()
     runs-on: ubuntu-latest
+    env:
+      DISCOVER_RESULT: ${{ needs.discover.result }}
+      BEHAVIORAL_RESULT: ${{ needs.behavioral.result }}
+      AFFECTED: ${{ needs.discover.outputs.any }}
+      SKILLS: ${{ needs.discover.outputs.skills }}
+      # 'true' only on a PR that carries the label; '' / 'false' otherwise.
+      LABEL_PRESENT: ${{ contains(github.event.pull_request.labels.*.name, 'run-behavioral') }}
     steps:
       - name: Verify behavioral results
         run: |
-          discover_result="${{ needs.discover.result }}"
-          behavioral_result="${{ needs.behavioral.result }}"
-          echo "discover:   $discover_result"
-          echo "behavioral: $behavioral_result"
+          echo "discover:    $DISCOVER_RESULT"
+          echo "behavioral:  $BEHAVIORAL_RESULT"
+          echo "affected:    $AFFECTED ($SKILLS)"
+          echo "label:       $LABEL_PRESENT"
 
-          # Label absent (or dispatch skipped): behavioral tests were not
-          # requested for this run, so the gate is a no-op pass.
-          if [ "$discover_result" = "skipped" ]; then
-            echo "Behavioral tests not requested (no '${BEHAVIORAL_LABEL}' label)."
+          # If discovery itself failed, surface that rather than guessing.
+          if [ "$DISCOVER_RESULT" != "success" ]; then
+            echo "The discover job did not succeed ($DISCOVER_RESULT)." >&2
+            exit 1
+          fi
+
+          # No skill or behavioral test changed: nothing to gate on.
+          if [ "$AFFECTED" != "true" ]; then
+            echo "No behavioral tests affected by this change."
             exit 0
           fi
 
-          # Nothing matched the change set, or everything that ran passed.
-          if [ "$behavioral_result" = "success" ] || [ "$behavioral_result" = "skipped" ]; then
-            echo "All requested behavioral tests passed."
-            exit 0
+          # Something testable changed. Manual dispatch and labeled PRs are
+          # authorized to run the tests, so the gate reflects the test result.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$LABEL_PRESENT" = "true" ]; then
+            if [ "$BEHAVIORAL_RESULT" = "success" ]; then
+              echo "All affected behavioral tests passed."
+              exit 0
+            fi
+            echo "One or more behavioral tests failed ($BEHAVIORAL_RESULT)." >&2
+            exit 1
           fi
 
-          echo "One or more behavioral tests failed." >&2
+          # Testable change on a PR with no label: require it.
+          echo "::error::This PR changes a skill or behavioral test ($SKILLS) but the '${BEHAVIORAL_LABEL}' label is not set." >&2
+          echo "Add the '${BEHAVIORAL_LABEL}' label to run the required behavioral tests for these changes." >&2
           exit 1
