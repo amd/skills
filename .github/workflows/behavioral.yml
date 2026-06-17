@@ -9,7 +9,7 @@ name: behavioral
 #     .github/scripts/select_behavioral.py.
 #   * label-gated execution -- the test job (which holds ANTHROPIC_API_KEY)
 #     only runs on manual dispatch or when a maintainer adds the
-#     `run-behavioral` label, keeping the secret away from untrusted / fork
+#     `run_behavioral` label, keeping the secret away from untrusted / fork
 #     code that runs with tool permissions bypassed.
 #   * required when relevant -- when a PR changes a skill or test that maps to a
 #     behavioral test, the `behavioral` gate FAILS until the label is added and
@@ -45,7 +45,7 @@ permissions:
   contents: read
 
 env:
-  BEHAVIORAL_LABEL: run-behavioral
+  BEHAVIORAL_LABEL: run_behavioral
 
 jobs:
   # Decide which skills the change affects. This is secret-free (just git diff +
@@ -96,12 +96,12 @@ jobs:
     name: Behavioral (${{ matrix.skill }})
     needs: discover
     # Run only when something testable changed AND the run is authorized:
-    # manual dispatch, or a maintainer added the `run-behavioral` label. This is
+    # manual dispatch, or a maintainer added the `run_behavioral` label. This is
     # the gate that protects the ANTHROPIC_API_KEY secret.
     if: >-
       needs.discover.outputs.any == 'true' &&
       (github.event_name == 'workflow_dispatch' ||
-       contains(github.event.pull_request.labels.*.name, 'run-behavioral'))
+       contains(github.event.pull_request.labels.*.name, 'run_behavioral'))
     runs-on: ubuntu-latest
     # Behavioral runs install local models and can take a while; cap it so a
     # hung agent or stalled model pull fails the job instead of burning minutes.
@@ -161,7 +161,7 @@ jobs:
       AFFECTED: ${{ needs.discover.outputs.any }}
       SKILLS: ${{ needs.discover.outputs.skills }}
       # 'true' only on a PR that carries the label; '' / 'false' otherwise.
-      LABEL_PRESENT: ${{ contains(github.event.pull_request.labels.*.name, 'run-behavioral') }}
+      LABEL_PRESENT: ${{ contains(github.event.pull_request.labels.*.name, 'run_behavioral') }}
     steps:
       - name: Verify behavioral results
         run: |

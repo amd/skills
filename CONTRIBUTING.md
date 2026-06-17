@@ -222,7 +222,7 @@ cd eval/behavioral && pytest tests/test_local_ai_use.py
 ```
 
 In CI, the `behavioral` workflow runs these tests, but **only** when a
-maintainer adds the `run-behavioral` label to a PR for safety.
+maintainer adds the `run_behavioral` label to a PR for safety.
 
 ## Pre-publish checklist
 
