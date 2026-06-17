@@ -139,6 +139,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # Lets the harness default to this skill if a test relies on the env.
           BEHAVIORAL_SKILL: ${{ matrix.skill }}
+          # Cost cap: sonnet only. The harness also enforces this under CI.
+          BEHAVIORAL_MODEL: sonnet
         run: |
           set -euo pipefail
           test_file="tests/test_$(echo '${{ matrix.skill }}' | tr '-' '_').py"

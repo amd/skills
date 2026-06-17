@@ -44,6 +44,32 @@ DEFAULT_SKILL = os.environ.get("BEHAVIORAL_SKILL", "local-ai-use")
 DEFAULT_MODEL = os.environ.get("BEHAVIORAL_MODEL", "sonnet")
 DEFAULT_EFFORT = os.environ.get("BEHAVIORAL_EFFORT", "high")
 
+# Automated runs are capped at sonnet: a behavioral run makes real cloud calls
+# (agent run + LLM judge), so a workflow picking an expensive model can quietly
+# run up a large bill. No override -- the cap is non-negotiable in CI.
+AUTOMATED_MODEL = "sonnet"
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _is_automated_env() -> bool:
+    """True under CI / an automated workflow (GitHub Actions sets both)."""
+    return any(
+        os.environ.get(var, "").strip().lower() in _TRUTHY
+        for var in ("CI", "GITHUB_ACTIONS")
+    )
+
+
+def _enforce_model_policy(model: str | None) -> str | None:
+    """Coerce non-sonnet models to sonnet in CI; pass through otherwise."""
+    if model is None or not _is_automated_env() or "sonnet" in model.lower():
+        return model
+    print(
+        f"[behavioral] automated run: coercing model '{model}' -> "
+        f"'{AUTOMATED_MODEL}' to cap token usage.",
+        flush=True,
+    )
+    return AUTOMATED_MODEL
+
 
 def _claude_env() -> dict[str, str]:
     """Environment for `claude` subprocesses.
@@ -70,6 +96,7 @@ def check_api_reachable(model: str | None = DEFAULT_MODEL, timeout: int = 60) ->
     if not claude_bin:
         return False, "'claude' CLI not found on PATH"
 
+    model = _enforce_model_policy(model)
     cmd = [claude_bin, "-p", "Reply with the single word: ok", "--output-format", "json"]
     if model:
         cmd += ["--model", model]
@@ -314,7 +341,8 @@ class Agent:
         skill: str = DEFAULT_SKILL,
         effort: str | None = DEFAULT_EFFORT,
     ) -> None:
-        self.model = model
+        # Coerce here so the agent run and the LLM judge share the capped model.
+        self.model = _enforce_model_policy(model)
         self.skill = skill
         self.effort = effort
         self.workspace: Path | None = None
