@@ -30,6 +30,11 @@ For each source, the script:
 Usage:
     uv run .github/scripts/import_external_skills.py            # write changes
     uv run .github/scripts/import_external_skills.py --dry-run  # report only
+    uv run .github/scripts/import_external_skills.py --only magpie  # one skill
+
+The `--only` flag (repeatable) restricts the run to the named skill
+folder(s): other skills in the catalog are skipped and pruning is limited
+to the named skills, so unrelated federated skills are never removed.
 
 The companion GitHub Actions workflow `import-external-skills` calls this
 script on manual dispatch and opens a pull request with the result.
@@ -553,9 +558,33 @@ def main(argv: list[str] | None = None) -> int:
         default=CATALOG_FILE,
         help=f"Path to the catalog file (default: {CATALOG_FILE}).",
     )
+    parser.add_argument(
+        "--only",
+        action="append",
+        metavar="SKILL",
+        help=(
+            "Import only the named skill folder (repeatable). When set, "
+            "skills not named here are left untouched and pruning is "
+            "restricted to the named skills, so other federated skills are "
+            "never removed."
+        ),
+    )
     args = parser.parse_args(argv)
 
     sources = parse_sources(args.catalog)
+
+    only = set(args.only or [])
+    if only:
+        known = {spec.folder for source in sources for spec in source.skills}
+        unknown = only - known
+        if unknown:
+            raise ValueError(
+                "--only names skill(s) not present in the catalog: "
+                + ", ".join(sorted(unknown))
+            )
+        for source in sources:
+            source.skills = [s for s in source.skills if s.folder in only]
+        sources = [source for source in sources if source.skills]
     log: list[str] = []
     declared: set[str] = set()
     all_results: list[ImportResult] = []
@@ -573,7 +602,15 @@ def main(argv: list[str] | None = None) -> int:
             declared.add(spec.folder)
         all_results.extend(import_source(source, args.dry_run, log))
 
-    pruned = prune_orphans(declared, existing_federated, args.dry_run, log)
+    # With --only we deliberately ignore skills the user didn't name, so
+    # restrict orphan pruning to just those skills. Otherwise every other
+    # federated skill would look like an orphan and be deleted.
+    prunable = (
+        {name: marker for name, marker in existing_federated.items() if name in only}
+        if only
+        else existing_federated
+    )
+    pruned = prune_orphans(declared, prunable, args.dry_run, log)
     marketplace_changed = update_marketplace(all_results, args.dry_run)
 
     for line in log:
