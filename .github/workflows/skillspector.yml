@@ -1,9 +1,14 @@
 name: skillspector
 
-# Statically scan every skill under skills/ with SkillSpector to catch malicious patterns and
-# security risks before they land on main. LLM semantic analysis is
-# intentionally disabled (--no-llm): the scan is fully static, needs no API
+# Statically scan skills under skills/ with SkillSpector to catch malicious
+# patterns and security risks before they land on main. LLM semantic analysis
+# is intentionally disabled (--no-llm): the scan is fully static, needs no API
 # key, and runs in an isolated environment via uvx.
+#
+# To avoid re-scanning the entire catalog on every change, the discovery job
+# only selects the skills that actually changed in the diff. When the scanning
+# machinery itself changes (this workflow, the gate, or the allowlist) we scan
+# every skill instead -- see .github/scripts/changed_skills.py.
 #
 # Mirrors the discover-matrix-aggregate shape of validate.yml so each skill
 # is its own pass/fail and a single aggregate check (the `skillspector` job)
@@ -13,17 +18,24 @@ on:
   push:
     branches: [main]
   pull_request:
+    # Keep this in sync with INFRA_PATHS in changed_skills.py: any path here
+    # that isn't a skill forces a full re-scan of every skill when it changes.
     paths:
       - "skills/**"
       - ".github/workflows/skillspector.yml"
+      - ".github/scripts/changed_skills.py"
+      - ".github/scripts/skillspector_gate.py"
+      - ".github/skillspector-allow.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  # Enumerate the skills so the scan job can fan out over them with a matrix,
-  # reusing the same discovery script that validate.yml relies on.
+  # Enumerate the skills the scan job should fan out over. Instead of always
+  # listing every skill, select only the ones that changed relative to the
+  # diff base (or all skills when the scanning machinery itself changed). The
+  # resulting JSON array may be empty, in which case scan-skill is skipped.
   discover-skills:
     name: Discover skills
     runs-on: ubuntu-latest
@@ -32,13 +44,30 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # Need history so we can diff against the base ref below.
+          fetch-depth: 0
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
-      - name: List skills
+      # On pull_request, diff against the PR base; on push, diff against the
+      # commit we pushed over; otherwise (manual run) leave it empty so the
+      # script falls back to scanning every skill.
+      - name: Determine diff base
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "ref=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "ref=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Select changed skills
         id: discover
-        run: echo "skills=$(uv run .github/scripts/validate_skills.py --list)" >> "$GITHUB_OUTPUT"
+        run: echo "skills=$(uv run .github/scripts/changed_skills.py --base '${{ steps.base.outputs.ref }}')" >> "$GITHUB_OUTPUT"
 
   scan-skill:
     name: Scan skill
@@ -116,9 +145,13 @@ jobs:
     steps:
       - name: Verify all skill scans passed
         run: |
-          echo "scan-skill result: ${{ needs.scan-skill.result }}"
-          if [ "${{ needs.scan-skill.result }}" != "success" ]; then
+          result="${{ needs.scan-skill.result }}"
+          echo "scan-skill result: $result"
+          # "skipped" means the matrix was empty -- no changed skills to scan,
+          # which is a legitimate pass. Anything other than success/skipped is
+          # a real failure.
+          if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
             echo "One or more skills failed the SkillSpector scan." >&2
             exit 1
           fi
-          echo "All skills passed the SkillSpector scan."
+          echo "All changed skills passed the SkillSpector scan."
