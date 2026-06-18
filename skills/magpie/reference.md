@@ -100,4 +100,4 @@ kernels:
 
 ## Benchmark config YAML
 
-Top-level key `benchmark:` with `framework`, `model`, `precision`, `envs`, `profiler`, `gap_analysis`, `timeout_seconds`, etc. See `examples/benchmarks/benchmark_vllm_dsr1.yaml` and `docs/benchmark.md`.
+Top-level key `benchmark:` with `framework`, `model`, `precision`, `envs`, `profiler`, `gap_analysis`, `timeout_seconds`, etc. See `examples/benchmarks/benchmark_vllm_dsr1.yaml` and `docs/how-to/benchmark.md`.
