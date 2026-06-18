@@ -32,7 +32,7 @@ sources:
       - magpie
   - name: amd-agi-tracelens
     repo: AMD-AGI/TraceLens
-    ref: 9b461bb25192ce73cb70de912ce27df515b56b44
+    ref: feat/gw_rename_directories
     path: TraceLens/Agent/Analysis/skills
     license: MIT
     skills:
