@@ -30,3 +30,10 @@ sources:
     license: MIT
     skills:
       - magpie
+  - name: amd-agi-tracelens
+    repo: AMD-AGI/TraceLens
+    ref: 9b461bb25192ce73cb70de912ce27df515b56b44
+    path: TraceLens/Agent/Analysis/skills
+    license: MIT
+    skills:
+      - analysis-orchestrator
