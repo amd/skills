@@ -2,7 +2,7 @@
 
 ## Description
 
-Perform GPU kernel correctness and performance evaluation and LLM inference benchmarking with Magpie (HIP/CUDA/PyTorch kernels, vLLM/SGLang benchmarks, TraceLens, and torch-trace gap analysis).
+Performs GPU kernel correctness and performance evaluation and LLM inference benchmarking with Magpie. Analyzes single or multiple kernels (HIP/CUDA/PyTorch), compares kernel implementations, runs vLLM/SGLang benchmarks with profiling and TraceLens, and runs gap analysis on torch traces.
 
 ## Owner
 
