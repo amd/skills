@@ -19,6 +19,10 @@ talks to it on `http://localhost:PORT/api/v1`. The user gets local, private,
 hardware-optimized inference (CPU, AMD iGPU/dGPU, XDNA2 NPU) with no separate
 install.
 
+**What you'll end up with:** one new launcher module (~30 lines), one config
+change to the existing HTTP client (base URL + API key), one vendored binary
+under `vendor/lemonade/`. Typical integration: 1–2 hours on a new codebase.
+
 ## When this skill is the right tool
 
 Use this skill when **all** of the following are true:
@@ -41,10 +45,10 @@ This skill follows one fixed sequence. Do not deviate without a stated reason.
 ```
 [ ] 1. Survey the app's current AI integration
 [ ] 2. Pick a model + backend profile
-[ ] 3. Place Embeddable Lemonade in the app's tree
+[ ] 3. Place Embeddable Lemonade in the app's tree (full package, not just the binary)
 [ ] 4. Add a `lemond` launcher (subprocess + API key + port)
-[ ] 5. Re-point the existing client at lemond
-[ ] 6. Wait for /v1/health and pre-load the default model
+[ ] 5. Re-point the existing client at lemond (set HTTP timeout to 120s)
+[ ] 6. Wait for /api/v1/health — do not pre-load; surface first-run latency to user
 [ ] 7. Wire shutdown and error recovery
 ```
 
@@ -100,22 +104,65 @@ For more options and tradeoffs, see [reference.md](reference.md).
 
 ## Step 3: Place Embeddable Lemonade in the app's tree and install backends
 
-Get the embeddable artifact from the latest Lemonade release:
+**Get the embeddable artifact** from the latest Lemonade release:
+
+```
+https://github.com/lemonade-sdk/lemonade/releases/latest
+```
+
+Download the file matching your target OS:
 
 - Windows: `lemonade-embeddable-{VERSION}-windows-x64.zip`
-- Linux: `lemonade-embeddable-{VERSION}-ubuntu-x64.tar.gz`
+- Linux:   `lemonade-embeddable-{VERSION}-ubuntu-x64.tar.gz`
 
-Unpack into the app source tree at `vendor/lemonade/` (or whatever the app's
-existing convention for vendored binaries is). The expected layout after
-customization:
+**First, create the target directory** — it does not exist in a fresh repo:
+
+```powershell
+# Windows
+New-Item -ItemType Directory -Force vendor\lemonade
+```
+
+```bash
+# Linux
+mkdir -p vendor/lemonade
+```
+
+Then download and unpack on Windows (PowerShell):
+
+```powershell
+$ver = (Invoke-RestMethod https://api.github.com/repos/lemonade-sdk/lemonade/releases/latest).tag_name
+Invoke-WebRequest "https://github.com/lemonade-sdk/lemonade/releases/download/$ver/lemonade-embeddable-$ver-windows-x64.zip" -OutFile lemond.zip
+Expand-Archive lemond.zip -DestinationPath "$env:TEMP\lemond-unpack"
+Copy-Item -Recurse "$env:TEMP\lemond-unpack\lemonade-embeddable-$ver-windows-x64\*" vendor\lemonade\
+```
+
+On Linux (bash):
+
+```bash
+VER=$(curl -s https://api.github.com/repos/lemonade-sdk/lemonade/releases/latest | grep tag_name | cut -d'"' -f4)
+curl -L "https://github.com/lemonade-sdk/lemonade/releases/download/$VER/lemonade-embeddable-$VER-ubuntu-x64.tar.gz" | tar -xz --strip-components=1 -C vendor/lemonade
+```
+
+> **Copy the full package, not just the binary.** The archive contains
+> `lemond[.exe]`, `lemonade[.exe]`, `LICENSE`, and `resources/`. The
+> `resources/` directory is required — without it lemond starts and passes the
+> health check but fails on every model and backend request. Copying only the
+> binary produces a server that looks healthy but cannot function.
+
+> **`lemond` vs `lemonade` CLI:** `lemond` is the embedded server binary that
+> ships with the app. The `lemonade` CLI is a separate packaging tool used
+> only during development/build time to install backends. Install it once on
+> the developer machine with `pip install lemonade-sdk`.
+
+The expected layout after unpacking and customization:
 
 ```
 vendor/lemonade/
   lemond[.exe]                     # the only binary the app ships
   LICENSE
-  config.json                      # generated on first run
+  config.json                      # generated on first run; commit a seed copy
   resources/
-    server_models.json             # trim to just the models you ship
+    server_models.json             # do not edit; use GET /api/v1/models at runtime
     backend_versions.json
   bin/                             # backends bundled at packaging time
     llamacpp/vulkan/llama-server[.exe]
@@ -123,24 +170,41 @@ vendor/lemonade/
     models--unsloth--Qwen3-4B-GGUF/
 ```
 
+> **`server_models.json`:** Do not edit or rely on this file. It can be stale.
+> The only authoritative model list is `GET /api/v1/models` on a running
+> `lemond` instance with the backend already installed.
+
 **Bundle decisions: pick deliberately**
 
 - **Backends:** Bundle `llamacpp:vulkan` at packaging time (works on every
   GPU). Install `llamacpp:rocm` at first run on supported AMD systems via
-  `POST /v1/install` after probing `GET /v1/system-info`. Never ship every
-  backend, or the artifact balloons.
+  `POST /api/v1/install` after probing `GET /api/v1/system-info`. Never ship
+  every backend, or the artifact balloons.
 - **Models:** Either bundle the default model under `models/` (offline
-  install, larger installer) **or** pull on first run with `POST /v1/pull`
-  (smaller installer, needs network). Pick one and document it.
+  install, larger installer) **or** pull on first run with
+  `POST /api/v1/pull` (smaller installer, needs network). Pick one and
+  document it.
 - **`models_dir`:** Set to `./models` in `config.json` to keep weights
   private to the app. Leave as `auto` only if the user explicitly wants to
   share weights with other apps.
 
-**Install the backend before running any model.** Right after placing
-`lemond`, install the backend your chosen recipe needs — a model won't load
-without it. Use the CLI at packaging time, e.g. `lemonade backends install
-flm:npu` (or `llamacpp:vulkan`, `sd-cpp:cpu`, etc.), or `POST /v1/install`
-at first run for hardware-specific backends like `llamacpp:rocm`.
+**Backend install timing — two distinct paths:**
+
+> **Packaging time** (developer machine, before bundling):
+> ```
+> lemonade backends install llamacpp:vulkan
+> lemonade backends install flm:npu    # Windows NPU path only
+> ```
+> This bakes the backend binaries into `vendor/lemonade/bin/` before the app
+> ships. `lemond` does not need to be running.
+>
+> **First-run / runtime** (user's machine, after `lemond` is running):
+> ```http
+> POST /api/v1/install
+> {"recipe": "llamacpp", "backend": "rocm"}
+> ```
+> Use this for hardware-specific backends (e.g. `llamacpp:rocm`) that cannot
+> be bundled universally. `lemond` must already be running (Step 4 complete).
 
 ## Step 4: Add a `lemond` launcher
 
@@ -150,6 +214,14 @@ The launcher is a thin process supervisor. Its only jobs:
 2. Pick a free localhost port.
 3. Spawn `lemond <dir> --port <port>` with `LEMONADE_API_KEY` set.
 4. Expose the chosen `port` and `key` to the rest of the app.
+
+> **Dev-mode file watchers:** If the app runs with a file watcher (Tauri,
+> Electron, Next.js, Vite, etc.) that watches the source tree, ensure
+> `vendor/lemonade/` is excluded from the watched paths. Lemond writes config
+> and cache files at runtime; a watcher that picks these up will restart the
+> app, kill the lemond subprocess, and spawn a new one on a new port —
+> silently breaking any in-flight transcription. Add `vendor/` (or the
+> equivalent) to the watcher's ignore list before testing.
 
 **Python reference launcher** (adapt to the app's language):
 
@@ -165,17 +237,27 @@ def _free_port() -> int:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
-def start_lemond() -> tuple[subprocess.Popen, str, int]:
-    port = _free_port()
-    key = secrets.token_urlsafe(32)
-    env = {**os.environ, "LEMONADE_API_KEY": key}
-    proc = subprocess.Popen(
-        [str(LEMOND_BIN), str(LEMOND_DIR), "--port", str(port)],
-        env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-    )
-    _wait_for_health(port, key, timeout_s=30)
-    return proc, key, port
+def start_lemond(retries: int = 3) -> tuple[subprocess.Popen, str, int]:
+    # _free_port releases the socket before lemond binds — another process
+    # can grab the port in that window. Retry with a fresh port on failure.
+    last_err: Exception | None = None
+    for _ in range(retries):
+        port = _free_port()
+        key = secrets.token_urlsafe(32)
+        env = {**os.environ, "LEMONADE_API_KEY": key}
+        proc = subprocess.Popen(
+            [str(LEMOND_BIN), str(LEMOND_DIR), "--port", str(port)],
+            env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        try:
+            _wait_for_health(port, key, timeout_s=30)
+            return proc, key, port
+        except RuntimeError as e:
+            proc.kill()
+            proc.wait()
+            last_err = e
+    raise RuntimeError(f"lemond failed to start after {retries} attempts") from last_err
 
 def _wait_for_health(port: int, key: str, timeout_s: int) -> None:
     url = f"http://127.0.0.1:{port}/api/v1/health"
@@ -188,7 +270,7 @@ def _wait_for_health(port: int, key: str, timeout_s: int) -> None:
                     return
         except Exception:
             time.sleep(0.25)
-    raise RuntimeError("lemond failed to become healthy")
+    raise RuntimeError(f"lemond on port {port} did not become healthy within {timeout_s}s")
 ```
 
 **Node.js reference launcher:**
@@ -208,15 +290,25 @@ const freePort = () => new Promise((res) => {
   });
 });
 
-export async function startLemond() {
-  const port = await freePort();
-  const key = randomBytes(32).toString("base64url");
-  const proc = spawn(LEMOND_BIN, [LEMOND_DIR, "--port", String(port)], {
-    env: { ...process.env, LEMONADE_API_KEY: key },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  await waitForHealth(port, key, 30_000);
-  return { proc, key, port };
+// freePort releases the socket before lemond binds — retry with a fresh port on failure.
+export async function startLemond(retries = 3) {
+  let lastErr;
+  for (let i = 0; i < retries; i++) {
+    const port = await freePort();
+    const key = randomBytes(32).toString("base64url");
+    const proc = spawn(LEMOND_BIN, [LEMOND_DIR, "--port", String(port)], {
+      env: { ...process.env, LEMONADE_API_KEY: key },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    try {
+      await waitForHealth(port, key, 30_000);
+      return { proc, key, port };
+    } catch (e) {
+      proc.kill();
+      lastErr = e;
+    }
+  }
+  throw new Error(`lemond failed to start after ${retries} attempts: ${lastErr?.message}`);
 }
 
 async function waitForHealth(port, key, timeoutMs) {
@@ -230,7 +322,7 @@ async function waitForHealth(port, key, timeoutMs) {
     } catch {}
     await new Promise((r) => setTimeout(r, 250));
   }
-  throw new Error("lemond failed to become healthy");
+  throw new Error(`lemond on port ${port} did not become healthy within ${timeoutMs}ms`);
 }
 ```
 
@@ -258,14 +350,23 @@ internally by the launcher, so the user never enters one and any UI
 placeholder (e.g. `"local"`) is fine. Flipping into local mode should never
 strand the user on a key-entry wall.
 
+**Set the HTTP client timeout to at least 120 seconds.** The default timeout
+on most HTTP clients (30s) is shorter than the time lemond takes to load a
+model on first use. A silent timeout looks identical to a broken integration
+— the request fires, nothing comes back, and the UI shows nothing. 120s
+covers first-run model load on any supported hardware.
+
 **Python (openai) example:**
 
 ```python
 from openai import OpenAI
+import httpx
+
 proc, key, port = start_lemond()
 client = OpenAI(
     base_url=f"http://127.0.0.1:{port}/api/v1",
     api_key=key,
+    http_client=httpx.Client(timeout=120.0),  # covers first-run model load
 )
 resp = client.chat.completions.create(
     model="Qwen3-4B-GGUF",
@@ -273,21 +374,24 @@ resp = client.chat.completions.create(
 )
 ```
 
-## Step 6: Wait for health, then preload the default model
+## Step 6: Wait for health — do not pre-load
 
-`lemond` lazy-loads models on first inference. To eliminate cold-start
-latency on the user's first message, preload right after the health check
-passes:
+Once `GET /api/v1/health` returns 200, the integration is ready. **Do not
+call `POST /api/v1/load` at startup.** Lemond lazy-loads models on the first
+inference request and handles this correctly on its own. Pre-loading is
+unreliable across lemond versions (request body shape has changed between
+releases) and a malformed `/load` call can crash or destabilise the server
+before the user takes any action.
 
-```http
-POST /api/v1/load
-Authorization: Bearer {key}
-Content-Type: application/json
+**First-run latency is expected and must be surfaced to the user.** On the
+very first inference after a cold start, lemond loads the model into memory.
+This takes 10–30 seconds depending on model size and hardware. An app that
+makes no attempt to communicate this will look broken.
 
-{"model": "Qwen3-4B-GGUF"}
-```
-
-If the model isn't downloaded yet, follow the recovery flow in Step 7.
+Minimum: show a loading indicator or status message ("Starting local AI…")
+from the moment the user triggers inference until the first response arrives.
+The simplest implementation is a flag that is set when the first request is
+sent and cleared when the first response arrives.
 
 ## Step 7: Lifecycle and recovery
 
@@ -295,10 +399,10 @@ These are the only failure modes worth handling. Do not over-engineer.
 
 | Symptom | Cause | Recovery |
 |---|---|---|
-| `POST /v1/load` returns 404 / model not found | Model not pulled yet | `POST /v1/pull` with `{"model": "..."}` then retry `/v1/load` |
-| `/v1/load` returns 500 with backend error | Backend not installed for this hardware | `GET /v1/system-info`, pick a supported backend, `POST /v1/install` with `{"recipe": "...", "backend": "..."}`, retry |
-| Subprocess exits immediately | Port already in use by another `lemond` | Pick a new free port and retry once |
-| `/v1/health` never returns 200 | First-run backend extraction is slow on cold disk | Extend timeout to 90s on first launch, 30s after |
+| `POST /api/v1/load` returns 404 / model not found | Model not pulled yet | `POST /api/v1/pull` with `{"model": "..."}` then retry `/api/v1/load` |
+| `POST /api/v1/load` returns 500 with backend error | Backend not installed for this hardware | `GET /api/v1/system-info`, pick a supported backend, `POST /api/v1/install` with `{"recipe": "...", "backend": "..."}`, retry |
+| Subprocess exits immediately | Port race: another process grabbed the port between `freePort()` and lemond binding | The reference launcher retries with a fresh port automatically (3 attempts) |
+| `/api/v1/health` never returns 200 | First-run backend extraction is slow on cold disk | Extend timeout to 90s on first launch, 30s after |
 | HTTP 401 on every request | Forgot the `Authorization: Bearer` header | Audit the client config because Lemonade rejects unauth'd calls when `LEMONADE_API_KEY` is set |
 
 **Shutdown:** On app exit, `proc.terminate()` (Unix) or
@@ -314,13 +418,19 @@ couple of seconds. Always wait on the process; never orphan it.
 
 The integration is done when **all** of these are true:
 
+- [ ] `vendor/lemonade/` contains the full package: `lemond[.exe]`,
+      `lemonade[.exe]`, `LICENSE`, and `resources/` — not just the binary.
 - [ ] `lemond` starts as a subprocess with a fresh API key per launch.
 - [ ] `GET /api/v1/health` returns 200 within the timeout.
-- [ ] The default model loads successfully via `POST /v1/load`.
 - [ ] The existing client's chat / image / speech call returns a valid
       response with the base URL and key swapped, with no other code changed.
+- [ ] First-run latency is surfaced: the UI shows a loading state from the
+      moment the first inference request is sent until the response arrives.
+- [ ] The HTTP client timeout is set to at least 120 seconds.
 - [ ] In local mode the app's API-key gate is bypassed: no onboarding wall,
       validator, or startup check blocks the user for lacking a cloud key.
+- [ ] If the app uses a dev-mode file watcher, `vendor/lemonade/` is excluded
+      from the watched paths so runtime writes by lemond do not trigger restarts.
 - [ ] Killing the parent process leaves no `lemond` subprocess behind.
 - [ ] On a fresh machine without the optimal backend, the app still works
       via the Vulkan fallback bundled in `bin/`.
