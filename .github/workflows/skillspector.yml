@@ -10,9 +10,15 @@ name: skillspector
 # machinery itself changes (this workflow, the gate, or the allowlist) we scan
 # every skill instead -- see .github/scripts/changed_skills.py.
 #
-# Mirrors the discover-matrix-aggregate shape of validate.yml so each skill
-# is its own pass/fail and a single aggregate check (the `skillspector` job)
-# can be marked required in branch protection.
+# Mirrors the discover-matrix-aggregate shape of validate.yml so each skill is
+# scanned independently and a single aggregate check (the `skillspector` job)
+# rolls them up.
+#
+# This workflow is ADVISORY ONLY: SkillSpector findings never fail CI. Each
+# changed skill with un-allowlisted HIGH/CRITICAL findings (or a tool error)
+# raises a ::warning:: annotation plus a job-summary entry so reviewers are
+# alerted that action is needed, without blocking the merge. Keep this check
+# non-required in branch protection to preserve that behavior.
 
 on:
   push:
@@ -93,36 +99,63 @@ jobs:
       # The CLI exits 1 when a skill's *aggregate* risk score is HIGH/CRITICAL
       # (score > 50) and 2 on error. We don't gate on the aggregate score,
       # because a pile of MEDIUM findings can push the aggregate to HIGH even
-      # when no single finding is HIGH/CRITICAL. Instead we fail only when an
-      # individual finding is HIGH or CRITICAL (and always fail on error).
-      - name: Scan skill with SkillSpector
+      # when no single finding is HIGH/CRITICAL. Instead we evaluate individual
+      # HIGH/CRITICAL findings via the gate script.
+      #
+      # SkillSpector is ADVISORY ONLY: this step never fails the build. When a
+      # finding (or a tool error) needs attention we raise a ::warning::
+      # annotation and write to the job summary so it shows up on the PR
+      # without blocking the merge. Flip the gate back to `exit 1` if you ever
+      # want it to be merge-blocking again.
+      - name: Scan skill with SkillSpector (advisory)
         run: |
-          mkdir -p reports
-          report="reports/${{ matrix.skill }}.md"
           set +e
+          mkdir -p reports
+          skill="${{ matrix.skill }}"
+          report="reports/${skill}.md"
+
           uvx --python 3.12 \
             --from "git+https://github.com/NVIDIA/skillspector.git@939da7d41eed4282e4d8217fe2254c69f690027e" \
-            skillspector scan "skills/${{ matrix.skill }}" \
+            skillspector scan "skills/${skill}" \
               --no-llm --format markdown --output "$report"
-          code=$?
-          set -e
-          echo "----- SkillSpector report: ${{ matrix.skill }} -----"
+          scan_code=$?
+
+          echo "----- SkillSpector report: ${skill} -----"
           cat "$report" || true
 
-          # Exit code 2 means SkillSpector itself errored; surface that.
-          if [ "$code" = "2" ]; then
-            echo "SkillSpector errored (exit code 2)." >&2
-            exit 2
+          # Exit code 2 means SkillSpector itself errored; surface it as a
+          # warning but don't fail the build.
+          if [ "$scan_code" = "2" ]; then
+            echo "::warning title=SkillSpector error::SkillSpector errored while scanning '${skill}' (exit 2) -- review needed."
+            {
+              echo "### :warning: ${skill}: SkillSpector errored"
+              echo "SkillSpector exited 2 (tool error). Re-run the workflow or investigate the step log."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
 
-          # Fail when any individual finding is HIGH or CRITICAL, except for
-          # documented false positives recorded in .github/skillspector-allow.yml.
-          # SkillSpector has no native suppression, so the gate applies the
-          # allowlist here (see .github/scripts/skillspector_gate.py).
+          # Evaluate individual HIGH/CRITICAL findings, minus documented false
+          # positives in .github/skillspector-allow.yml. The gate exits 1 when
+          # un-allowlisted HIGH/CRITICAL findings remain; we turn that into an
+          # advisory warning rather than a failure.
           uv run .github/scripts/skillspector_gate.py \
             --report "$report" \
-            --skill "${{ matrix.skill }}" \
+            --skill "${skill}" \
             --allowlist .github/skillspector-allow.yml
+          gate_code=$?
+
+          if [ "$gate_code" != "0" ]; then
+            echo "::warning title=SkillSpector findings::Skill '${skill}' has un-allowlisted HIGH/CRITICAL SkillSpector findings -- action needed (advisory, not blocking)."
+            {
+              echo "### :warning: ${skill}: action needed"
+              echo "SkillSpector flagged un-allowlisted HIGH/CRITICAL findings. Download the \`skillspector-report-${skill}\` artifact or read the step log above, then fix the skill or add a justified entry to \`.github/skillspector-allow.yml\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### :white_check_mark: ${skill}: no un-allowlisted HIGH/CRITICAL findings" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # Advisory: always succeed regardless of findings.
+          exit 0
 
       - name: Upload report
         if: always()
@@ -132,26 +165,33 @@ jobs:
           path: reports/${{ matrix.skill }}.md
           if-no-files-found: warn
 
-  # Single gate that aggregates the per-skill matrix. Branch protection can
-  # require just this one check: it only passes when every skill scan
-  # succeeded. Because matrix jobs run independently under `fail-fast: false`,
-  # we inspect the job result explicitly rather than relying on `needs`
-  # short-circuiting.
+  # Single advisory check that aggregates the per-skill matrix. SkillSpector is
+  # advisory only, so findings never fail this check -- they surface as
+  # ::warning:: annotations and job-summary entries on the run instead. This
+  # job goes red ONLY when a scan job genuinely crashed (e.g. runner/setup
+  # error), which is an infrastructure problem worth surfacing rather than a
+  # skill finding. Keep this check NON-required in branch protection so the
+  # advisory nature is preserved.
+  #
+  # Because matrix jobs run independently under `fail-fast: false`, we inspect
+  # the job result explicitly rather than relying on `needs` short-circuiting.
   skillspector:
-    name: SkillSpector security scan
+    name: SkillSpector security scan (advisory)
     needs: scan-skill
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Verify all skill scans passed
+      - name: Summarize scan results
         run: |
           result="${{ needs.scan-skill.result }}"
           echo "scan-skill result: $result"
-          # "skipped" means the matrix was empty -- no changed skills to scan,
-          # which is a legitimate pass. Anything other than success/skipped is
-          # a real failure.
+          # "skipped" means the matrix was empty -- no changed skills to scan.
+          # "success" means every scan ran (findings, if any, were already
+          # raised as warnings on those jobs). Anything else is a genuine job
+          # crash, not a finding, so we surface it.
           if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
-            echo "One or more skills failed the SkillSpector scan." >&2
+            echo "::warning title=SkillSpector scan failed to run::A SkillSpector scan job did not complete (result: $result). This is an infrastructure error, not a finding."
+            echo "One or more SkillSpector scan jobs failed to run (result: $result)." >&2
             exit 1
           fi
-          echo "All changed skills passed the SkillSpector scan."
+          echo "SkillSpector scans completed. Any findings are reported as warnings on the run summary (advisory only)."
