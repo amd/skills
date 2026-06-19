@@ -10,6 +10,11 @@
   },
   "plugins": [
     {
+      "name": "analysis-orchestrator",
+      "source": "./skills/analysis-orchestrator",
+      "description": "Orchestrates modular PyTorch profiler trace analysis with TraceLens: generates perf reports, prepares category data, runs system-level and compute-kernel subagents in parallel, validates outputs, and writes a prioritized stakeholder report (analysis.md)."
+    },
+    {
       "name": "apu-memory-tuner",
       "source": "./skills/apu-memory-tuner",
       "description": "Inspect and tune the shared-vs-dedicated memory split (GTT / UMA Frame Buffer) on AMD Ryzen APUs so larger LLMs and image models fit on the iGPU."

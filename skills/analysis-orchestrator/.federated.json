@@ -1,0 +1,9 @@
+{
+  "source": "amd-agi-tracelens",
+  "repo": "AMD-AGI/TraceLens",
+  "ref": "feat/gw_rename_directories",
+  "commit": "9b461bb25192ce73cb70de912ce27df515b56b44",
+  "path": "TraceLens/Agent/Analysis/skills/analysis-orchestrator",
+  "license": "MIT",
+  "imported_at": "2026-06-19T00:16:47Z"
+}
