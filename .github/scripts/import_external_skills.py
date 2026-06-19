@@ -9,7 +9,9 @@ For each source, the script:
 
 1. Shallow-clones the repo at the pinned `ref` into a temp directory,
    using sparse-checkout so only the configured `path` is fetched.
-2. Copies each named skill folder into `skills/<skill>/`.
+2. Copies each named skill folder into `skills/<skill>/`, plus any declared
+   companion files (e.g. templates linked from agent markdown but stored
+   outside the skill subtree in the upstream repo).
 3. Writes `.federated.json` inside each copy with source metadata so we
    can tell vendored skills apart from skills authored in this repo.
 4. Rewrites relative markdown links that point outside the copied skill
@@ -353,6 +355,45 @@ def copy_skill(src: Path, dest: Path) -> None:
     shutil.copytree(src, dest)
 
 
+# Repo-relative paths (inside the upstream clone) that a federated skill links
+# to but that live outside its copied subtree. Fetched with `git show` so the
+# sparse checkout does not need to widen.
+_COMPANION_FILES: dict[tuple[str, str], list[tuple[str, str]]] = {
+    ("amd-agi-tracelens", "analysis-orchestrator"): [
+        (
+            "TraceLens/Agent/Analysis/utils/templates/sub_agent_spec.md",
+            "utils/templates/sub_agent_spec.md",
+        ),
+    ],
+}
+
+
+def vendor_companion_files(
+    clone_dir: Path,
+    commit: str,
+    dest_skill: Path,
+    source_name: str,
+    skill_folder: str,
+    log: list[str],
+) -> None:
+    """Materialize companion blobs linked from agent markdown but outside the skill folder."""
+    for repo_rel, dest_rel in _COMPANION_FILES.get((source_name, skill_folder), []):
+        result = subprocess.run(
+            ["git", "show", f"{commit}:{repo_rel}"],
+            cwd=clone_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        out = dest_skill / dest_rel
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(result.stdout, encoding="utf-8")
+        log.append(
+            f"[{source_name}] vendored companion {repo_rel} -> "
+            f"skills/{skill_folder}/{dest_rel}"
+        )
+
+
 def write_marker(
     skill_dir: Path,
     source: Source,
@@ -502,6 +543,14 @@ def import_source(
             log.append(f"[{source.name}] {action} {spec.folder} -> skills/{spec.folder}")
             if not dry_run:
                 copy_skill(src_skill, dest_skill)
+                vendor_companion_files(
+                    tmp_path,
+                    commit,
+                    dest_skill,
+                    source.name,
+                    spec.folder,
+                    log,
+                )
                 write_marker(dest_skill, source, commit, relative_path)
                 write_card(dest_skill, source, marketplace_description)
                 rewrite_external_references(
