@@ -40,14 +40,12 @@ hardware-optimized one at first run after a system probe.
 
 ### Speech-to-text
 
-Two NPU paths exist. **Prefer `flm` for NPU**.
-
 | Recipe | Backend | Model | Hardware | OS |
 |---|---|---|---|---|
-| `flm` | `npu` | `whisper-v3-turbo-FLM` | XDNA2 NPU | Windows |
+| `whispercpp` | `vulkan` | `Whisper-Large-v3-Turbo` | AMD iGPU / dGPU | Windows, Linux |
 | `whispercpp` | `cpu` | `Whisper-Large-v3-Turbo` | x86_64 CPU | Windows, Linux |
-| `whispercpp` | `vulkan` | `Whisper-Large-v3-Turbo` | x86_64 CPU | Linux |
-| `whispercpp` | `npu` | `.rai`-cached whisper model | XDNA2 NPU | Windows (avoid) |
+| `whispercpp` | `npu` | `Whisper-Large-v3-Turbo` | XDNA2 NPU | Windows |
+| `flm` | `npu` | `whisper-v3-turbo-FLM` | XDNA2 NPU | Linux (runtime-install only) |
 
 ### Text-to-speech
 
@@ -89,6 +87,14 @@ model catalog; it can be stale or incomplete. A model only appears in
 `GET /v1/models` once its backend is installed (see Step 3), so install the
 backend first or the list will look empty/incomplete.
 
+**Catalogued ≠ downloaded.** A model listed by `GET /v1/models` is *available
+to use*, not necessarily present on disk. It must be **pulled**
+(`POST /api/v1/pull {"model":"..."}`) before it can serve — until then,
+inference returns an empty result with HTTP 200, not an error. The surest
+signal that a model is ready is a successful pull, not its presence in the
+catalog. See SKILL.md
+[Step 6](SKILL.md#step-6-health-backend-then-pull-the-model--before-first-inference).
+
 ---
 
 ## Hardware probing with /v1/system-info
@@ -120,12 +126,30 @@ Response shape (truncated):
 }
 ```
 
-Decision rules in priority order, for the default `llamacpp` recipe:
+The same pattern applies to **every** recipe: read the per-backend `state`,
+install the best one that is `installable`, use it if already `installed`, and
+fall back down the priority list otherwise. Apply it to whichever recipe matches
+the app's modality.
+
+Decision rules in priority order, for the default `llamacpp` recipe (text gen):
 
 1. If `recipes.llamacpp.backends.rocm.state == "installable"` →
    `POST /v1/install {"recipe":"llamacpp","backend":"rocm"}`.
 2. Else if `state == "installed"` for `vulkan` → use it as-is.
 3. Else fall back to `cpu`.
+
+Decision rules for the `whispercpp` recipe (speech-to-text), NPU-first:
+
+1. If `recipes.whispercpp.backends.npu.state == "installed"` → use NPU as-is.
+2. Else if `npu.state == "installable"` →
+   `POST /v1/install {"recipe":"whispercpp","backend":"npu"}`, then use NPU.
+3. Else if `vulkan` is `installed`/`installable` → use the iGPU/dGPU path.
+4. Else fall back to `cpu`.
+
+Probe **once**, cache the chosen backend for the session (the result does not
+change while the app runs), and log which backend was selected. This is the
+mechanism that lets one build run on an NPU machine and a CPU-only machine
+without any user configuration.
 
 For Ryzen AI Hybrid models on Windows, additionally check
 `ryzenai-llm.backends.npu.state` and install if `installable`.

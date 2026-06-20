@@ -46,13 +46,20 @@ This skill follows one fixed sequence. Do not deviate without a stated reason.
 [ ] 1. Survey the app's current AI integration
 [ ] 2. Pick a model + backend profile
 [ ] 3. Place Embeddable Lemonade in the app's tree (full package, not just the binary)
-[ ] 4. Add a `lemond` launcher (subprocess + API key + port)
+[ ] 4. Add a `lemond` launcher (subprocess + API key + port + per-stage logging)
 [ ] 5. Re-point the existing client at lemond (set HTTP timeout to 120s)
-[ ] 6. Wait for /api/v1/health — do not pre-load; surface first-run latency to user
+[ ] 6. Wait for /api/v1/health, install backend, then PULL the model before first use
 [ ] 7. Wire shutdown and error recovery
 ```
 
 Track progress against this checklist. Move on only when each step verifies.
+
+> **Log every stage.** A local integration has many silent failure points —
+> spawn, health, backend install, model download, first inference. Without a
+> log line at each transition, "nothing happened" is indistinguishable from
+> "broke at stage 3." Emit one clear line per stage as you build (see
+> [Step 4](#step-4-add-a-lemond-launcher)); the most common dead-end in this
+> integration — a blank result with no error — is invisible without them.
 
 ---
 
@@ -91,8 +98,8 @@ it.
 | Coding assistant | `Qwen2.5-Coder-7B-Instruct-GGUF` | `llamacpp` | Strong code, runs on iGPU |
 | Vision / multimodal chat | `Gemma-4-E2B-it-GGUF` | `llamacpp` | Small multimodal default |
 | NPU-first on Ryzen AI | `Llama-3.2-3B-Instruct-Hybrid` | `ryzenai-llm` | XDNA2 NPU on Windows |
-| CPU Speech-to-text | `Whisper-Large-v3-Turbo` | `whispercpp` | Best quality/speed |
-| NPU speech-to-text | `whisper-v3-turbo-FLM` | `flm` | XDNA2 NPU on Windows |
+| Speech-to-text (Windows) | `Whisper-Large-v3-Turbo` | `whispercpp` | One model; probe picks NPU → iGPU/dGPU → CPU automatically |
+| Speech-to-text (Linux NPU) | `whisper-v3-turbo-FLM` | `flm` | Linux NPU path; falls back to `whispercpp` iGPU/CPU off-NPU |
 | Text-to-speech | `kokoro-v1` | `kokoro` | CPU-only, low latency |
 | Image generation | `SDXL-Turbo` | `sd-cpp` | Single-step generation |
 
@@ -115,6 +122,12 @@ Download the file matching your target OS:
 - Windows: `lemonade-embeddable-{VERSION}-windows-x64.zip`
 - Linux:   `lemonade-embeddable-{VERSION}-ubuntu-x64.tar.gz`
 
+> **Don't hand-build the download URL from the tag.** The git tag carries a
+> leading `v` (e.g. `v10.8.0`) but the asset filename strips it
+> (`lemonade-embeddable-10.8.0-...`), so using the tag verbatim 404s. Ask the
+> GitHub API for the asset by its stable name pattern and use the URL it
+> returns, as below — this stays correct across version and naming changes.
+
 **First, create the target directory** — it does not exist in a fresh repo:
 
 ```powershell
@@ -130,17 +143,22 @@ mkdir -p vendor/lemonade
 Then download and unpack on Windows (PowerShell):
 
 ```powershell
-$ver = (Invoke-RestMethod https://api.github.com/repos/lemonade-sdk/lemonade/releases/latest).tag_name
-Invoke-WebRequest "https://github.com/lemonade-sdk/lemonade/releases/download/$ver/lemonade-embeddable-$ver-windows-x64.zip" -OutFile lemond.zip
+$rel = Invoke-RestMethod https://api.github.com/repos/lemonade-sdk/lemonade/releases/latest
+$asset = $rel.assets | Where-Object { $_.name -like "lemonade-embeddable-*-windows-x64.zip" } | Select-Object -First 1
+Invoke-WebRequest $asset.browser_download_url -OutFile lemond.zip
 Expand-Archive lemond.zip -DestinationPath "$env:TEMP\lemond-unpack"
-Copy-Item -Recurse "$env:TEMP\lemond-unpack\lemonade-embeddable-$ver-windows-x64\*" vendor\lemonade\
+$folder = $asset.name -replace '\.zip$',''   # unpacked dir = asset name without .zip
+Copy-Item -Recurse "$env:TEMP\lemond-unpack\$folder\*" vendor\lemonade\
+# Sanity check: resources/ must be nested under vendor\lemonade\ (not flattened)
+if (-not (Test-Path vendor\lemonade\resources\*.json)) { throw "resources/ missing — re-extract and copy again" }
 ```
 
 On Linux (bash):
 
 ```bash
-VER=$(curl -s https://api.github.com/repos/lemonade-sdk/lemonade/releases/latest | grep tag_name | cut -d'"' -f4)
-curl -L "https://github.com/lemonade-sdk/lemonade/releases/download/$VER/lemonade-embeddable-$VER-ubuntu-x64.tar.gz" | tar -xz --strip-components=1 -C vendor/lemonade
+URL=$(curl -s https://api.github.com/repos/lemonade-sdk/lemonade/releases/latest \
+  | grep browser_download_url | grep ubuntu-x64.tar.gz | cut -d'"' -f4)
+curl -L "$URL" | tar -xz --strip-components=1 -C vendor/lemonade
 ```
 
 > **Copy the full package, not just the binary.** The archive contains
@@ -154,7 +172,9 @@ curl -L "https://github.com/lemonade-sdk/lemonade/releases/download/$VER/lemonad
 > only during development/build time to install backends. Install it once on
 > the developer machine with `pip install lemonade-sdk`.
 
-The expected layout after unpacking and customization:
+The expected layout **after setup** (first run + backend install). A freshly
+unzipped package contains only `lemond[.exe]`, `lemonade[.exe]`, `LICENSE`, and
+`resources/` — the items below are created later, as their comments note:
 
 ```
 vendor/lemonade/
@@ -214,6 +234,23 @@ The launcher is a thin process supervisor. Its only jobs:
 2. Pick a free localhost port.
 3. Spawn `lemond <dir> --port <port>` with `LEMONADE_API_KEY` set.
 4. Expose the chosen `port` and `key` to the rest of the app.
+
+> **Log one line per lifecycle stage.** Build the logging in from the start —
+> not as an afterthought when something breaks. Each silent transition needs a
+> visible marker so a failure points at the exact stage. Aim for:
+>
+> ```
+> [lemond] Starting on port <port>
+> [lemond] Healthy on port <port>
+> [lemond] <recipe>:<backend> installed        (or: already installed / install failed)
+> [lemond] Pulling model <name>...             then: Model <name> ready  (or: pull returned <status>)
+> [local]  <modality> result: <value>          (first inference output — empty string here = unpulled model)
+> ```
+>
+> Logging the **first inference result verbatim** is what turns the
+> silent-empty failure (Step 6) from a multi-hour mystery into a one-line
+> diagnosis. Route these through the app's normal logging so they can be quieted
+> for release.
 
 > **Dev-mode file watchers:** If the app runs with a file watcher (Tauri,
 > Electron, Next.js, Vite, etc.) that watches the source tree, ensure
@@ -341,14 +378,21 @@ and the API key. Nothing else.
 The model identifier on requests stays a Lemonade model name (e.g.
 `Qwen3-4B-GGUF`), not the cloud name.
 
-**Bypass the app's API-key gate in local mode.** A local backend needs no
-cloud key, so any onboarding wall, validator, or startup check that demands
-one must not block local-mode users. Skip or auto-satisfy the key-entry
-screen, treat local mode as already-authorized in validation logic, and
-re-enable the gate only for cloud mode. The `lemond` key from Step 4 is set
-internally by the launcher, so the user never enters one and any UI
-placeholder (e.g. `"local"`) is fine. Flipping into local mode should never
-strand the user on a key-entry wall.
+**Local mode needs no cloud API key — at all.** This is a defining property of
+local mode, not an edge case: there is no cloud service to authenticate to, so
+nothing should ever ask the user for a key. Any onboarding wall, validator, or
+startup check that demands one must not block local-mode users. Concretely:
+
+- Skip or auto-satisfy the key-entry screen in local mode.
+- Treat local mode as already-authorized in every validation path — an
+  empty-key check must short-circuit to "valid" when the active mode is local,
+  never throw "API key not configured".
+- Re-enable the gate **only** for cloud mode.
+
+The `lemond` key from Step 4 is generated internally by the launcher and used
+only for the local loopback connection, so the user never sees or enters one;
+any UI placeholder (e.g. `"local"`) is fine. Flipping into local mode should
+never strand the user on a key-entry wall.
 
 **Set the HTTP client timeout to at least 120 seconds.** The default timeout
 on most HTTP clients (30s) is shorter than the time lemond takes to load a
@@ -374,24 +418,69 @@ resp = client.chat.completions.create(
 )
 ```
 
-## Step 6: Wait for health — do not pre-load
+## Step 6: Health, backend, then pull the model — *before* first inference
 
-Once `GET /api/v1/health` returns 200, the integration is ready. **Do not
-call `POST /api/v1/load` at startup.** Lemond lazy-loads models on the first
-inference request and handles this correctly on its own. Pre-loading is
-unreliable across lemond versions (request body shape has changed between
-releases) and a malformed `/load` call can crash or destabilise the server
-before the user takes any action.
+`GET /api/v1/health` returning 200 means the **server** is up. It does **not**
+mean inference will work. Before the first real request succeeds, three more
+things must be true: the backend for your modality is installed, the model's
+weights are **downloaded to disk**, and (on the first call) the model is loaded
+into memory. Treating health=200 as "ready" is the single biggest cause of a
+broken-looking integration.
 
-**First-run latency is expected and must be surfaced to the user.** On the
-very first inference after a cold start, lemond loads the model into memory.
-This takes 10–30 seconds depending on model size and hardware. An app that
-makes no attempt to communicate this will look broken.
+**Do not call `POST /api/v1/load` at startup.** Lemond lazy-loads the model
+into memory on the first inference request and handles that step on its own.
+Pre-loading is unreliable across lemond versions (the `/load` request body
+shape has changed between releases) and a malformed call can crash or
+destabilise the server before the user takes any action. Loading is the one
+step you let lemond do lazily — pulling is not.
 
-Minimum: show a loading indicator or status message ("Starting local AI…")
-from the moment the user triggers inference until the first response arrives.
-The simplest implementation is a flag that is set when the first request is
-sent and cleared when the first response arrives.
+### Pull the model so it exists on disk
+
+Lazy-load only loads weights that are **already downloaded**. If the model was
+never pulled, the first inference does not error — lemond returns an empty /
+blank result with HTTP 200. So after health passes and the backend is
+installed, proactively pull the model:
+
+```http
+POST /api/v1/pull
+{"model": "Whisper-Large-v3-Turbo"}
+```
+
+This is **idempotent** — a no-op if the weights are already present, a download
+if they are not. Run it once during setup (after backend install, before the
+first user-triggered inference) and log the result.
+
+- **Default model** (the one you chose in Step 2): pull it by name as above.
+- **Custom / user-overridden model:** do not assume it exists. Confirm it is a
+  real Lemonade model first via `GET /api/v1/models` (the **only** trusted
+  catalog — see [reference.md](reference.md)), then pull it the same way. A
+  model appearing in the catalog is **not** proof its weights are downloaded;
+  a successful pull is.
+
+> **Silent-empty is almost always an unpulled model.** If inference returns an
+> empty string / blank output with no HTTP error, the model was not downloaded.
+> Check your pull step before debugging anything else — this is the failure mode
+> that wastes the most time. Log the pull result and the first inference result
+> (see Step 4) so this is diagnosable from the console, not by guesswork.
+
+### Surface the *whole* setup, not just model load
+
+First-run cold start is more than a model load. The full sequence is:
+
+```
+server spawn  →  health 200  →  backend install  →  model download  →  model load  →  first result
+```
+
+On a fresh machine, backend install and model download can each take from tens
+of seconds to several **minutes** (multi-GB weights over the network). Model
+load alone is 10–30s. An app that shows nothing during this will look frozen.
+
+Minimum: show a loading indicator or status message ("Setting up local AI…")
+from the moment setup begins until the first response arrives — covering the
+*entire* sequence above, not just the final load. The simplest implementation
+is a flag set when setup/first-request starts and cleared when the first
+response arrives. Once the model is pulled and loaded once, subsequent runs are
+fast; the long wait is first-run only.
 
 ## Step 7: Lifecycle and recovery
 
@@ -399,7 +488,8 @@ These are the only failure modes worth handling. Do not over-engineer.
 
 | Symptom | Cause | Recovery |
 |---|---|---|
-| `POST /api/v1/load` returns 404 / model not found | Model not pulled yet | `POST /api/v1/pull` with `{"model": "..."}` then retry `/api/v1/load` |
+| **Inference returns empty / blank with HTTP 200, no error** | Model never pulled: backend is installed but weights are absent, so lazy-load has nothing to load | `POST /api/v1/pull` with `{"model":"..."}`, wait for success, retry. Log the pulled result and the first inference result. This is the most common silent failure — see [Step 6](#step-6-health-backend-then-pull-the-model--before-first-inference) |
+| `POST /api/v1/load` returns 404 / model not found | Model not pulled yet (same root cause as the empty-result row above) | `POST /api/v1/pull` with `{"model": "..."}` then retry `/api/v1/load` |
 | `POST /api/v1/load` returns 500 with backend error | Backend not installed for this hardware | `GET /api/v1/system-info`, pick a supported backend, `POST /api/v1/install` with `{"recipe": "...", "backend": "..."}`, retry |
 | Subprocess exits immediately | Port race: another process grabbed the port between `freePort()` and lemond binding | The reference launcher retries with a fresh port automatically (3 attempts) |
 | `/api/v1/health` never returns 200 | First-run backend extraction is slow on cold disk | Extend timeout to 90s on first launch, 30s after |
@@ -422,13 +512,19 @@ The integration is done when **all** of these are true:
       `lemonade[.exe]`, `LICENSE`, and `resources/` — not just the binary.
 - [ ] `lemond` starts as a subprocess with a fresh API key per launch.
 - [ ] `GET /api/v1/health` returns 200 within the timeout.
+- [ ] The default model is pulled (or bundled) before the first inference; a
+      custom/overridden model is confirmed via `GET /api/v1/models` and then
+      pulled. A blank result with no error means this step was skipped.
+- [ ] Each lifecycle stage logs a clear line (spawn, health, backend install,
+      model pull, first result) so a failure is diagnosable from the console.
 - [ ] The existing client's chat / image / speech call returns a valid
       response with the base URL and key swapped, with no other code changed.
 - [ ] First-run latency is surfaced: the UI shows a loading state from the
       moment the first inference request is sent until the response arrives.
 - [ ] The HTTP client timeout is set to at least 120 seconds.
-- [ ] In local mode the app's API-key gate is bypassed: no onboarding wall,
-      validator, or startup check blocks the user for lacking a cloud key.
+- [ ] In local mode the app requires **no** cloud API key: no onboarding wall,
+      validator, or startup check blocks the user, and no code path throws
+      "API key not configured" when the active mode is local.
 - [ ] If the app uses a dev-mode file watcher, `vendor/lemonade/` is excluded
       from the watched paths so runtime writes by lemond do not trigger restarts.
 - [ ] Killing the parent process leaves no `lemond` subprocess behind.
