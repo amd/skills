@@ -271,3 +271,112 @@ Two backend limitations on Linux as of this writing:
 
 When building from source for an unusual Linux distro, see the upstream
 `docs/embeddable/building.md` in the lemonade-sdk/lemonade repo.
+
+---
+
+## Reference launchers
+
+Full implementations for Step 4. Adapt to the app's language; the key
+constraints are: retry with a fresh port on spawn failure (the socket is
+released before lemond binds), poll `/api/v1/health` with the Bearer key,
+and kill the process on app exit.
+
+**Python:**
+
+```python
+import os, secrets, socket, subprocess, sys, time, urllib.request
+from pathlib import Path
+
+LEMOND_DIR = Path(__file__).parent / "vendor" / "lemonade"
+LEMOND_BIN = LEMOND_DIR / ("lemond.exe" if sys.platform == "win32" else "lemond")
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+def start_lemond(retries: int = 3) -> tuple[subprocess.Popen, str, int]:
+    last_err: Exception | None = None
+    for _ in range(retries):
+        port = _free_port()
+        key = secrets.token_urlsafe(32)
+        env = {**os.environ, "LEMONADE_API_KEY": key}
+        proc = subprocess.Popen(
+            [str(LEMOND_BIN), str(LEMOND_DIR), "--port", str(port)],
+            env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        try:
+            _wait_for_health(port, key, timeout_s=30)
+            return proc, key, port
+        except RuntimeError as e:
+            proc.kill()
+            proc.wait()
+            last_err = e
+    raise RuntimeError(f"lemond failed to start after {retries} attempts") from last_err
+
+def _wait_for_health(port: int, key: str, timeout_s: int) -> None:
+    url = f"http://127.0.0.1:{port}/api/v1/health"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(req, timeout=1) as r:
+                if r.status == 200:
+                    return
+        except Exception:
+            time.sleep(0.25)
+    raise RuntimeError(f"lemond on port {port} did not become healthy within {timeout_s}s")
+```
+
+**Node.js:**
+
+```js
+import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { createServer } from "node:net";
+import path from "node:path";
+
+const LEMOND_DIR = path.join(import.meta.dirname, "vendor", "lemonade");
+const LEMOND_BIN = path.join(LEMOND_DIR, process.platform === "win32" ? "lemond.exe" : "lemond");
+
+const freePort = () => new Promise((res) => {
+  const s = createServer().listen(0, "127.0.0.1", () => {
+    const { port } = s.address(); s.close(() => res(port));
+  });
+});
+
+export async function startLemond(retries = 3) {
+  let lastErr;
+  for (let i = 0; i < retries; i++) {
+    const port = await freePort();
+    const key = randomBytes(32).toString("base64url");
+    const proc = spawn(LEMOND_BIN, [LEMOND_DIR, "--port", String(port)], {
+      env: { ...process.env, LEMONADE_API_KEY: key },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    try {
+      await waitForHealth(port, key, 30_000);
+      return { proc, key, port };
+    } catch (e) {
+      proc.kill();
+      lastErr = e;
+    }
+  }
+  throw new Error(`lemond failed to start after ${retries} attempts: ${lastErr?.message}`);
+}
+
+async function waitForHealth(port, key, timeoutMs) {
+  const url = `http://127.0.0.1:${port}/api/v1/health`;
+  const headers = { Authorization: `Bearer ${key}` };
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const r = await fetch(url, { headers });
+      if (r.ok) return;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`lemond on port ${port} did not become healthy within ${timeoutMs}ms`);
+}
+```
