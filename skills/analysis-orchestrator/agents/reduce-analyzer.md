@@ -88,7 +88,7 @@ Each `category_findings[i].members[j].operation` carries a torch op name (e.g. `
 
 ### Step 4: Render P-items from `category_findings`
 
-Per [`utils/templates/sub_agent_spec.md`](../utils/templates/sub_agent_spec.md), emit one P-item per entry in ascending `rank` order; ground **Insight** / **Action** / **Reasoning for Slowdown** in the `members[]` rows (their `operation`, `efficiency_pct`, `library`) using the Action Prose Guidance and Common Patterns below. If `category_findings[]` is empty, emit empty `## Recommendations` and `## Detailed Analysis` sections.
+Per [`templates/sub_agent_spec.md`](../templates/sub_agent_spec.md), emit one P-item per entry in ascending `rank` order; ground **Insight** / **Action** / **Reasoning for Slowdown** in the `members[]` rows (their `operation`, `efficiency_pct`, `library`) using the Action Prose Guidance and Common Patterns below. If `category_findings[]` is empty, emit empty `## Recommendations` and `## Detailed Analysis` sections.
 
 **efficiency_percent semantics:**
 - **Standalone:** Treat `efficiency_percent` as **% of roofline**.
@@ -122,7 +122,7 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 
 ## Trace observability (category-specific)
 
-The universal CANNOT Infer rows in [`sub_agent_spec.md`](../utils/templates/sub_agent_spec.md) always apply. In addition, reduce analysis cannot observe:
+The universal CANNOT Infer rows in [`sub_agent_spec.md`](../templates/sub_agent_spec.md) always apply. In addition, reduce analysis cannot observe:
 
 | NOT observable | Why | Fallback prose |
 |----------------|-----|----------------|
@@ -132,7 +132,7 @@ The universal CANNOT Infer rows in [`sub_agent_spec.md`](../utils/templates/sub_
 
 ## Validate findings
 
-Per [`sub_agent_spec.md`](../utils/templates/sub_agent_spec.md) § Validate findings, run:
+Per [`sub_agent_spec.md`](../templates/sub_agent_spec.md) § Validate findings, run:
 
 ```bash
 <prefix> python3 -c "

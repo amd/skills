@@ -88,7 +88,7 @@ Reference the detected implementation in the **Identification** prose of every f
 
 ### Step 3: Render P-items from `category_findings`
 
-Read `category_data/<sdpa>_metrics.json::category_findings`. Per [`utils/templates/sub_agent_spec.md`](../utils/templates/sub_agent_spec.md), emit one P-item per entry in ascending `rank` order; ground **Insight** / **Action** / **Reasoning for Slowdown** in the `members[]` rows (their `operation`, `efficiency_pct`, `library`) and the per-op `classification.kernel_breakdown` / `classification.workload_profile` (Paged) using the Action Prose Guidance, Expected Efficiency, and Common Patterns below. For Paged Attention, extend the **Data:** operations table with kernel-breakdown component, workload type, and attention pattern columns when populated. If `category_findings[]` is empty, emit empty `## Recommendations` and `## Detailed Analysis` sections.
+Read `category_data/<sdpa>_metrics.json::category_findings`. Per [`templates/sub_agent_spec.md`](../templates/sub_agent_spec.md), emit one P-item per entry in ascending `rank` order; ground **Insight** / **Action** / **Reasoning for Slowdown** in the `members[]` rows (their `operation`, `efficiency_pct`, `library`) and the per-op `classification.kernel_breakdown` / `classification.workload_profile` (Paged) using the Action Prose Guidance, Expected Efficiency, and Common Patterns below. For Paged Attention, extend the **Data:** operations table with kernel-breakdown component, workload type, and attention pattern columns when populated. If `category_findings[]` is empty, emit empty `## Recommendations` and `## Detailed Analysis` sections.
 
 **efficiency_percent semantics:**
 - **Standalone:** Treat `efficiency_percent` as **% of roofline**.
@@ -175,7 +175,7 @@ Short sequences naturally show lower efficiency — do NOT call low efficiency a
 
 ## Trace observability (category-specific)
 
-The universal CANNOT Infer rows in [`sub_agent_spec.md`](../utils/templates/sub_agent_spec.md) always apply. In addition, SDPA analysis cannot observe:
+The universal CANNOT Infer rows in [`sub_agent_spec.md`](../templates/sub_agent_spec.md) always apply. In addition, SDPA analysis cannot observe:
 
 **Flash / Standard Attention:**
 
@@ -193,7 +193,7 @@ The universal CANNOT Infer rows in [`sub_agent_spec.md`](../utils/templates/sub_
 
 ## Validate findings
 
-Per [`sub_agent_spec.md`](../utils/templates/sub_agent_spec.md) § Validate findings, run:
+Per [`sub_agent_spec.md`](../templates/sub_agent_spec.md) § Validate findings, run:
 
 ```bash
 <prefix> python3 -c "

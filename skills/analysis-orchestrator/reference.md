@@ -509,7 +509,7 @@ If the plot fails (extension-absent branch), retry once. If still failing, proce
 
 **CRITICAL: Do NOT delegate Step 11 to a Task subagent.** The orchestrator must write the report directly.
 
-1. **Read** the report template: `TraceLens/Agent/Analysis/utils/templates/analysis_template.md`
+1. **Read** the report template: `TraceLens/Agent/Analysis/skills/analysis-orchestrator/templates/analysis_template.md`
 2. **Write the report in sections** to `<output_dir>/analysis.md` using **only** `<prefix> tee` / `<prefix> tee -a` with single-quoted heredoc delimiters (see write order below). You MUST NOT use the IDE Write tool, Edit tool, StrReplace tool, `cat >`, `echo >`, `>>` redirect, or any other write method for `analysis.md` unless tee fails.
 3. **Fill in** each section by substituting placeholders with actual data. Never retain template placeholders (`<Brief Title>`, `X ms`, `Y%`, `<platform>`, `<model>`) — every field must contain actual data.
 

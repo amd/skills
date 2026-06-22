@@ -237,13 +237,13 @@ Recommendation quality requirements (apply before writing):
 
 ```
 
-**Detailed Analysis block:** Follow [`utils/templates/sub_agent_spec.md`](../utils/templates/sub_agent_spec.md) for the full block schema.
+**Detailed Analysis block:** Follow [`templates/sub_agent_spec.md`](../templates/sub_agent_spec.md) for the full block schema.
 
 **Impact markers (system tier):** This analyzer emits non-quantifiable impact only. Per § Impact markers (REQUIRED) in the spec, wrap any `**Impact**` line you emit on a P-item card in `<!-- impact-begin kind=p_item low=null mid=null high=null -->` ... `<!-- impact-end -->`. Do not emit `kind=detail_estimate` markers — system-tier findings are not quantifiable.
 
 ### Step 7.1: Validate Findings
 
-Per [`sub_agent_spec.md`](../utils/templates/sub_agent_spec.md) § Validate findings, run:
+Per [`sub_agent_spec.md`](../templates/sub_agent_spec.md) § Validate findings, run:
 
 ```bash
 <prefix> python3 -c "

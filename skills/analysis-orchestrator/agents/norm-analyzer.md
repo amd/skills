@@ -93,7 +93,7 @@ Different norm variants have different efficiency characteristics due to their k
 - **Standalone:** Treat `efficiency_percent` as **% of roofline**.
 - **Comparative:** Treat `efficiency_percent` as **100 × (trace2 kernel time) / (trace1 kernel time)**.
 
-Per [`utils/templates/sub_agent_spec.md`](../utils/templates/sub_agent_spec.md), emit one P-item per entry in ascending `rank` order; ground **Insight** / **Action** / **Reasoning for Slowdown** in the `members[]` rows (their `operation`, `efficiency_pct`, `library`) using the Action Prose Guidance and Common Patterns below. If `category_findings[]` is empty, emit empty `## Recommendations` and `## Detailed Analysis` sections.
+Per [`templates/sub_agent_spec.md`](../templates/sub_agent_spec.md), emit one P-item per entry in ascending `rank` order; ground **Insight** / **Action** / **Reasoning for Slowdown** in the `members[]` rows (their `operation`, `efficiency_pct`, `library`) using the Action Prose Guidance and Common Patterns below. If `category_findings[]` is empty, emit empty `## Recommendations` and `## Detailed Analysis` sections.
 
 **Markers required:** wrap every `**Impact**` line in `<!-- impact-begin kind=p_item ... --> ... <!-- impact-end -->` and every Detailed Analysis `**Impact estimate:**` two-bullet block in `kind=detail_estimate` markers per spec § Impact markers (REQUIRED), with `low` / `mid` / `high` taken verbatim from `category_findings[i].impact_score{,_low,_high}`.
 
@@ -135,7 +135,7 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 
 ## Trace observability (category-specific)
 
-The universal CANNOT Infer rows in [`sub_agent_spec.md`](../utils/templates/sub_agent_spec.md) always apply. In addition, normalization analysis cannot observe:
+The universal CANNOT Infer rows in [`sub_agent_spec.md`](../templates/sub_agent_spec.md) always apply. In addition, normalization analysis cannot observe:
 
 | NOT observable | Why | Fallback prose |
 |----------------|-----|----------------|
@@ -145,7 +145,7 @@ The universal CANNOT Infer rows in [`sub_agent_spec.md`](../utils/templates/sub_
 
 ## Validate findings
 
-Per [`sub_agent_spec.md`](../utils/templates/sub_agent_spec.md) § Validate findings, run:
+Per [`sub_agent_spec.md`](../templates/sub_agent_spec.md) § Validate findings, run:
 
 ```bash
 <prefix> python3 -c "
