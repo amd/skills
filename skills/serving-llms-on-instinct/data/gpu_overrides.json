@@ -1,6 +1,7 @@
 {
   "docker_flags": [
     "--group-add=video",
+    "--group-add=render",
     "--cap-add=SYS_PTRACE",
     "--security-opt seccomp=unconfined",
     "--device /dev/kfd",
@@ -9,20 +10,40 @@
   ],
   "gpu_configs": {
     "gfx950": {
-      "gpu_family": "AMD Instinct MI350 / MI350X",
-      "vram_gb": 294,
+      "gpu_family": "AMD Instinct MI350X / MI355X",
+      "vram_gb": 288,
       "env_defaults": {
         "VLLM_ROCM_USE_AITER": "1",
         "VLLM_ROCM_USE_AITER_FP4BMM": "1"
       },
+      "precision": {
+        "native": ["bf16", "fp16", "fp8_ocp", "int8", "mxfp4", "mxfp6"],
+        "emulated": ["fp8_fnuz"],
+        "unsupported": ["nvfp4"],
+        "notes": "MXFP4/MXFP6 are hardware-native on gfx950. FP8 uses OCP (E4M3FN) standard, not FNUZ. NVFP4 is NVIDIA-specific and will not load on ROCm."
+      },
+      "model_overrides": [
+        {
+          "match": "openai/gpt-oss",
+          "env_set": {"VLLM_ROCM_USE_AITER_MOE": "0"},
+          "reason": "AITER MoE kernels corrupt gpt-oss output on gfx950 (coherent reasoning but word-salad/repetition/unicode-junk final answer at any temperature) on ROCm 7.2 / vLLM 0.23.0. Only the MoE path needs to be off; AITER attention and the unified-attention backend remain enabled. AITER_FUSED_MOE_A16W4=1 does NOT fix it; AITER_MOE=0 does. Verified on 20b and 120b."
+        }
+      ],
       "workarounds": []
     },
     "gfx942": {
-      "gpu_family": "AMD Instinct MI300X / MI300A / MI325X",
+      "gpu_family": "AMD Instinct MI300X / MI325X / MI300A",
+      "vram_gb_note": "Varies: MI300X=192, MI325X=256, MI300A=128. Use detect.py vram_gb for actual value.",
       "vram_gb": 192,
       "env_defaults": {
         "VLLM_ROCM_USE_AITER": "1",
         "VLLM_ROCM_USE_AITER_FP4BMM": "0"
+      },
+      "precision": {
+        "native": ["bf16", "fp16", "fp8_fnuz", "int8"],
+        "emulated": ["mxfp4", "mxfp6"],
+        "unsupported": ["nvfp4"],
+        "notes": "FP8 uses FNUZ (E4M3FNUZ) dialect, not OCP. vLLM auto-converts OCP checkpoints. MXFP4/MXFP6 compute is emulated (dequant to BF16 during matmul), but weights stay compressed in VRAM. NVFP4 is NVIDIA-specific and will not load on ROCm."
       },
       "workarounds": [
         {"id": "vllm-34641", "description": "FP4BMM=0 mandatory on gfx942 (MI300X crash bug)"}
