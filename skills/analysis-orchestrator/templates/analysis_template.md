@@ -385,6 +385,24 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 **Resolution:** [1-2 sentences - Why the suggested optimization helps close the gap — not merely restating what to do.]
 **Impact estimate:** [Rendered from metadata → impact_estimates]
 
+<a id="detailed-analysis-compute-p2"></a>
+<!-- reasoning-candidate tier=compute rank=2 -->
+#### 🟡 P2: <Brief Title>
+**Identification:**
+**Data:**
+**Reasoning for Slowdown:**
+**Resolution:**
+**Impact estimate:**
+
+<a id="detailed-analysis-compute-p3"></a>
+<!-- reasoning-candidate tier=compute rank=3 -->
+#### 🟢 P3: <Brief Title>
+**Identification:**
+**Data:**
+**Reasoning for Slowdown:**
+**Resolution:**
+**Impact estimate:**
+
 ### Kernel Fusion Insights
 <!-- === STANDALONE Kernel Fusion === -->
 > **Note:** Kernel fusion analysis is experimental. impact_score projections estimate the recoverable fraction of E2E with 85% memory/compute pipeline overlap. Kernels without perf models use their measured trace time as-is. Actual recoverable time depends on implementation feasibility and interaction effects.
@@ -413,6 +431,20 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 <!-- reasoning-candidate tier=fusion rank=2 -->
 #### 🔴/🟡/🟢 P2: <Candidate Name> (<time_ms> ms, <instance_count> instances)
 
+**Identification:**
+
+**Data:**
+
+| Kernel | Type | Duration (us) | Perf model |
+|--------|------|--------------|------------|
+| <kernel name (truncated to ~60 chars)> | <type> | X.X | Yes/No |
+
+**Impact estimate:**
+
+<a id="detailed-analysis-fusion-P3"></a>
+<!-- reasoning-candidate tier=fusion rank=3 -->
+#### 🔴/🟡/🟢 P3: <Candidate Name> (<time_ms> ms, <instance_count> instances)
+
 *Repeat the same Identification + Data + Impact estimate format for each candidate, with anchors `detailed-analysis-fusion-PN`.*
 
 ### System-Level Insights
@@ -425,6 +457,24 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 <a id="detailed-analysis-system-p1"></a>
 <!-- reasoning-candidate tier=system rank=1 -->
 #### 🔴 P1: <Brief Title>
+**Identification:**
+**Data:**
+**Reasoning for Slowdown:**
+**Resolution:**
+**Impact estimate:**
+
+<a id="detailed-analysis-system-p2"></a>
+<!-- reasoning-candidate tier=system rank=2 -->
+#### 🟡 P2: <Brief Title>
+**Identification:**
+**Data:**
+**Reasoning for Slowdown:**
+**Resolution:**
+**Impact estimate:**
+
+<a id="detailed-analysis-system-p3"></a>
+<!-- reasoning-candidate tier=system rank=3 -->
+#### 🟢 P3: <Brief Title>
 **Identification:**
 **Data:**
 **Reasoning for Slowdown:**
