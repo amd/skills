@@ -16,7 +16,14 @@
 #       license: SPDX license identifier (carried into the marker file)
 #       skills:  list of skill folder names to import from `path`
 #                Either a bare string (folder name) or a mapping:
-#                  { name: <folder>, marketplace_description: <override> }
+#                  { name: <folder>, as: <local-name>,
+#                    marketplace_description: <override> }
+#                `as` vendors the skill under a different local catalog name
+#                (folder + marketplace entry + SKILL.md `name`). Federated
+#                skills use a `<projectrepo>-<skill>` convention, e.g. the
+#                TraceLens `analysis-orchestrator` skill is imported `as:
+#                tracelens-analysis-orchestrator`. The upstream `name` is
+#                still used to locate the folder in the source repo.
 #
 # To add or remove an imported skill, edit `skills:` here and then run the
 # "Import external skills" workflow. The workflow opens a pull request with
@@ -29,11 +36,13 @@ sources:
     path: skills
     license: MIT
     skills:
-      - magpie
+      - name: magpie
+        as: magpie-kernel-evaluator
   - name: amd-agi-tracelens
     repo: AMD-AGI/TraceLens
     ref: feat/gw_rename_directories
     path: TraceLens/Agent/Analysis/skills
     license: MIT
     skills:
-      - analysis-orchestrator
+      - name: analysis-orchestrator
+        as: tracelens-analysis-orchestrator

@@ -85,7 +85,7 @@ Run and optimize on AMD Instinct.
 | Skill | What it does | Source |
 | --- | --- | --- |
 | [`serving-llms-on-instinct`](skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine/backend selection in later phases. | in-repo |
-| [`llm-kernel-evaluator` (`magpie`)](skills/magpie/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM / SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
+| [`magpie-kernel-evaluator`](skills/magpie-kernel-evaluator/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM / SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
 
 
 ## A federated catalog

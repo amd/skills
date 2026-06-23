@@ -1,5 +1,5 @@
 ---
-name: magpie
+name: magpie-kernel-evaluator
 description: Performs GPU kernel correctness and performance evaluation and LLM inference benchmarking with Magpie. Analyzes single or multiple kernels (HIP/CUDA/PyTorch), compares kernel implementations, runs vLLM/SGLang benchmarks with profiling and TraceLens, and runs gap analysis on torch traces. Creates kernel config YAMLs, discovers kernels in a project, and queries GPU specs. Use when the user mentions Magpie, kernel analyze or compare, HIP/CUDA kernel evaluation, vLLM/SGLang benchmark, gap analysis, TraceLens, creating kernel configs, or discovering GPU kernels.
 ---
 

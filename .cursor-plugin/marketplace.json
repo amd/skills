@@ -10,11 +10,6 @@
   },
   "plugins": [
     {
-      "name": "analysis-orchestrator",
-      "source": "./skills/analysis-orchestrator",
-      "description": "Orchestrates modular PyTorch profiler trace analysis with TraceLens: generates perf reports, prepares category data, runs system-level and compute-kernel subagents in parallel, validates outputs, and writes a prioritized stakeholder report (analysis.md)."
-    },
-    {
       "name": "local-ai-app-integration",
       "source": "./skills/local-ai-app-integration",
       "description": "Integrate local AI into cloud LLM apps for offline support, better privacy, and lower API costs."
@@ -25,14 +20,19 @@
       "description": "Route image generation, text-to-speech, and speech-to-text through a local AI Server to reduce token/cost usage."
     },
     {
-      "name": "magpie",
-      "source": "./skills/magpie",
+      "name": "magpie-kernel-evaluator",
+      "source": "./skills/magpie-kernel-evaluator",
       "description": "Performs GPU kernel correctness and performance evaluation and LLM inference benchmarking with Magpie. Analyzes single or multiple kernels (HIP/CUDA/PyTorch), compares kernel implementations, runs vLLM/SGLang benchmarks with profiling and TraceLens, and runs gap analysis on torch traces."
     },
     {
       "name": "serving-llms-on-instinct",
       "source": "./skills/serving-llms-on-instinct",
       "description": "Serve LLMs on AMD Instinct GPUs (MI300X/MI325X/MI350X/MI355X) with vLLM on ROCm. Handles GPU detection, environment validation, vLLM configuration, launch, and health verification."
+    },
+    {
+      "name": "tracelens-analysis-orchestrator",
+      "source": "./skills/tracelens-analysis-orchestrator",
+      "description": "Orchestrates modular PyTorch profiler trace analysis with TraceLens: generates perf reports, prepares category data, runs system-level and compute-kernel subagents in parallel, validates outputs, and writes a prioritized stakeholder report (analysis.md)."
     }
   ]
 }
