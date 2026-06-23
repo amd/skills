@@ -1,6 +1,3 @@
-> [!IMPORTANT]
-> **Tech Preview: Catalog under active development.** We’re building the catalog in the open, sharing progress as the foundations take shape. Expect frequent changes as skills, categories, and descriptions evolve.
-
 # AMD Skills
 
 <div align="center">
@@ -24,6 +21,11 @@
 AMD Skills provide agents with knowledge, scripts, and conventions for working with AMD hardware and software.
 
 Skills in this repository follow the standardized [Agent Skills](https://github.com/anthropics/skills) format and are designed to interoperate with the major coding agents like Cursor, Claude Code, OpenAI Codex, and Gemini CLI.
+
+> [!IMPORTANT]
+> **Tech Preview: Catalog under active development.** We’re building the catalog in the open, sharing progress as the foundations take shape. Expect frequent changes as skills, categories, and descriptions evolve.
+
+
 
 ## Installation
 
