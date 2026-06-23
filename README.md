@@ -27,9 +27,25 @@ Skills in this repository follow the standardized [Agent Skills](https://github.
 
 ## Installation
 
-AMD Skills will soon be installable directly in Claude/Cursor/Codex and other agents through marketplace integration.
+Install AMD Skills with the [`skills` CLI](https://github.com/vercel-labs/skills) via `npx`. No clone or manual copying required.
 
-While we work marketplace integration, please refer to our [Manual installation steps](#manual-installation).
+```bash
+npx skills add amd/skills
+```
+
+This prompts you to pick a skill and an install destination. To install a specific skill into specific agents, pass `--skill` with one or more `--agent` flags (e.g. `cursor`, `claude-code`, `codex`):
+
+```bash
+npx skills add amd/skills --skill local-ai-use --agent claude-code
+```
+
+Browse everything available before installing:
+
+```bash
+npx skills add amd/skills --list
+```
+
+Prefer to do it by hand? See [Manual installation](#manual-installation).
 
 ## What is a skill?
 
