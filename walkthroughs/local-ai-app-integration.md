@@ -133,7 +133,7 @@ cloud provider — the text appears where your cursor was last located.
 
 > **Repeated phrases** like `" How can you hear me now?\n How can you hear me
 > now?\n"` on quiet audio are a known Whisper behavior on silence/low-energy
-> input, not an integration bug — don't chase it.
+> input, not an integration bug.
 
 ## Step 6 - (Optional) Going beyond
 
