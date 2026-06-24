@@ -49,23 +49,6 @@ npx skills add amd/skills --list
 
 Prefer to do it by hand? See [Manual installation](#manual-installation).
 
-## What is a skill?
-
-A skill is a self-contained folder that bundles everything an agent needs to perform a focused task: instructions, helper scripts, prompts, templates, and references. At its core is a `SKILL.md` file with YAML frontmatter, a `name`, and a short `description` that tells the agent *when* the skill should activate, followed by the guidance the agent reads while the skill is in use.
-
-```
-skills/
-  rocm-doctor/
-    SKILL.md
-    skill-card.md
-    scripts/
-    references/
-```
-
-When an agent decides a skill is relevant (or you invoke it explicitly), it loads that `SKILL.md` and follows the instructions inside. Descriptions stay in context cheaply; the full body of a skill only loads when the task actually matches.
-
-Every skill also ships a `skill-card.md`: a short, human-facing governance card (Description, Owner, License) that tells a reviewer what the skill is and who stands behind it without reading the source. See [docs/skill-cards.md](docs/skill-cards.md).
-
 ## Using a skill
 
 Once a skill is installed, reference it in plain language while talking to your agent. For example:
@@ -110,6 +93,29 @@ Run and optimize on AMD Instinct.
 | [`serving-llms-on-instinct`](skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine/backend selection in later phases. | in-repo |
 | [`magpie-kernel-evaluator`](skills/magpie-kernel-evaluator/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM / SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
 | [`tracelens-analysis-orchestrator`](skills/tracelens-analysis-orchestrator/SKILL.md) | Orchestrate modular PyTorch profiler trace analysis with TraceLens: generate perf reports, run system-level and compute-kernel subagents in parallel, and write a prioritized stakeholder report. | [TraceLens](https://github.com/AMD-AGI/TraceLens) |
+
+## What is a skill?
+
+A skill is a self-contained folder that bundles everything an agent needs to perform a focused task: instructions, helper scripts, prompts, templates, and references. At its core is a `SKILL.md` file with YAML frontmatter, a `name`, and a short `description` that tells the agent *when* the skill should activate, followed by the guidance the agent reads while the skill is in use.
+
+```
+skills/
+  rocm-doctor/
+    SKILL.md
+    skill-card.md
+    scripts/
+    references/
+```
+
+When an agent decides a skill is relevant (or you invoke it explicitly), it loads that `SKILL.md` and follows the instructions inside. Descriptions stay in context cheaply; the full body of a skill only loads when the task actually matches.
+
+Every skill also ships a `skill-card.md`: a short, human-facing governance card (Description, Owner, License) that tells a reviewer what the skill is and who stands behind it without reading the source. See [docs/skill-cards.md](docs/skill-cards.md).
+
+## Why a skill, not a doc?
+
+Documentation describes an API surface: every flag, every option, neutral by design. A skill encodes the opinionated path: which flags, which container image, which `gfx` target, which environment variables, in what order. It captures the decisions a senior AMD engineer makes without thinking, in a form the agent can apply consistently across teams and repositories.
+
+Skills earn their keep on repeated, opinionated workflows, exactly where the AMD stack lives.
 
 
 ## A federated catalog
@@ -170,12 +176,6 @@ cp -r amd-skills/skills/local-ai-use <agent-skills-dir>/
 | Cursor | `~/.cursor/skills/` / `.cursor/skills/` |
 | Claude Code | `~/.claude/skills/` / `.claude/skills/` |
 | Codex | `$HOME/.agents/skills` / `$REPO_ROOT/.agents/skills` |
-
-## Why a skill, not a doc?
-
-Documentation describes an API surface: every flag, every option, neutral by design. A skill encodes the opinionated path: which flags, which container image, which `gfx` target, which environment variables, in what order. It captures the decisions a senior AMD engineer makes without thinking, in a form the agent can apply consistently across teams and repositories.
-
-Skills earn their keep on repeated, opinionated workflows, exactly where the AMD stack lives.
 
 ## Contributing a skill
 
