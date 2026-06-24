@@ -1,0 +1,53 @@
+{
+  "vllm_version": "0.22.0",
+  "container": {
+    "image": "amdih/zendnn_zentorch:vllm_v0.22.0_zentorch_v2.11.0.1_ubuntu22.04_2026_ww23",
+    "runtimes": ["docker", "podman"],
+    "comment": "Public vLLM + zentorch CPU image on Docker Hub (amdih/zendnn_zentorch) -- no internal-registry access needed. Tags are vllm_v<ver>_zentorch_v<ver>_<os>_<build>; prefer the newest ubuntu22.04 stable. Both docker and podman are supported; the skill prefers docker and falls back to podman.",
+    "run_flags": [
+      "--ipc=host",
+      "--shm-size=16g",
+      "--network=host"
+    ],
+    "hf_cache_mount": "-v ~/.cache/huggingface:/root/.cache/huggingface",
+    "flag_notes": {
+      "--ipc=host": "vLLM workers use host IPC/shared memory.",
+      "--shm-size=16g": "vLLM needs a large /dev/shm; default 64MB is not enough.",
+      "--network=host": "Expose the served port directly. Alternative: -p <port>:<port>.",
+      "numa": "Default: a single instance uses socket 0's CPUs with NO memory binding (cpu_tune.py emits --cpuset-cpus for the container; conda relies on VLLM_CPU_OMP_THREADS_BIND). On NPS2/NPS4 (multiple NUMA nodes per socket), optimal per-node binding could add performance -- cpu_tune.py notes this; the base recipe does not do it."
+    }
+  },
+  "launch": {
+    "cli": "vllm serve",
+    "device_flag_note": "Do NOT pass --device cpu on vLLM >= 0.20; the zentorch plugin auto-selects the CPU platform and `vllm serve` rejects --device. Only pass it if `vllm serve --help` advertises it (older vLLM)."
+  },
+  "precision": {
+    "native": ["bf16", "fp16", "fp32"],
+    "default": "bfloat16",
+    "notes": "bf16 is the throughput default on EPYC (Zen). fp32 is slower and for debugging only. WOQ (per-channel/per-group int) is supported by zentorch but out of scope for the base recipe."
+  },
+  "model_support": {
+    "check_script": "scripts/check_model.py",
+    "policy": "Do NOT blanket-block multimodal. check_model.py reads the model's HF architectures and checks them against vLLM's model registry for the pinned vllm_version. Text and multimodal generation endpoints are allowed; pooling/embedding/reranker and non-LLM architectures are rejected (not chat/completion endpoints).",
+    "cpu_note": "A vLLM-supported multimodal arch may still hit a GPU-only kernel on CPU; that surfaces at load, where the no-retry rule applies."
+  },
+  "default_model": "Qwen/Qwen3-0.6B",
+  "default_model_notes": "Ungated (Apache-2.0), tiny, fast first success on CPU. For a real workload pick a larger Qwen3 / Llama once the flow is verified.",
+  "smoke_model": "Qwen/Qwen3-0.6B",
+  "smoke_model_notes": "Current small Qwen, chat-capable (ships a chat template, so /v1/chat/completions works -- unlike base models such as opt-125m).",
+  "env_defaults": {
+    "VLLM_CPU_OMP_THREADS_BIND": "set by cpu_tune.py (physical cores of socket 0)",
+    "VLLM_CPU_KVCACHE_SPACE": "set by cpu_tune.py (GB)",
+    "do_not_set": "OMP_NUM_THREADS -- vLLM sets it from the bind list (len of cpu_list); and VLLM_CPU_NUM_OF_RESERVED_CPU -- vLLM has its own default when unset, forcing 0 overrides it."
+  },
+  "throughput_flags_optional": {
+    "TORCHINDUCTOR_FREEZING": "1",
+    "VLLM_USE_AOT_COMPILE": "0",
+    "ZENTORCH_WEIGHT_PREPACK": "1",
+    "gotcha": "VERIFIED on vLLM 0.22.0 / zentorch 2.11.0.1: TORCHINDUCTOR_FREEZING=1 ALONE crashes engine-core init with 'AssertionError: expected OutputCode, got function'. It only works when VLLM_USE_AOT_COMPILE=0 is set alongside it. Never set FREEZING=1 without AOT_COMPILE=0. The base recipe leaves all three unset."
+  },
+  "ram": {
+    "os_headroom_gb": 16,
+    "comment": "Reserve ~16 GB for OS + framework beyond model weights + KV cache when checking fit."
+  }
+}
