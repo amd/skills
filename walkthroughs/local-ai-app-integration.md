@@ -27,10 +27,12 @@ cd dictate
 
 ## Step 3 - Enabling claude to see `local-ai-app-integration`
 
-In the future this will be enabled directly through claude's marketplace. For now, we have to manually add it.
+* Install the skill with the [`skills` CLI](https://github.com/vercel-labs/skills):
 
-* Clone `https://github.com/amd/skills`
-* Move the `local-ai-app-integration` skill from the repo to `.claude/skills/`
+```bash
+npx skills add amd/skills --skill local-ai-app-integration --agent claude-code
+```
+
 * Run `claude "Which skills can you see?" --model opus`. You should see a list of skills that includes `local-ai-app-integration`.
 
 ## Step 4 - Running the skill

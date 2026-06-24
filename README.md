@@ -1,6 +1,3 @@
-> [!IMPORTANT]
-> **Tech Preview: Catalog under active development.** We’re building the catalog in the open, sharing progress as the foundations take shape. Expect frequent changes as skills, categories, and descriptions evolve.
-
 # AMD Skills
 
 <div align="center">
@@ -25,11 +22,77 @@ AMD Skills provide agents with knowledge, scripts, and conventions for working w
 
 Skills in this repository follow the standardized [Agent Skills](https://github.com/anthropics/skills) format and are designed to interoperate with the major coding agents like Cursor, Claude Code, OpenAI Codex, and Gemini CLI.
 
+> [!IMPORTANT]
+> **Tech Preview:** We’re building the catalog in the open, sharing progress as the foundations take shape. Expect frequent changes as skills, categories, and descriptions evolve.
+
+
+
 ## Installation
 
-AMD Skills will soon be installable directly in Claude/Cursor/Codex and other agents through marketplace integration.
+Install AMD Skills with the [`skills` CLI](https://github.com/vercel-labs/skills) via `npx`. No clone or manual copying required.
 
-While we work marketplace integration, please refer to our [Manual installation steps](#manual-installation).
+```bash
+npx skills add amd/skills
+```
+
+This prompts you to pick a skill and an install destination. To install a specific skill into specific agents, pass `--skill` with one or more `--agent` flags (e.g. `cursor`, `claude-code`, `codex`):
+
+```bash
+npx skills add amd/skills --skill local-ai-use --agent claude-code
+```
+
+Browse everything available before installing:
+
+```bash
+npx skills add amd/skills --list
+```
+
+Prefer to do it by hand? See [Manual installation](#manual-installation).
+
+## Using a skill
+
+Once a skill is installed, reference it in plain language while talking to your agent. For example:
+
+- "Use AMD Skills to learn how to generate images locally instead of burning cloud tokens."
+- "Use AMD Skills to deploy this LLM for inference on my AMD Instinct GPUs."
+
+In most cases the agent picks the right skill on its own from the description; explicit invocation is a fallback, not a requirement.
+
+For hands-on, step-by-step guides that show a skill in action, see the [walkthroughs](walkthroughs/README.md).
+
+## The catalog
+
+The initial catalog is organized into three focus areas, spanning the full stack from client to cloud. This catalog is expected to grow significantly as more skills land.
+
+### Client-Native
+
+Run and optimize on Ryzen AI.
+
+| Skill | What it does | Source |
+| --- | --- | --- |
+| [`local-ai-use`](skills/local-ai-use/SKILL.md) | Route image generation, text-to-speech, and speech-to-text through a local AI server to reduce token cost. | in-repo |
+| [`local-ai-app-integration`](skills/local-ai-app-integration/SKILL.md) | Integrate local AI into cloud LLM apps for offline support, better privacy, and lower API costs. | in-repo |
+| `apu-memory-tuner` | Inspect and tune the shared-vs-dedicated memory split (GTT / UMA Frame Buffer) on AMD Ryzen APUs. | _planned_ |
+
+### Cross-Stack
+
+Cross-stack skills, from client to cloud.
+
+| Skill | What it does | Source |
+| --- | --- | --- |
+| `rocm-doctor` | Diagnose ROCm / PyTorch / llama.cpp failures on AMD GPUs against a fixed list of known misconfigurations. | _planned_ |
+| `hyperloom-kernel-optimizer` | Autonomously optimizes LLM inference on AMD GPUs. | _planned_ |
+| `vllm-semantic-router` | Setup a vLLM router that semantically maps your request to the best available platform. | _planned_ |
+
+### Server-Native
+
+Run and optimize on AMD Instinct.
+
+| Skill | What it does | Source |
+| --- | --- | --- |
+| [`serving-llms-on-instinct`](skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine/backend selection in later phases. | in-repo |
+| [`magpie-kernel-evaluator`](skills/magpie-kernel-evaluator/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM / SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
+| [`tracelens-analysis-orchestrator`](skills/tracelens-analysis-orchestrator/SKILL.md) | Orchestrate modular PyTorch profiler trace analysis with TraceLens: generate perf reports, run system-level and compute-kernel subagents in parallel, and write a prioritized stakeholder report. | [TraceLens](https://github.com/AMD-AGI/TraceLens) |
 
 ## What is a skill?
 
@@ -53,40 +116,6 @@ Every skill also ships a `skill-card.md`: a short, human-facing governance card 
 Documentation describes an API surface: every flag, every option, neutral by design. A skill encodes the opinionated path: which flags, which container image, which `gfx` target, which environment variables, in what order. It captures the decisions a senior AMD engineer makes without thinking, in a form the agent can apply consistently across teams and repositories.
 
 Skills earn their keep on repeated, opinionated workflows, exactly where the AMD stack lives.
-
-## The catalog
-
-The initial catalog is organized into three focus areas, spanning the full stack from client to cloud. This catalog is expected to grow significantly as more skills land.
-
-### Client-Native
-
-Run and optimize on Ryzen AI.
-
-| Skill | What it does | Source |
-| --- | --- | --- |
-| [`local-ai-use`](skills/local-ai-use/SKILL.md) | Route image generation, text-to-speech, and speech-to-text through a local AI server to reduce token cost. | in-repo |
-| [`local-ai-app-integration`](skills/local-ai-app-integration/SKILL.md) | Integrate local AI into cloud LLM apps for offline support, better privacy, and lower API costs. | in-repo |
-| `apu-memory-tuner` | Inspect and tune the shared-vs-dedicated memory split (GTT / UMA Frame Buffer) on AMD Ryzen APUs. | _planned_ |
-
-### Cross-Stack
-
-Cross-stack skills, from client to cloud.
-
-| Skill | What it does | Source |
-| --- | --- | --- |
-| `rocm-doctor` | Diagnose ROCm / PyTorch / llama.cpp failures on AMD GPUs against a fixed list of known misconfigurations. | _planned_ |
-| `llm-kernel-optimizer` (`hyperloom`) | Autonomously optimizes LLM inference on AMD GPUs. | _planned_ |
-| `vllm-semantic-router` | Setup a vLLM router that semantically maps your request to the best available platform. | _planned_ |
-
-### Server-Native
-
-Run and optimize on AMD Instinct.
-
-| Skill | What it does | Source |
-| --- | --- | --- |
-| [`serving-llms-on-instinct`](skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine/backend selection in later phases. | in-repo |
-| [`magpie-kernel-evaluator`](skills/magpie-kernel-evaluator/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM / SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
-| [`tracelens-analysis-orchestrator`](skills/tracelens-analysis-orchestrator/SKILL.md) | Orchestrate modular PyTorch profiler trace analysis with TraceLens: generate perf reports, run system-level and compute-kernel subagents in parallel, and write a prioritized stakeholder report. | [TraceLens](https://github.com/AMD-AGI/TraceLens) |
 
 
 ## A federated catalog
@@ -147,17 +176,6 @@ cp -r amd-skills/skills/local-ai-use <agent-skills-dir>/
 | Cursor | `~/.cursor/skills/` / `.cursor/skills/` |
 | Claude Code | `~/.claude/skills/` / `.claude/skills/` |
 | Codex | `$HOME/.agents/skills` / `$REPO_ROOT/.agents/skills` |
-
-## Using a skill
-
-Once a skill is installed, reference it in plain language while talking to your agent. For example:
-
-- "Use AMD Skills to integrate local AI capabilities into my app with Embeddable Lemonade."
-- "Use AMD Skills to convert these CUDA kernels and flag anything that needs manual review."
-
-In most cases the agent picks the right skill on its own from the description; explicit invocation is a fallback, not a requirement.
-
-For hands-on, step-by-step guides that show a skill in action, see the [walkthroughs](walkthroughs/README.md).
 
 ## Contributing a skill
 
