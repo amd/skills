@@ -66,11 +66,16 @@ When an agent decides a skill is relevant (or you invoke it explicitly), it load
 
 Every skill also ships a `skill-card.md`: a short, human-facing governance card (Description, Owner, License) that tells a reviewer what the skill is and who stands behind it without reading the source. See [docs/skill-cards.md](docs/skill-cards.md).
 
-## Why a skill, not a doc?
+## Using a skill
 
-Documentation describes an API surface: every flag, every option, neutral by design. A skill encodes the opinionated path: which flags, which container image, which `gfx` target, which environment variables, in what order. It captures the decisions a senior AMD engineer makes without thinking, in a form the agent can apply consistently across teams and repositories.
+Once a skill is installed, reference it in plain language while talking to your agent. For example:
 
-Skills earn their keep on repeated, opinionated workflows, exactly where the AMD stack lives.
+- "Use AMD Skills to learn how to generate images locally instead of burning cloud tokens."
+- "Use AMD Skills to deploy this LLM for inference on my AMD Instinct GPUs."
+
+In most cases the agent picks the right skill on its own from the description; explicit invocation is a fallback, not a requirement.
+
+For hands-on, step-by-step guides that show a skill in action, see the [walkthroughs](walkthroughs/README.md).
 
 ## The catalog
 
@@ -166,16 +171,11 @@ cp -r amd-skills/skills/local-ai-use <agent-skills-dir>/
 | Claude Code | `~/.claude/skills/` / `.claude/skills/` |
 | Codex | `$HOME/.agents/skills` / `$REPO_ROOT/.agents/skills` |
 
-## Using a skill
+## Why a skill, not a doc?
 
-Once a skill is installed, reference it in plain language while talking to your agent. For example:
+Documentation describes an API surface: every flag, every option, neutral by design. A skill encodes the opinionated path: which flags, which container image, which `gfx` target, which environment variables, in what order. It captures the decisions a senior AMD engineer makes without thinking, in a form the agent can apply consistently across teams and repositories.
 
-- "Use AMD Skills to integrate local AI capabilities into my app with Embeddable Lemonade."
-- "Use AMD Skills to convert these CUDA kernels and flag anything that needs manual review."
-
-In most cases the agent picks the right skill on its own from the description; explicit invocation is a fallback, not a requirement.
-
-For hands-on, step-by-step guides that show a skill in action, see the [walkthroughs](walkthroughs/README.md).
+Skills earn their keep on repeated, opinionated workflows, exactly where the AMD stack lives.
 
 ## Contributing a skill
 
