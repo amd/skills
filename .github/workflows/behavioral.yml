@@ -7,7 +7,7 @@ name: behavioral
 #   * selective -- only the skills whose folder or test changed are run (the
 #     whole suite runs when the shared harness changes). See
 #     .github/scripts/select_behavioral.py.
-#   * label-gated execution -- the test job (which holds ANTHROPIC_API_KEY)
+#   * label-gated execution -- the test job (which holds ORCHESTR_API_KEY)
 #     only runs on manual dispatch or when a maintainer adds the
 #     `run_behavioral` label, keeping the secret away from untrusted / fork
 #     code that runs with tool permissions bypassed.
@@ -93,24 +93,39 @@ jobs:
           fi
 
   behavioral:
-    name: Behavioral (${{ matrix.skill }})
+    name: Behavioral (${{ matrix.skill }} on ${{ matrix.os }})
     needs: discover
     # Run only when something testable changed AND the run is authorized:
     # manual dispatch, or a maintainer added the `run_behavioral` label. This is
-    # the gate that protects the ANTHROPIC_API_KEY secret.
+    # the gate that protects the ORCHESTR_API_KEY secret.
     if: >-
       needs.discover.outputs.any == 'true' &&
       (github.event_name == 'workflow_dispatch' ||
        contains(github.event.pull_request.labels.*.name, 'run_behavioral'))
-    runs-on: ubuntu-latest
+    # Self-hosted Strix Halo runners. The OS label (Linux / Windows) comes from
+    # the matrix below so each skill is exercised on both platforms.
+    runs-on: [self-hosted, strix_halo, "${{ matrix.os }}"]
     # Behavioral runs install local models and can take a while; cap it so a
     # hung agent or stalled model pull fails the job instead of burning minutes.
     timeout-minutes: 45
     strategy:
-      # One skill failing should not hide the others' results.
+      # One skill / OS failing should not hide the others' results.
       fail-fast: false
       matrix:
         skill: ${{ fromJson(needs.discover.outputs.skills) }}
+        os: [Linux, Windows]
+    env:
+      # The CLI authenticates from this key and targets AMD's internal LLM
+      # gateway. This job only runs on labeled PRs and manual dispatch (see this
+      # job's `if:` above), keeping the secret away from untrusted / fork code.
+      ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
+      ANTHROPIC_BASE_URL: https://llm-api.amd.com
+      # The gateway identifies the calling user via a custom header.
+      ANTHROPIC_CUSTOM_HEADERS: "x-user: a1_ucicd"
+      # Lets the harness default to this skill if a test relies on the env.
+      BEHAVIORAL_SKILL: ${{ matrix.skill }}
+      # Cost cap: sonnet only. The harness also enforces this under CI.
+      BEHAVIORAL_MODEL: sonnet
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -131,21 +146,26 @@ jobs:
       - name: Install behavioral test dependencies
         run: pip install -r eval/behavioral/requirements.txt
 
-      - name: Run behavioral test for ${{ matrix.skill }}
+      - name: Run behavioral test for ${{ matrix.skill }} (Linux)
+        if: matrix.os == 'Linux'
         working-directory: eval/behavioral
-        env:
-          # The CLI authenticates from this key. This job only runs on labeled
-          # PRs and manual dispatch (see this job's `if:` above).
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Lets the harness default to this skill if a test relies on the env.
-          BEHAVIORAL_SKILL: ${{ matrix.skill }}
-          # Cost cap: sonnet only. The harness also enforces this under CI.
-          BEHAVIORAL_MODEL: sonnet
+        shell: bash
         run: |
           set -euo pipefail
           test_file="tests/test_$(echo '${{ matrix.skill }}' | tr '-' '_').py"
           echo "Running $test_file"
           pytest "$test_file"
+
+      - name: Run behavioral test for ${{ matrix.skill }} (Windows)
+        if: matrix.os == 'Windows'
+        working-directory: eval/behavioral
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $skill = "${{ matrix.skill }}"
+          $test_file = "tests/test_$($skill -replace '-','_').py"
+          Write-Host "Running $test_file"
+          pytest $test_file
 
   # Single aggregate gate. Mark THIS check required in branch protection.
   #
