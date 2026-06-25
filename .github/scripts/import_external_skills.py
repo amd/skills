@@ -10,6 +10,14 @@ For each source, the script:
 1. Shallow-clones the repo at the pinned `ref` into a temp directory,
    using sparse-checkout so only the configured `path` is fetched.
 2. Copies each named skill folder into `skills/<skill>/`.
+2b. Optionally vendors the skill under a different local catalog name (the
+   `as:` field on a skill entry). Federated skills follow a
+   `<projectrepo>-<skill>` naming convention in this catalog (e.g. the
+   `analysis-orchestrator` skill from TraceLens is vendored as
+   `tracelens-analysis-orchestrator`), so the local folder, marketplace
+   entry, and the SKILL.md `name` frontmatter are all set to the `as:`
+   value. The upstream folder name is still used to locate the skill in
+   its source repo.
 3. Writes `.federated.json` inside each copy with source metadata so we
    can tell vendored skills apart from skills authored in this repo.
 4. Rewrites relative markdown links that point outside the copied skill
@@ -30,11 +38,12 @@ For each source, the script:
 Usage:
     uv run .github/scripts/import_external_skills.py            # write changes
     uv run .github/scripts/import_external_skills.py --dry-run  # report only
-    uv run .github/scripts/import_external_skills.py --only magpie  # one skill
+    uv run .github/scripts/import_external_skills.py --only magpie-kernel-evaluator
 
-The `--only` flag (repeatable) restricts the run to the named skill
-folder(s): other skills in the catalog are skipped and pruning is limited
-to the named skills, so unrelated federated skills are never removed.
+The `--only` flag (repeatable) restricts the run to the named *local*
+skill folder(s) (the `as:` name when one is set): other skills in the
+catalog are skipped and pruning is limited to the named skills, so
+unrelated federated skills are never removed.
 
 The companion GitHub Actions workflow `import-external-skills` calls this
 script on manual dispatch and opens a pull request with the result.
@@ -68,6 +77,9 @@ FRONTMATTER_RE = re.compile(
     r"\A---\s*\n(?P<frontmatter>.*?)\n---\s*\n?(?P<body>.*)\Z",
     re.DOTALL,
 )
+# The `name:` line inside a SKILL.md frontmatter block. Used to rewrite the
+# frontmatter `name` when a skill is vendored under a different local name.
+NAME_FIELD_RE = re.compile(r"(?m)^(?P<key>name[ \t]*:[ \t]*)(?P<value>.*)$")
 # Inline markdown links and images: `[text](target)` / `![alt](target)`,
 # with an optional `"title"` after the target. The `target` group captures
 # everything up to whitespace or the closing paren.
@@ -85,7 +97,13 @@ MARKETPLACE_DESCRIPTION_MAX = 320
 @dataclass
 class SkillSpec:
     folder: str
+    local_name: str | None = None
     marketplace_description_override: str | None = None
+
+    @property
+    def dest_name(self) -> str:
+        """Local catalog name: the `as:` override, or the upstream folder."""
+        return self.local_name or self.folder
 
 
 @dataclass
@@ -145,6 +163,7 @@ def parse_sources(catalog: Path) -> list[Source]:
                 skills.append(
                     SkillSpec(
                         folder=sk["name"],
+                        local_name=sk.get("as"),
                         marketplace_description_override=sk.get(
                             "marketplace_description"
                         ),
@@ -399,6 +418,35 @@ def write_card(skill_dir: Path, source: Source, description: str) -> None:
     )
 
 
+def rewrite_skill_name(skill_dir: Path, new_name: str, log: list[str]) -> None:
+    """Set the SKILL.md frontmatter `name` to `new_name`.
+
+    Upstream ships its own `name` (e.g. `analysis-orchestrator`), but this
+    repo's validator requires the frontmatter `name` to match the skill's
+    directory name. When a skill is vendored under a different local name
+    (the `as:` field), rewrite the frontmatter so the imported copy stays
+    valid without hand-editing after every refresh.
+    """
+    skill_md = skill_dir / "SKILL.md"
+    text = skill_md.read_text(encoding="utf-8")
+    match = FRONTMATTER_RE.match(text)
+    if not match:
+        return
+    fm_start, fm_end = match.span("frontmatter")
+    frontmatter = match.group("frontmatter")
+
+    new_frontmatter, count = NAME_FIELD_RE.subn(
+        lambda m: f"{m.group('key')}{new_name}", frontmatter, count=1
+    )
+    if count == 0:
+        # No `name:` line to rewrite; prepend one so the copy stays valid.
+        new_frontmatter = f"name: {new_name}\n{frontmatter}"
+    if new_frontmatter == frontmatter:
+        return
+    skill_md.write_text(text[:fm_start] + new_frontmatter + text[fm_end:], encoding="utf-8")
+    log.append(f"    [SKILL.md] name -> {new_name}")
+
+
 def update_marketplace(results: Iterable[ImportResult], dry_run: bool) -> bool:
     """Sync `.claude-plugin/marketplace.json` with the imported skills.
 
@@ -496,14 +544,22 @@ def import_source(
                 or truncate_description(description)
             )
 
-            dest_skill = SKILLS_DIR / spec.folder
+            dest_name = spec.dest_name
+            dest_skill = SKILLS_DIR / dest_name
+            # The marker records the skill's *upstream* location, which keeps
+            # using the source folder name even when we vendor it locally as
+            # `dest_name`.
             relative_path = f"{source.path}/{spec.folder}"
             action = "would import" if dry_run else "importing"
-            log.append(f"[{source.name}] {action} {spec.folder} -> skills/{spec.folder}")
+            renamed = f" (as {dest_name})" if dest_name != spec.folder else ""
+            log.append(
+                f"[{source.name}] {action} {spec.folder} -> skills/{dest_name}{renamed}"
+            )
             if not dry_run:
                 copy_skill(src_skill, dest_skill)
                 write_marker(dest_skill, source, commit, relative_path)
                 write_card(dest_skill, source, marketplace_description)
+                rewrite_skill_name(dest_skill, dest_name, log)
                 rewrite_external_references(
                     dest_skill,
                     relative_path,
@@ -516,7 +572,7 @@ def import_source(
             results.append(
                 ImportResult(
                     source=source,
-                    folder=spec.folder,
+                    folder=dest_name,
                     commit=commit,
                     skill_description=description.strip(),
                     marketplace_description=marketplace_description,
@@ -575,7 +631,7 @@ def main(argv: list[str] | None = None) -> int:
 
     only = set(args.only or [])
     if only:
-        known = {spec.folder for source in sources for spec in source.skills}
+        known = {spec.dest_name for source in sources for spec in source.skills}
         unknown = only - known
         if unknown:
             raise ValueError(
@@ -583,7 +639,7 @@ def main(argv: list[str] | None = None) -> int:
                 + ", ".join(sorted(unknown))
             )
         for source in sources:
-            source.skills = [s for s in source.skills if s.folder in only]
+            source.skills = [s for s in source.skills if s.dest_name in only]
         sources = [source for source in sources if source.skills]
     log: list[str] = []
     declared: set[str] = set()
@@ -594,12 +650,12 @@ def main(argv: list[str] | None = None) -> int:
 
     for source in sources:
         for spec in source.skills:
-            if spec.folder in declared:
+            if spec.dest_name in declared:
                 raise ValueError(
-                    f"Skill name collision: {spec.folder!r} is listed by "
+                    f"Skill name collision: {spec.dest_name!r} is listed by "
                     "more than one source in .github/scripts/sources.yml."
                 )
-            declared.add(spec.folder)
+            declared.add(spec.dest_name)
         all_results.extend(import_source(source, args.dry_run, log))
 
     # With --only we deliberately ignore skills the user didn't name, so

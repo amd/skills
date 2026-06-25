@@ -38,24 +38,10 @@ cd dictate
 
 ## Step 3 - Enabling claude to see `local-ai-app-integration`
 
-> **Future:** this will be a one-liner: `/plugin install local-ai-app-integration@amd/skills`.
-> Until the marketplace ships, install manually:
+* Install the skill with the [`skills` CLI](https://github.com/vercel-labs/skills):
 
 ```bash
-# Clone the AMD skills repo (if you haven't already)
-git clone https://github.com/amd/skills path/to/amd-skills
-
-# Copy the skill into Claude's skill directory for the dictate repo
-# Run this from inside the dictate repo root
-mkdir -p .claude/skills
-cp -r path/to/amd-skills/skills/local-ai-app-integration .claude/skills/
-```
-
-On Windows (PowerShell):
-
-```powershell
-New-Item -ItemType Directory -Force .claude\skills
-Copy-Item -Recurse path\to\amd-skills\skills\local-ai-app-integration .claude\skills\
+npx skills add amd/skills --skill local-ai-app-integration --agent claude-code
 ```
 
 * Run `claude "Which skills can you see?" --model opus`. You should see a list of skills that includes `local-ai-app-integration`.
