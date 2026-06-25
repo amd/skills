@@ -21,7 +21,7 @@ install.
 
 **What you'll end up with:** one new launcher module (~30 lines), one config
 change to the existing HTTP client (base URL + API key), one vendored binary
-under `vendor/lemonade/`. Typical integration: 1–2 hours on a new codebase.
+under `vendor/lemonade/`.
 
 ## When this skill is the right tool
 
@@ -106,6 +106,18 @@ it.
 For the LLM backend, default to `llamacpp` and let `lemond` pick
 `rocm` → `vulkan` → `cpu` automatically by leaving `llamacpp_backend`
 unset. Override only if the app has hard hardware requirements.
+
+**Scope: this skill selects a backend once at integration time on the
+developer's machine.** Runtime fallback based on the end user's hardware is
+out of scope. Bundle `vulkan` as the universal fallback so the app works on
+any machine. If the dev machine has an NPU and the chosen recipe supports it,
+the skill will use the NPU backend — otherwise it falls back to `vulkan`.
+
+> **Note:** having an NPU does not mean every recipe supports NPU. Confirm
+> the recipe/backend pair is `installed` or `installable` via
+> `GET /api/v1/system-info` before committing to it. See
+> [reference.md](reference.md#hardware-probing-with-v1system-info) for
+> per-recipe decision rules.
 
 For more options and tradeoffs, see [reference.md](reference.md).
 
@@ -429,7 +441,7 @@ The integration is done when **all** of these are true:
       model pull, first result) so a failure is diagnosable from the console.
 - [ ] The existing client's chat / image / speech call returns a valid
       response with the base URL and key swapped, with no other code changed.
-- [ ] First-run latency is surfaced: the UI shows a loading state from the
+- [ ] First-run latency is surfaced: the interface shows a loading state from the
       moment the first inference request is sent until the response arrives.
 - [ ] The HTTP client timeout is set to at least 120 seconds.
 - [ ] In local mode the app requires **no** cloud API key: no onboarding wall,

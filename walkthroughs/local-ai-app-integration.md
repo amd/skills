@@ -15,19 +15,13 @@ Transcription moves from cloud to your local device. Expect 1–2 hours.
 
 This sample app requires the Rust toolchain (install from https://rustup.rs/).
 
-**Hardware:** Any Windows x64 PC works. You do **not** need an AMD NPU. The
-skill detects what your machine has and runs transcription on the fastest option
-available, in this priority order:
+**Hardware:** Any Windows x64 PC works. The skill selects a backend once at integration time based on your development machine. If your machine has an NPU and the chosen recipe supports it, the NPU backend is used — otherwise it transparently falls back to Vulkan as the universal fallback so the app works on any end-user machine. The skill logs which backend was selected and why, so you always know what ran.
 
 | Priority | Your hardware | What you get |
 |---|---|---|
 | 1 (fastest) | Ryzen AI with XDNA2 NPU (Strix, Strix Halo, Kraken, Gorgon Point) | NPU-accelerated transcription |
 | 2 | AMD iGPU / dGPU | GPU-accelerated transcription |
 | 3 (fallback) | Any other Windows x64 PC | CPU transcription |
-
-If you have an NPU the skill uses it first; if not, it transparently falls back
-to your iGPU and then CPU. You don't choose any of this — the steps below are the
-same on every machine.
 
 ## Step 1 - Get the target app
 
