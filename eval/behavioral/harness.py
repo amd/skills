@@ -97,14 +97,16 @@ def check_api_reachable(model: str | None = DEFAULT_MODEL, timeout: int = 60) ->
         return False, "'claude' CLI not found on PATH"
 
     model = _enforce_model_policy(model)
-    cmd = [claude_bin, "-p", "Reply with the single word: ok", "--output-format", "json"]
+    cmd = [claude_bin, "-p", "--output-format", "json"]
     if model:
         cmd += ["--model", model]
 
+    # Prompt goes over stdin (see `_run_agent` for why) -- consistent here even
+    # though this one is single-line.
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8",
-            stdin=subprocess.DEVNULL, timeout=timeout, env=_claude_env(),
+            input="Reply with the single word: ok", timeout=timeout, env=_claude_env(),
         )
     except subprocess.TimeoutExpired:
         return False, f"API preflight timed out after {timeout}s (is the network reachable?)"
@@ -135,7 +137,7 @@ def _run_agent(prompt_text: str, workspace: Path, model: str | None, effort: str
         raise RuntimeError("'claude' CLI not found on PATH")
 
     cmd = [
-        claude_bin, "-p", prompt_text,
+        claude_bin, "-p",
         "--output-format", "stream-json", "--verbose",
         "--dangerously-skip-permissions",
         "--add-dir", str(workspace),
@@ -145,9 +147,14 @@ def _run_agent(prompt_text: str, workspace: Path, model: str | None, effort: str
     if effort:
         cmd += ["--effort", effort]
 
+    # Pass the prompt over stdin rather than as an argv string. On Windows, when
+    # `claude` resolves to a .cmd/.ps1 shim, a multi-line command-line argument
+    # is re-parsed by cmd.exe/PowerShell and truncated at the first newline.
+    # stdin is a raw byte stream and is immune to that on all platforms, so
+    # multi-line test prompts stay intact.
     proc = subprocess.run(
         cmd, cwd=str(workspace), capture_output=True, text=True,
-        encoding="utf-8", stdin=subprocess.DEVNULL, env=_claude_env(),
+        encoding="utf-8", input=prompt_text, env=_claude_env(),
     )
 
     events: list[dict] = []
@@ -229,7 +236,7 @@ def _grade_with_llm(statement: str, run: "Run", judge_model: str | None) -> tupl
         '{"pass": true|false, "reason": "<one short sentence>"}'
     )
     cmd = [
-        claude_bin, "-p", prompt_text,
+        claude_bin, "-p",
         "--output-format", "json",
         "--dangerously-skip-permissions",
         "--add-dir", str(run.workspace),
@@ -240,7 +247,7 @@ def _grade_with_llm(statement: str, run: "Run", judge_model: str | None) -> tupl
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8",
-            stdin=subprocess.DEVNULL, timeout=180, env=_claude_env(),
+            input=prompt_text, timeout=180, env=_claude_env(),
         )
     except subprocess.TimeoutExpired:
         return False, "llm_judge timed out after 180s"
