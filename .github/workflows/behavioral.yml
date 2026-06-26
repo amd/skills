@@ -142,7 +142,7 @@ jobs:
       - name: Run behavioral test for ${{ matrix.skill }} (Windows)
         if: matrix.os == 'Windows'
         working-directory: eval/behavioral
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
           $skill = "${{ matrix.skill }}"
