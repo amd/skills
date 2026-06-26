@@ -100,12 +100,11 @@ jobs:
         skill: ${{ fromJson(needs.discover.outputs.skills) }}
         os: [Linux, Windows]
     env:
-      # The CLI authenticates from this key and targets AMD's internal LLM
-      # gateway.
       ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
-      ANTHROPIC_BASE_URL: https://llm-api.amd.com
-      # The gateway identifies the calling user via a custom header.
-      ANTHROPIC_CUSTOM_HEADERS: "x-user: a1_ucicd"
+      ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
+      ANTHROPIC_CUSTOM_HEADERS: |
+        Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
+        user: a1_ucicd
       # Lets the harness default to this skill if a test relies on the env.
       BEHAVIORAL_SKILL: ${{ matrix.skill }}
       # Cost cap: sonnet only. The harness also enforces this under CI.
