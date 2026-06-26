@@ -47,6 +47,29 @@ then open a PR for review.
 2. Commit `skills/**`, `.github/scripts/sources.yml`, and the manifests.
 3. Open a PR; a maintainer reviews and merges once CI passes.
 
+## Catch failures before nightly
+
+The catalog runs checks against your skills. Run the **same** checks in your own
+repo by calling them as reusable workflows, so you catch breakage during normal
+development instead of in the catalog's nightly run. The logic and config live in
+`amd/skills`, so green in your repo means green in the catalog — and you never copy
+or maintain the check yourself.
+
+Add a caller workflow to your repo (e.g. `.github/workflows/skills-checks.yml`):
+
+```yaml
+name: skills-checks
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  external-references:
+    uses: amd/skills/.github/workflows/external-reference-check.yml@main
+    permissions:
+      contents: read
+      issues: write
+```
+
 ## Update or remove
 
 Automatic refresh and pruning will soon be enabled through nightly workflows.
