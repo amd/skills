@@ -21,6 +21,25 @@ on:
     # Mondays at 12:00 UTC. Catches link rot in unchanged content.
     - cron: "0 12 * * 1"
   workflow_dispatch:
+  # Lets OTHER repos reuse this exact check instead of copying it, so the
+  # logic never drifts. A consumer adds a ~10-line caller workflow:
+  #
+  #   jobs:
+  #     external-references:
+  #       uses: amd/skills/.github/workflows/external-reference-check.yml@main
+  #       permissions:
+  #         contents: read
+  #         issues: write
+  #
+  # The lychee config is NOT configurable: callers always use the canonical
+  # .github/lychee.toml from amd/skills (pinned to the same commit as this
+  # workflow), so neither the logic nor the config can drift.
+  workflow_call:
+    inputs:
+      markdown_glob:
+        description: "Glob of markdown files to check, relative to the caller repo root."
+        type: string
+        default: "./**/*.md"
 
 permissions:
   contents: read
@@ -34,11 +53,44 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      # The lychee config always comes from amd/skills so it can never drift.
+      # When this repo runs the check on itself, the working-tree copy is used
+      # (so PRs that edit the config are tested against their own changes).
+      # When another repo calls this workflow, the canonical config is fetched
+      # from amd/skills at the SAME commit as this workflow file
+      # (github.job_workflow_sha), keeping logic and config in lockstep.
+      # Sparse-checkout grabs only the config file so its markdown can't
+      # pollute the scan.
+      - name: Fetch canonical lychee config
+        if: ${{ github.repository != 'amd/skills' }}
+        uses: actions/checkout@v4
+        with:
+          repository: amd/skills
+          ref: ${{ github.job_workflow_sha || 'main' }}
+          path: .external-reference-check-config
+          sparse-checkout: |
+            .github/lychee.toml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Resolve lychee config path
+        id: cfg
+        shell: bash
+        env:
+          IS_CANONICAL: ${{ github.repository == 'amd/skills' }}
+        run: |
+          set -euo pipefail
+          if [ "${IS_CANONICAL}" = "true" ]; then
+            echo "path=.github/lychee.toml" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=.external-reference-check-config/.github/lychee.toml" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check external references
         id: lychee
         uses: lycheeverse/lychee-action@v2
         with:
-          args: --config .github/lychee.toml --no-progress "./**/*.md"
+          args: --config ${{ steps.cfg.outputs.path }} --no-progress "${{ inputs.markdown_glob || './**/*.md' }}"
           # Fail the workflow on PR and manual runs so broken external
           # references show up as a red check (mark this workflow as
           # not-required in branch protection if you don't want it to

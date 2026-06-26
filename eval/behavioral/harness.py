@@ -101,8 +101,6 @@ def check_api_reachable(model: str | None = DEFAULT_MODEL, timeout: int = 60) ->
     if model:
         cmd += ["--model", model]
 
-    # Prompt goes over stdin (see `_run_agent` for why) -- consistent here even
-    # though this one is single-line.
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8",
@@ -147,11 +145,6 @@ def _run_agent(prompt_text: str, workspace: Path, model: str | None, effort: str
     if effort:
         cmd += ["--effort", effort]
 
-    # Pass the prompt over stdin rather than as an argv string. On Windows, when
-    # `claude` resolves to a .cmd/.ps1 shim, a multi-line command-line argument
-    # is re-parsed by cmd.exe/PowerShell and truncated at the first newline.
-    # stdin is a raw byte stream and is immune to that on all platforms, so
-    # multi-line test prompts stay intact.
     proc = subprocess.run(
         cmd, cwd=str(workspace), capture_output=True, text=True,
         encoding="utf-8", input=prompt_text, env=_claude_env(),
