@@ -29,13 +29,17 @@ Best for cross-cutting skills that do not have a natural product home.
    ```
 8. Open a pull request. The `validate` GitHub Actions workflow runs `./.github/scripts/check.sh` and must pass before merge. See [Validating locally](#validating-locally) for the full set of enforced rules.
 
-### Path B: Skills authored in a product repository
+### Path B: Skills authored in a product repository (federation)
 
-Best for skills that should ship and version with a product (HIP, MIGraphX, Ryzen AI, Lemonade, etc.).
+Best for skills that should ship and version with a product (HIP, MIGraphX, Ryzen AI, Lemonade, etc.). Your repo stays the source of truth and the catalog vendors a pinned copy. This is called **federation**, and the full walkthrough lives in [docs/federating-your-repo.md](docs/federating-your-repo.md).
 
-1. Add the skill folder to your product repository; a common location is `.agents/skills/<skill-name>/`.
-2. Open a pull request here that adds (or extends) an entry in [`.github/scripts/sources.yml`](.github/scripts/sources.yml) — the master list — naming your repo, a pinned ref, the sub-path that holds skill folders, and your skill's folder name.
-3. Once the catalog change merges, dispatch the **Import external skills** workflow from the Actions tab. It shallow-clones your repo at the pinned ref, vendors the skill into `skills/<name>/`, updates `.claude-plugin/marketplace.json`, and opens a follow-up pull request. Validation then runs against the same rules as in-repo skills before merge.
+The short version:
+
+1. Keep each skill as a folder with a valid `SKILL.md` and `skill-card.md` in your AMD-owned repo (a common location is `skills/` or `.agents/skills/<skill-name>/`).
+2. Add (or extend) an entry in [`.github/scripts/sources.yml`](.github/scripts/sources.yml) — the master list — naming your repo, a pinned ref, the sub-path that holds skill folders, and each skill's folder name.
+3. Vendor the skills and refresh the manifests locally, then open a pull request here for review. Validation runs against the same rules as in-repo skills before merge.
+
+See [docs/federating-your-repo.md](docs/federating-your-repo.md) for the exact `sources.yml` schema, the import commands, and how to run the catalog's checks in your own repo.
 
 ## Is this task a good fit for a skill?
 

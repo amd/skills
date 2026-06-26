@@ -3,6 +3,11 @@
 How to list skills that live in **your own AMD repo** in this catalog. Your repo
 stays the source of truth; the catalog vendors a pinned copy.
 
+This is the detailed version of **Path B** in
+[CONTRIBUTING.md](../CONTRIBUTING.md#path-b-skills-authored-in-a-product-repository-federation).
+Start there for an overview of how it compares to authoring skills directly in
+this repo.
+
 > **Eligibility: AMD-owned repositories only.** The source `repo` must be under
 > an AMD GitHub org (e.g. `AMD-AGI/...`). Non-AMD repos are not accepted.
 
