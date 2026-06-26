@@ -33,18 +33,23 @@ Use `as:` to namespace skills as `<project>-<skill>` so catalog names stay uniqu
 
 ## Import
 
-1. Open a PR with your `sources.yml` change.
-2. Run the **Import external skills** workflow (manual dispatch). It shallow-clones
-   your repo at `ref`, vendors the folders into `skills/<name>/`, writes a
-   `.federated.json` marker (repo, ref, resolved commit, license, timestamp), and
-   opens a PR with the result.
-3. A maintainer reviews and merges. CI validation must pass.
+Run the import scripts locally (they read `sources.yml` from your working tree),
+then open a PR for review.
+
+1. Vendor the skills and refresh the manifests:
+
+   ```bash
+   uv run .github/scripts/import_external_skills.py    # vendor into skills/<name>/
+   uv run .github/scripts/generate_cursor_marketplace.py
+   ./.github/scripts/check.sh                          # validate
+   ```
+
+2. Commit `skills/**`, `.github/scripts/sources.yml`, and the manifests.
+3. Open a PR; a maintainer reviews and merges once CI passes.
 
 ## Update or remove
 
-- **Update:** bump `ref` in `sources.yml`, re-run the workflow. The marker records
-  the new commit.
-- **Remove:** delete the entry and re-run; the importer prunes the vendored copy.
+Automatic refresh and pruning will soon be enabled through nightly workflows.
 
 Never hand-edit vendored skills under `skills/`; changes must come from your repo
 via re-import, or they'll be overwritten.
