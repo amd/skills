@@ -91,6 +91,7 @@ Run and optimize on AMD Instinct.
 | Skill | What it does | Source |
 | --- | --- | --- |
 | [`serving-llms-on-instinct`](skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine/backend selection in later phases. | in-repo |
+| [`serving-llms-on-epyc`](skills/serving-llms-on-epyc/SKILL.md) | Serve LLMs on AMD EPYC CPUs with vLLM + zentorch, in a container (Docker/Podman) or conda. Handles CPU detection, runtime/env validation, vLLM model-support and RAM-fit checks, hardware-sized threads/KV, launch, and health verification. Single instance; reports and stops on failure. | in-repo |
 | [`magpie-kernel-evaluator`](skills/magpie-kernel-evaluator/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM / SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
 | [`tracelens-analysis-orchestrator`](skills/tracelens-analysis-orchestrator/SKILL.md) | Orchestrate modular PyTorch profiler trace analysis with TraceLens: generate perf reports, run system-level and compute-kernel subagents in parallel, and write a prioritized stakeholder report. | [TraceLens](https://github.com/AMD-AGI/TraceLens) |
 
