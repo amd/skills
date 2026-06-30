@@ -44,7 +44,7 @@ From `data/epyc.json`. Unlike the Instinct (GPU) skill there are **no**
 | `--ipc=host` | vLLM workers use host IPC / shared memory |
 | `--shm-size=16g` | vLLM needs a large `/dev/shm`; the 64MB default is too small |
 | `--network=host` | expose the served port directly (or use `-p <port>:<port>`) |
-| `--cpuset-cpus` | (multi-socket) restrict the container to socket 0's CPUs; from `cpu_tune.py`. No `--cpuset-mems` -- no memory binding by default |
+| `--cpuset-cpus` / `--cpuset-mems` | pin the container to the chosen socket's physical cores and its NUMA node(s); from `cpu_tune.py` |
 | `-v ~/.cache/huggingface:/root/.cache/huggingface` | reuse the host model cache |
 
 Image: `amdih/zendnn_zentorch:<tag>` -- the public vLLM + zentorch CPU image on
@@ -69,22 +69,26 @@ surfaces at load, where the no-retry rule applies.
 
 ## CPU sizing
 
-Default policy (the same for NPS1/NPS2/NPS4): a single instance uses **socket 0's
-whole CPU with no memory binding**. `scripts/cpu_tune.py` derives:
-- `VLLM_CPU_OMP_THREADS_BIND` = the physical cores of socket 0 (one thread per
-  physical core; SMT siblings do not help vLLM CPU). vLLM sets `OMP_NUM_THREADS`
-  itself from this list, so we don't.
-- `VLLM_CPU_KVCACHE_SPACE` (GB) = `min(mem*kv_frac, mem-16)`; on <=32GB hosts, `mem*0.5`.
-- `container_cpuset` = `--cpuset-cpus=<socket 0 cpus>` (no `--cpuset-mems`) for the
-  container path on a multi-socket host. The conda path needs nothing extra -- the
-  bind env var binds the threads.
+Policy: a single instance is pinned to **one socket plus its memory** (vLLM scales
+poorly across sockets). `scripts/cpu_tune.py` derives:
+- **Socket choice** (dual-socket): samples per-socket CPU busy% (~0.5s) and prefers a
+  free socket -- both free → socket 0; one free → that one; both at/above
+  `--busy-threshold` (default 15%) → `warning` and proceed on the least-busy. `--socket N`
+  forces it. Single-socket → socket 0.
+- `VLLM_CPU_OMP_THREADS_BIND` = the chosen socket's physical cores (SMT dropped). vLLM
+  sets `OMP_NUM_THREADS` from this, so we don't.
+- `VLLM_CPU_KVCACHE_SPACE` (GB) = `min(socket_ram*kv_frac, socket_ram-16)` -- sized from
+  the **chosen socket's local RAM** so the KV pool stays on-socket (≤32GB → `*0.5`).
+- Memory-bound pin: `container_cpuset` = `--cpuset-cpus=<cores> --cpuset-mems=<nodes>`;
+  `conda_launch_prefix` = `numactl --cpunodebind=<nodes> --membind=<nodes>` (falls back to
+  `taskset` CPU-only, or empty-with-note if neither tool exists).
 
 Not set: `OMP_NUM_THREADS` (vLLM derives it from the bind) and
 `VLLM_CPU_NUM_OF_RESERVED_CPU` (vLLM has its own default when unset).
 
-When socket 0 spans multiple NUMA nodes (NPS2/NPS4), `cpu_tune.py` emits a
-`perf_note`: the simple default leaves some performance on the table versus optimal
-per-NUMA-node binding (one instance per node, memory bound). That tuning is out of
+When the chosen socket spans multiple NUMA nodes (NPS2/NPS4), `cpu_tune.py` emits an
+`nps_note`: memory is bound across the socket's nodes, and finer per-node binding
+(one instance per node) could add more. That tuning is out of
 scope for the base recipe.
 
 ## Known quirks
@@ -115,8 +119,10 @@ HF file sizes (`.safetensors` or legacy `.bin`); `--weight-gb` overrides when a
 model has no metadata. KV cache is bf16-only on zentorch CPU (no fp8 KV), so the estimate always uses 2 bytes/element.
 
 **NUMA cross-node traffic**
-On a 2-socket EPYC, an unpinned instance spreads threads across both sockets and
-pays cross-socket latency. The default keeps one instance on **socket 0's CPUs**
-(`cpu_tune.py` -> `VLLM_CPU_OMP_THREADS_BIND`, plus `--cpuset-cpus` for the
-container), with **no memory binding**. On NPS2/NPS4, `cpu_tune.py` notes that
-optimal per-NUMA-node binding could add performance; the base recipe doesn't do it.
+On a 2-socket EPYC, an unpinned instance spreads threads + memory across both sockets
+and pays cross-socket latency. `cpu_tune.py` keeps one instance on **one socket plus
+its memory**: CPU bind (`VLLM_CPU_OMP_THREADS_BIND` + `--cpuset-cpus`), memory bind
+(`--cpuset-mems` / `numactl --membind`), and KV sized from that socket's local RAM so
+the KV pool never lands on the other socket. The socket is chosen by load (free socket
+preferred; warns if both busy). True multi-socket throughput = **multiple instances**
+(one per socket) -- out of scope for this single-instance recipe.

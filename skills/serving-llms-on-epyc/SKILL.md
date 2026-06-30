@@ -10,10 +10,10 @@ description: >-
   detect the CPU (incl. EPYC generation), validate the runtime/env, check vLLM
   supports the model (via vLLM's registry, not a modality blocklist), check it
   fits host RAM, size CPU threads/KV/NUMA from the hardware, confirm the plan with
-  the user, launch, and poll until the endpoint is responsive. Single instance
-  only. Does NOT debug failures
-  and does NOT retry -- it reports and stops. Do not use for GPU/Instinct (use
-  serving-llms-on-instinct) or multi-node.
+  the user, launch, and poll until the endpoint is responsive. Single instance,
+  single socket (pinned to one socket + its memory; vLLM scales poorly across
+  sockets). Does NOT debug failures and does NOT retry -- it reports and stops. Do
+  not use for GPU/Instinct (use serving-llms-on-instinct) or multi-node.
 allowed-tools: Bash, Read
 ---
 
@@ -22,6 +22,11 @@ allowed-tools: Bash, Read
 Bring up a single vLLM OpenAI endpoint on an AMD EPYC host with the zentorch CPU
 backend, sized to the hardware. Container-first (Docker or Podman); conda/host
 is the fallback.
+
+**This is single-socket serving:** one instance pinned to one socket and its memory
+(vLLM scales poorly across sockets, so we do not span them). On a dual-socket host it
+runs on a single socket; the multi-socket answer is **multiple instances (one per
+socket)**, which is out of scope for this single-instance recipe.
 
 Hard rule for this skill: **on any failure, report the cause + logs and STOP.
 Do not retry, do not debug.** (Debugging is a separate workflow.)
@@ -114,15 +119,23 @@ Extra flag: `--weight-gb N` overrides weights if a model has no HF metadata
 eval "$(python3 scripts/cpu_tune.py)"      # or --format json to inspect
 ```
 
-Exports `VLLM_CPU_OMP_THREADS_BIND` (physical cores of **socket 0**) and
-`VLLM_CPU_KVCACHE_SPACE` (GB). It does **not** set `OMP_NUM_THREADS` (vLLM derives
-it from the bind list) or `VLLM_CPU_NUM_OF_RESERVED_CPU` (vLLM has its own default
-when unset). Default policy, the same for NPS1/NPS2/NPS4: a single instance uses
-**socket 0's whole CPU with no memory binding**. On a multi-socket host the JSON
-gives `container_cpuset` (`--cpuset-cpus` only -- no `--cpuset-mems`) for the
-container path; the conda path needs nothing extra (the bind env var binds the
-threads). If socket 0 spans multiple NUMA nodes (NPS2/NPS4), `perf_note` flags that
-optimal per-node binding could give more performance -- surface it, but proceed.
+A single instance runs on **one socket, with its memory** (vLLM scales poorly across
+sockets). `cpu_tune.py` exports `VLLM_CPU_OMP_THREADS_BIND` (the chosen socket's
+physical cores) and `VLLM_CPU_KVCACHE_SPACE` (sized from that **socket's local RAM**,
+not whole-system, so the KV pool stays on-socket). It does **not** set
+`OMP_NUM_THREADS` (vLLM derives it) or `VLLM_CPU_NUM_OF_RESERVED_CPU` (vLLM's own default).
+
+Socket choice on a dual-socket host (load-aware): it samples per-socket CPU busy%
+(~0.5s) and prefers a free socket -- both free → socket 0; one free → that socket;
+**both busy (≥ `--busy-threshold`, default 15%) → it `warning`s and proceeds on the
+least-busy socket**. `--socket N` forces a choice. Single-socket hosts use socket 0.
+
+For the chosen socket it also emits the memory-bound pin: `container_cpuset`
+(`--cpuset-cpus=<cores> --cpuset-mems=<nodes>`) for the container path, and
+`conda_launch_prefix` (`numactl --cpunodebind/--membind`, falling back to `taskset`
+CPU-only, or empty-with-note if neither tool exists) for conda. **Surface `warning`
+to the user** if set. On NPS2/NPS4 a socket spans multiple NUMA nodes; memory is
+bound across them and `nps_note` flags that finer binding could add performance.
 
 ## Step 6: Confirm the plan, then launch (container-first)
 
@@ -135,9 +148,11 @@ not launch unprompted. This is the human gate before anything runs:
 | Path | container (`<runtime>`, image from `data/epyc.json`) or conda/host |
 | Precision | `bfloat16` (or the user's choice) |
 | Fit | required `<required_gb>` GB vs `<ram_gb>` GB RAM |
-| CPU sizing | thread bind `<VLLM_CPU_OMP_THREADS_BIND>` (socket 0), KV `<VLLM_CPU_KVCACHE_SPACE>` GB, no memory binding |
+| CPU sizing | socket `<chosen_socket>` (`<socket_choice_reason>`), bind `<VLLM_CPU_OMP_THREADS_BIND>`, KV `<VLLM_CPU_KVCACHE_SPACE>` GB (socket-local), mem bound to nodes `<numa_nodes_on_socket>` |
 | Hardware | EPYC `<epyc_generation>` (`<zen_arch>`), `<physical_cores>` cores, AVX-512 `<avx512>` |
 | Port | `<port>` |
+
+If `cpu_tune.py` returned a `warning` (e.g. all sockets busy), include it here so the user sees it before confirming.
 
 Proceed only on a clear "go". If the user declines or wants changes (model,
 `--max-model-len`, port), stop and adjust -- do not launch.
@@ -155,7 +170,7 @@ $RT pull <image from data/epyc.json>          # agent pulls; do not ask the user
 $RT run -d --name vllm-epyc \
   <run_flags from data/epyc.json>            # --ipc=host --shm-size=16g --network=host
   <hf_cache_mount> \
-  <container_cpuset from cpu_tune, on multi-socket>   # --cpuset-cpus=... (no --cpuset-mems)
+  <container_cpuset from cpu_tune>             # --cpuset-cpus=<cores> --cpuset-mems=<nodes>
   --env VLLM_CPU_OMP_THREADS_BIND="$VLLM_CPU_OMP_THREADS_BIND" \
   --env VLLM_CPU_KVCACHE_SPACE=$VLLM_CPU_KVCACHE_SPACE \
   --env HF_TOKEN=${HF_TOKEN} \
@@ -164,10 +179,11 @@ $RT run -d --name vllm-epyc \
 ```
 
 **Conda/host path** (no container runtime, `conda_path_available` true). `eval`-ing
-cpu_tune already exported the env vars; just launch -- `VLLM_CPU_OMP_THREADS_BIND`
-binds the threads to socket 0, and there is no memory binding by default:
+cpu_tune already exported the env vars; prefix the launch with `conda_launch_prefix`
+from cpu_tune so memory is bound to the chosen socket (empty → unpinned, with a note):
 ```bash
-vllm serve <model> --dtype bfloat16 --port <port> --max-model-len <len> &
+<conda_launch_prefix from cpu_tune> vllm serve <model> --dtype bfloat16 --port <port> --max-model-len <len> &
+# e.g. numactl --cpunodebind=0 --membind=0 vllm serve ...
 ```
 
 Optional throughput flags are **opt-in and must move together** (see Gotchas):
@@ -230,7 +246,8 @@ See [reference.md](reference.md) for the full list. The load-bearing ones:
   the other.
 - **`--shm-size`**: vLLM needs a large `/dev/shm`; the container default (64MB)
   is too small. Use `--shm-size=16g` (in `data/epyc.json`).
-- **NUMA**: the default is simple -- one instance on **socket 0's CPUs, no memory
-  binding** (`--cpuset-cpus` from `cpu_tune.py` for the container; the bind env var
-  for conda). If socket 0 spans multiple NUMA nodes (NPS2/NPS4), `cpu_tune.py` notes
-  that optimal per-node binding could add performance; the base recipe doesn't do it.
+- **NUMA / socket**: one instance is pinned to **one socket plus its memory** --
+  CPU bind + `--cpuset-mems` (container) / `numactl --membind` (conda), with KV sized
+  from that socket's local RAM. On a dual-socket host `cpu_tune.py` picks a free socket
+  by load and `warning`s if both are busy. NPS2/NPS4 (multi-node socket) gets an
+  `nps_note` that finer per-node binding could add more.

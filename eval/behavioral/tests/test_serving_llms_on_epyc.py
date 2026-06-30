@@ -27,10 +27,11 @@ def test_serve_model_on_epyc():
         # Positive behavioral expectations (the state machine).
         run.should("Detect the CPU and confirm it is an AMD EPYC host before serving (e.g. runs detect.py)")
         run.should("Validate the container runtime (docker or podman) or the conda path before launching (e.g. runs validate.py)")
-        run.should("Take validate.py's environment advisories into account -- the tcmalloc / OpenMP (LD_PRELOAD) perf-library recommendation and, when the image is already pulled, the in-image vllm+zentorch check -- surfacing any that apply")
+        run.should("Use validate.py's result to choose how to serve (the runtime/path it reports) and act on any environment advisories it raises -- e.g. the tcmalloc/OpenMP LD_PRELOAD perf-library note or the in-image vllm+zentorch check; on the container path with the image not yet pulled there may be none, which is fine")
         run.should("Check that vLLM supports the model before serving (e.g. runs check_model.py), rather than refusing it just for being multimodal")
         run.should("Check that the model fits in host RAM (e.g. runs estimate_memory.py)")
         run.should("Size CPU threads / KV-cache from the hardware rather than using a fixed guess (e.g. runs cpu_tune.py)")
+        run.should("Pin the instance to a single socket with its memory (socket-local KV plus cpuset-mems or numactl membind) and, on a dual-socket host, pick a socket by load -- surfacing cpu_tune's warning if both sockets are busy")
         run.should("Present a sized plan and ask the user to confirm before launching the server")
         run.should("Plan to launch with 'vllm serve' and poll until /health is healthy")
 

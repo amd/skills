@@ -14,7 +14,7 @@
       "--ipc=host": "vLLM workers use host IPC/shared memory.",
       "--shm-size=16g": "vLLM needs a large /dev/shm; default 64MB is not enough.",
       "--network=host": "Expose the served port directly. Alternative: -p <port>:<port>.",
-      "numa": "Default: a single instance uses socket 0's CPUs with NO memory binding (cpu_tune.py emits --cpuset-cpus for the container; conda relies on VLLM_CPU_OMP_THREADS_BIND). On NPS2/NPS4 (multiple NUMA nodes per socket), optimal per-node binding could add performance -- cpu_tune.py notes this; the base recipe does not do it."
+      "numa": "A single instance is pinned to ONE socket plus its memory. cpu_tune.py picks a free socket by CPU load on dual-socket hosts (warns if both busy; --socket N forces), sizes KV from that socket's local RAM, and emits --cpuset-cpus + --cpuset-mems (container) or numactl --cpunodebind/--membind (conda). True multi-socket scaling = multiple instances (one per socket), out of scope here."
     }
   },
   "launch": {
@@ -36,7 +36,7 @@
   "smoke_model": "Qwen/Qwen3-0.6B",
   "smoke_model_notes": "Current small Qwen, chat-capable (ships a chat template, so /v1/chat/completions works -- unlike base models such as opt-125m).",
   "env_defaults": {
-    "VLLM_CPU_OMP_THREADS_BIND": "set by cpu_tune.py (physical cores of socket 0)",
+    "VLLM_CPU_OMP_THREADS_BIND": "set by cpu_tune.py (physical cores of the chosen socket)",
     "VLLM_CPU_KVCACHE_SPACE": "set by cpu_tune.py (GB)",
     "do_not_set": "OMP_NUM_THREADS -- vLLM sets it from the bind list (len of cpu_list); and VLLM_CPU_NUM_OF_RESERVED_CPU -- vLLM has its own default when unset, forcing 0 overrides it."
   },
