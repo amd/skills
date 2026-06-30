@@ -1,0 +1,29 @@
+# Build B: v0.23.0 zentorch image + zentorch wheel rebuilt from ZenDNN PR #532.
+# Same vLLM (0.23.0) / torch (2.11.0) as Build A; only the ZenDNN/zentorch
+# native lib changes, so combos 3-5 differ from combos 1-2 by exactly PR #532.
+ARG BASE_IMAGE=mkmhub.amd.com/sw-aig-zendnn-vllm-zentorch-dev/vllm_v0.23.0_zentorch_v2.11.0.2:ubuntu22.04_v2.11.0.2
+FROM ${BASE_IMAGE}
+
+# Build toolchain for the plugin (image is runtime-only; needs compilers + cmake).
+USER root
+RUN apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        gcc-13 g++-13 make cmake git libnuma-dev && \
+    rm -rf /var/lib/apt/lists/* || true
+
+# Plugin build copies ZenDNN from its sibling parent dir when
+# ZENTORCH_USE_LOCAL_ZENDNN=1 (see cmake/modules/zendnnl.cmake). Place both as
+# siblings under /src so ${PLUGIN_PARENT_DIR}/ZenDNN resolves.
+ENV ZENTORCH_USE_LOCAL_ZENDNN=1
+COPY ZenDNN /src/ZenDNN
+COPY ZenDNN_PyTorch_Plugin /src/ZenDNN_PyTorch_Plugin
+
+# Rebuild the wheel from PR #532 source and force-reinstall over the image's
+# prebuilt zentorch (same py312 venv already on PATH).
+RUN cd /src/ZenDNN_PyTorch_Plugin && \
+    rm -rf build dist third_party/ZenDNN *.egg-info && \
+    python setup.py bdist_wheel && \
+    pip install --force-reinstall --no-deps dist/*.whl && \
+    python -c "import zentorch, torch, vllm; print('zentorch', zentorch.__version__, '| torch', torch.__version__, '| vllm', vllm.__version__)"
+
+WORKDIR /workspace
+CMD ["/bin/bash"]

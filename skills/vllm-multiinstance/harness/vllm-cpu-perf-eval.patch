@@ -1,0 +1,339 @@
+diff --git a/automation/test-execution/ansible/roles/benchmark_guidellm/tasks/main.yml b/automation/test-execution/ansible/roles/benchmark_guidellm/tasks/main.yml
+index 96214b5..ef107be 100644
+--- a/automation/test-execution/ansible/roles/benchmark_guidellm/tasks/main.yml
++++ b/automation/test-execution/ansible/roles/benchmark_guidellm/tasks/main.yml
+@@ -84,6 +84,11 @@
+   ansible.builtin.set_fact:
+     processor_model: "{{ guidellm_processor | default(resolved_model) }}"
+ 
++- name: Detect local processor path (so we can bind-mount it into the guidellm container)
++  ansible.builtin.set_fact:
++    processor_is_local_path: "{{ processor_model is string and processor_model.startswith('/') }}"
++    processor_local_path: "{{ processor_model if (processor_model is string and processor_model.startswith('/')) else '' }}"
++
+ - name: Set results path
+   ansible.builtin.set_fact:
+     results_path: "{{ bench_config.results_dir }}/{{ resolved_model | replace('/', '__') }}/{{ workload_type }}-{{ test_run_id }}/{{ core_cfg.name }}"
+@@ -142,7 +147,7 @@
+       GUIDELLM_COOLDOWN: "{{ guidellm_cfg.cooldown }}"
+       GUIDELLM_OUTPUTS: "{{ guidellm_cfg.outputs }}"
+       HF_TOKEN: "{{ hf_token | default('') }}"
+-  no_log: true
++  no_log: false
+ 
+ - name: Build GUIDELLM_DATA for fixed workloads
+   ansible.builtin.set_fact:
+@@ -157,13 +162,13 @@
+ - name: Add GUIDELLM_DATA to environment
+   ansible.builtin.set_fact:
+     guidellm_env: "{{ guidellm_env | combine({'GUIDELLM_DATA': guidellm_data_string}) }}"
+-  no_log: true
++  no_log: false
+ 
+ - name: Add rate parameter for non-synchronous profiles
+   ansible.builtin.set_fact:
+     guidellm_env: "{{ guidellm_env | combine({'GUIDELLM_RATE': guidellm_cfg.rate | default([]) | join(',')}) }}"
+   when: guidellm_cfg.profile != 'synchronous'
+-  no_log: true
++  no_log: false
+ 
+ - name: Add API key to backend kwargs if configured
+   ansible.builtin.set_fact:
+@@ -171,7 +176,7 @@
+   when:
+     - vllm_api_key is defined
+     - vllm_api_key | length > 0
+-  no_log: true
++  no_log: false
+ 
+ - name: Build GuideLLM container name with actual NUMA configuration
+   ansible.builtin.set_fact:
+@@ -182,21 +187,26 @@
+   containers.podman.podman_container:
+     name: "{{ guidellm_container_name }}"
+     image: "{{ guidellm_cfg.container_image }}"
++    user: "0:0"
+     state: started
+     rm: false  # Don't auto-remove so we can check exit code
+     detach: true  # Run in background so we can stream logs
+     network: host
+     cpuset_cpus: "{{ omit if ansible_facts['system'] == 'Darwin' else guidellm_cfg.cpuset_cpus }}"
+     cpuset_mems: "{{ omit if ansible_facts['system'] == 'Darwin' else guidellm_cfg.cpuset_mems }}"
+-    volumes:
+-      - "{{ results_path }}:/results:z"
++    volumes: >-
++      {{
++        [results_path ~ ':/results:z']
++        + ([processor_local_path ~ ':' ~ processor_local_path ~ ':ro,z']
++           if processor_is_local_path else [])
++      }}
+     env: "{{ guidellm_env }}"
+     log_driver: journald
+     log_opt:
+       tag: "{{ guidellm_container_name }}"
+   register: guidellm_container
+   when: use_guidellm_container | bool
+-  no_log: true  # Prevent HF_TOKEN from appearing in logs
++  no_log: false  # Prevent HF_TOKEN from appearing in logs
+ 
+ - name: Set monitoring command based on connection type
+   ansible.builtin.set_fact:
+@@ -379,7 +389,7 @@
+   when:
+     - use_guidellm_container | bool
+     - container_exit_code.stdout is defined
+-  no_log: true
++  no_log: false
+ 
+ - name: Check benchmark exit code after diagnostics (containerized)
+   ansible.builtin.fail:
+@@ -524,7 +534,7 @@
+   register: guidellm_host_result
+   changed_when: true
+   failed_when: false
+-  no_log: true
++  no_log: false
+   when: not (use_guidellm_container | bool)
+ 
+ # ============================================================================
+diff --git a/automation/test-execution/ansible/roles/common/tasks/setup-vllm-api-key.yml b/automation/test-execution/ansible/roles/common/tasks/setup-vllm-api-key.yml
+index 8d40880..7bc1ce1 100644
+--- a/automation/test-execution/ansible/roles/common/tasks/setup-vllm-api-key.yml
++++ b/automation/test-execution/ansible/roles/common/tasks/setup-vllm-api-key.yml
+@@ -12,7 +12,7 @@
+       when:
+         - vllm_endpoint.external.api_key.source | default('value') == 'env'
+         - vllm_endpoint.external.api_key.env_var is defined
+-      no_log: true
++      no_log: false
+ 
+     - name: Get API key from file
+       ansible.builtin.slurp:
+@@ -21,7 +21,7 @@
+       when:
+         - vllm_endpoint.external.api_key.source | default('value') == 'file'
+         - vllm_endpoint.external.api_key.file_path is defined
+-      no_log: true
++      no_log: false
+ 
+     - name: Set API key from file content
+       ansible.builtin.set_fact:
+@@ -29,7 +29,7 @@
+       when:
+         - vllm_endpoint.external.api_key.source | default('value') == 'file'
+         - vllm_api_key_file_content is defined
+-      no_log: true
++      no_log: false
+ 
+     - name: Get API key from Ansible vault
+       ansible.builtin.set_fact:
+@@ -37,7 +37,7 @@
+       when:
+         - vllm_endpoint.external.api_key.source | default('value') == 'vault'
+         - vllm_endpoint.external.api_key.vault_var is defined
+-      no_log: true
++      no_log: false
+ 
+     - name: Prompt for API key
+       ansible.builtin.pause:
+@@ -46,7 +46,7 @@
+       register: vllm_api_key_prompt
+       when:
+         - vllm_endpoint.external.api_key.source | default('value') == 'prompt'
+-      no_log: true
++      no_log: false
+ 
+     - name: Set API key from prompt
+       ansible.builtin.set_fact:
+@@ -54,7 +54,7 @@
+       when:
+         - vllm_endpoint.external.api_key.source | default('value') == 'prompt'
+         - vllm_api_key_prompt is defined
+-      no_log: true
++      no_log: false
+ 
+     - name: Use direct value if no source specified
+       ansible.builtin.set_fact:
+@@ -62,7 +62,7 @@
+       when:
+         - vllm_endpoint.external.api_key.source | default('value') == 'value'
+         - vllm_endpoint.external.api_key.value is defined
+-      no_log: true
++      no_log: false
+ 
+     - name: Validate API key configuration
+       ansible.builtin.assert:
+@@ -76,7 +76,7 @@
+     - name: Set vLLM API key fact
+       ansible.builtin.set_fact:
+         vllm_api_key: "{{ vllm_api_key_resolved }}"
+-      no_log: true
++      no_log: false
+ 
+     - name: Display API key status
+       ansible.builtin.debug:
+diff --git a/automation/test-execution/ansible/roles/hf_token/tasks/main.yml b/automation/test-execution/ansible/roles/hf_token/tasks/main.yml
+index f128943..4e9c0fd 100644
+--- a/automation/test-execution/ansible/roles/hf_token/tasks/main.yml
++++ b/automation/test-execution/ansible/roles/hf_token/tasks/main.yml
+@@ -9,7 +9,7 @@
+   when:
+     - huggingface.token_source == 'env'
+     - hf_token is not defined
+-  no_log: true
++  no_log: false
+ 
+ - name: Get HuggingFace token from file
+   ansible.builtin.slurp:
+@@ -19,7 +19,7 @@
+     - huggingface.token_source == 'file'
+     - hf_token is not defined
+     - huggingface.token_file is defined
+-  no_log: true
++  no_log: false
+ 
+ - name: Set HuggingFace token from file content
+   ansible.builtin.set_fact:
+@@ -27,7 +27,7 @@
+   when:
+     - huggingface.token_source == 'file'
+     - hf_token_file_content is defined
+-  no_log: true
++  no_log: false
+ 
+ - name: Get HuggingFace token from Ansible vault
+   ansible.builtin.set_fact:
+@@ -36,7 +36,7 @@
+     - huggingface.token_source == 'vault'
+     - hf_token is not defined
+     - huggingface.token_vault is defined
+-  no_log: true
++  no_log: false
+ 
+ - name: Prompt for HuggingFace token
+   ansible.builtin.pause:
+@@ -46,7 +46,7 @@
+   when:
+     - huggingface.token_source == 'prompt'
+     - hf_token is not defined
+-  no_log: true
++  no_log: false
+ 
+ - name: Set HuggingFace token from prompt
+   ansible.builtin.set_fact:
+@@ -54,7 +54,7 @@
+   when:
+     - huggingface.token_source == 'prompt'
+     - hf_token_prompt is defined
+-  no_log: true
++  no_log: false
+ 
+ - name: Validate HuggingFace token is set
+   ansible.builtin.assert:
+@@ -68,7 +68,7 @@
+       3. Vault: Set huggingface.token_vault in inventory
+       4. Prompt: Set huggingface.token_source=prompt in inventory
+     success_msg: "✓ HuggingFace token configured"
+-  no_log: true
++  no_log: false
+ 
+ - name: Display token source (masked)
+   ansible.builtin.debug:
+diff --git a/automation/test-execution/ansible/roles/vllm_server/tasks/start-embedding.yml b/automation/test-execution/ansible/roles/vllm_server/tasks/start-embedding.yml
+index 64f7296..83894e7 100644
+--- a/automation/test-execution/ansible/roles/vllm_server/tasks/start-embedding.yml
++++ b/automation/test-execution/ansible/roles/vllm_server/tasks/start-embedding.yml
+@@ -32,7 +32,7 @@
+     vllm_env_vars:
+       VLLM_CPU_KVCACHE_SPACE: "{{ workload_cfg.kv_cache_space | extract_size_value }}"
+       HF_TOKEN: "{{ hf_token }}"
+-  no_log: true  # Prevent HF_TOKEN from appearing in logs
++  no_log: false  # Prevent HF_TOKEN from appearing in logs
+ 
+ - name: Add OMP_NUM_THREADS if specified (ONLY for TP > 1)
+   ansible.builtin.set_fact:
+@@ -42,7 +42,7 @@
+     - core_cfg.omp_num_threads is defined
+     - core_cfg.omp_num_threads is not none
+     - core_cfg.omp_num_threads | int > 0
+-  no_log: true  # Prevent HF_TOKEN from appearing in logs
++  no_log: false  # Prevent HF_TOKEN from appearing in logs
+ 
+ - name: Add VLLM_CPU_OMP_THREADS_BIND if specified (ONLY for TP > 1)
+   ansible.builtin.set_fact:
+@@ -51,7 +51,7 @@
+     - (core_cfg.tensor_parallel | default(1) | int) > 1
+     - core_cfg.omp_threads_bind is defined
+     - core_cfg.omp_threads_bind is not none
+-  no_log: true  # Prevent HF_TOKEN from appearing in logs
++  no_log: false  # Prevent HF_TOKEN from appearing in logs
+ 
+ - name: Pull vLLM container image
+   containers.podman.podman_image:
+@@ -99,7 +99,7 @@
+     - container_cfg.engine == 'podman'
+     - core_cfg.cpuset_cpus is defined
+   register: vllm_container_pinned
+-  no_log: true  # Prevent HF_TOKEN from appearing in logs
++  no_log: false  # Prevent HF_TOKEN from appearing in logs
+ 
+ - name: Start vLLM embedding server (no CPU pinning)
+   containers.podman.podman_container:
+@@ -129,7 +129,7 @@
+     - container_cfg.engine == 'podman'
+     - core_cfg.cpuset_cpus is not defined
+   register: vllm_container_no_pin
+-  no_log: true  # Prevent HF_TOKEN from appearing in logs
++  no_log: false  # Prevent HF_TOKEN from appearing in logs
+ 
+ - name: Set container result
+   ansible.builtin.set_fact:
+diff --git a/automation/test-execution/ansible/roles/vllm_server/tasks/start-llm.yml b/automation/test-execution/ansible/roles/vllm_server/tasks/start-llm.yml
+index 2fe33a5..5a8ecb4 100644
+--- a/automation/test-execution/ansible/roles/vllm_server/tasks/start-llm.yml
++++ b/automation/test-execution/ansible/roles/vllm_server/tasks/start-llm.yml
+@@ -157,7 +157,7 @@
+     vllm_env_vars:
+       VLLM_CPU_KVCACHE_SPACE: "{{ effective_kv_cache_space | extract_size_value }}"
+       HF_TOKEN: "{{ hf_token }}"
+-  no_log: true  # Prevent HF_TOKEN from appearing in logs
++  no_log: false  # Prevent HF_TOKEN from appearing in logs
+ 
+ - name: Add OMP_NUM_THREADS if specified (ONLY for TP > 1)
+   ansible.builtin.set_fact:
+@@ -167,7 +167,7 @@
+     - core_cfg.omp_num_threads is defined
+     - core_cfg.omp_num_threads is not none
+     - core_cfg.omp_num_threads | int > 0
+-  no_log: true  # Prevent HF_TOKEN from appearing in logs
++  no_log: false  # Prevent HF_TOKEN from appearing in logs
+ 
+ - name: Add VLLM_CPU_OMP_THREADS_BIND if specified (ONLY for TP > 1)
+   ansible.builtin.set_fact:
+@@ -176,7 +176,7 @@
+     - (core_cfg.tensor_parallel | default(1) | int) > 1
+     - core_cfg.omp_threads_bind is defined
+     - core_cfg.omp_threads_bind is not none
+-  no_log: true  # Prevent HF_TOKEN from appearing in logs
++  no_log: false  # Prevent HF_TOKEN from appearing in logs
+ 
+ - name: Detect AMD ZenDNN container for OMP binding
+   ansible.builtin.set_fact:
+@@ -188,7 +188,7 @@
+   when:
+     - is_zendnn_container_early
+     - core_cfg.cpuset_cpus is defined
+-  no_log: true  # Prevent HF_TOKEN from appearing in logs
++  no_log: false  # Prevent HF_TOKEN from appearing in logs
+ 
+ - name: Build base vLLM arguments from workload
+   ansible.builtin.set_fact:
+@@ -318,7 +318,7 @@
+       tag: "vllm-{{ workload_type }}-{{ core_cfg.cores }}c-tp{{ core_cfg.tensor_parallel }}"
+   when: container_cfg.engine == 'podman'
+   register: vllm_container
+-  no_log: true  # Prevent HF_TOKEN from appearing in logs
++  no_log: false  # Prevent HF_TOKEN from appearing in logs
+ 
+ - name: Display vLLM container info
+   ansible.builtin.debug:
