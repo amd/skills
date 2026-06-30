@@ -38,6 +38,11 @@
       "name": "tracelens-analysis-orchestrator",
       "source": "./skills/tracelens-analysis-orchestrator",
       "description": "Orchestrates modular PyTorch profiler trace analysis with TraceLens: generates perf reports, prepares category data, runs system-level and compute-kernel subagents in parallel, validates outputs, and writes a prioritized stakeholder report (analysis.md)."
+    },
+    {
+      "name": "vllm-multiinstance",
+      "source": "./skills/vllm-multiinstance",
+      "description": "Multi-instance vLLM CPU benchmark on AMD EPYC: runs N vLLM instances behind NGINX, drives load with guidellm, and reports peak memory and end-to-end throughput/latency across models, concurrency rates, and instance counts."
     }
   ]
 }
