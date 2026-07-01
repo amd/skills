@@ -41,8 +41,8 @@ From `data/epyc.json`. Unlike the Instinct (GPU) skill there are **no**
 
 | Flag | Why |
 |---|---|
-| `--ipc=host` | vLLM workers use host IPC / shared memory |
-| `--shm-size=16g` | vLLM needs a large `/dev/shm`; the 64MB default is too small |
+| `--ipc=host` | vLLM workers need a large `/dev/shm`; sharing the host IPC namespace provides it. **Do not also pass `--shm-size`** -- podman rejects the combination, and it is redundant on docker |
+| `--shm-size=16g` | **only if you drop `--ipc=host`** (isolated IPC). The 64MB container default is too small for vLLM. Use one or the other, never both |
 | `--network=host` | expose the served port directly (or use `-p <port>:<port>`) |
 | `--cpuset-cpus` / `--cpuset-mems` | pin the container to the chosen socket's physical cores and its NUMA node(s); from `cpu_tune.py` |
 | `-v ~/.cache/huggingface:/root/.cache/huggingface` | reuse the host model cache |
@@ -107,8 +107,11 @@ between the failing and passing runs was `VLLM_USE_AOT_COMPILE`. Never set
 `FREEZING=1` without `VLLM_USE_AOT_COMPILE=0`. The base recipe leaves both unset.
 
 **`/dev/shm` too small**
-Without `--shm-size=16g` (or `--ipc=host`), vLLM workers fail to allocate shared
-memory at startup.
+vLLM workers need a large `/dev/shm` or they fail to allocate shared memory at
+startup. The base recipe uses `--ipc=host` (shares the host's large shared memory).
+**Do not combine `--ipc=host` with `--shm-size`** -- podman errors *"cannot set
+shmsize when running in the host IPC Namespace"*, and it is redundant on docker. If
+you drop `--ipc=host`, use `--shm-size=16g` instead -- one or the other, never both.
 
 **RAM is the ceiling, not VRAM**
 CPU serving keeps weights + KV cache in system RAM. `estimate_memory.py` checks

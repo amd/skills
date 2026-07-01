@@ -5,15 +5,15 @@ description: >-
   backend, in a container (Docker or Podman) or a conda env. Use whenever the
   user wants to run, serve, deploy, start, host, or launch an LLM on AMD EPYC,
   Zen CPU, "vLLM on CPU", "zentorch serving", or "serve a model without a GPU".
-  Use for "serve Qwen on EPYC", "start a CPU vLLM endpoint", "run an OpenAI
-  server on my EPYC box", or similar. Handles the full single-instance flow:
+  Handles the full single-instance flow:
   detect the CPU (incl. EPYC generation), validate the runtime/env, check vLLM
   supports the model (via vLLM's registry, not a modality blocklist), check it
   fits host RAM, size CPU threads/KV/NUMA from the hardware, confirm the plan with
   the user, launch, and poll until the endpoint is responsive. Single instance,
   single socket (pinned to one socket + its memory; vLLM scales poorly across
   sockets). Does NOT debug failures and does NOT retry -- it reports and stops. Do
-  not use for GPU/Instinct (use serving-llms-on-instinct) or multi-node.
+  not use for GPU/Instinct (use serving-llms-on-instinct), multi-node, or pre-Zen4
+  EPYC without AVX-512 (Naples/Rome/Milan).
 allowed-tools: Bash, Read
 ---
 
@@ -52,10 +52,16 @@ python3 scripts/detect.py            # add --host user@box for a remote host
 
 Returns `cpu_model`, `is_amd_epyc`, `epyc_generation`
 (Naples/Rome/Milan/Genoa/Bergamo/Siena/Turin), `zen_arch`, `avx512`,
-`logical_cores`, `physical_cores`, `sockets`, `numa_nodes`, `memory_gb`. If
-`is_amd_epyc` is `false`, stop: this skill targets AMD EPYC. (Other x86 may work
-but is unsupported here.) Carry `epyc_generation` / `avx512` through the later
-phases -- e.g. AVX-512 + bf16 land on Zen4+ (Genoa/Turin), and Turin packs up to
+`logical_cores`, `physical_cores`, `sockets`, `numa_nodes`, `memory_gb`.
+
+Two hard gates -- stop if either fails:
+- `is_amd_epyc` is `false` -> stop: this skill targets AMD EPYC. (Other x86 may work
+  but is unsupported here.)
+- `avx512` is `false` -> stop: the zentorch CPU path **requires AVX-512**, i.e. Zen4+
+  (Genoa / Bergamo / Siena / Turin) or newer. Pre-Zen4 EPYC (Naples / Rome / Milan)
+  is not supported -- say so and stop rather than launching into a load-time failure.
+
+Carry `epyc_generation` / `avx512` through the later phases -- e.g. Turin packs up to
 128 cores/socket, which the thread-binding in Step 5 sizes from.
 
 ## Step 2: Validate the runtime and environment
@@ -166,9 +172,10 @@ auto-selects the CPU platform and `vllm serve` rejects the flag. Only add it if
 including the pull. `RT` is the resolved runtime verbatim:
 ```bash
 RT="<runtime from validate.py: docker | podman>"
+$RT rm -f vllm-epyc 2>/dev/null               # clear any leftover container from a prior run (name collision otherwise)
 $RT pull <image from data/epyc.json>          # agent pulls; do not ask the user to
 $RT run -d --name vllm-epyc \
-  <run_flags from data/epyc.json>            # --ipc=host --shm-size=16g --network=host
+  <run_flags from data/epyc.json>            # --ipc=host --network=host (NO --shm-size: it conflicts with --ipc=host on podman)
   <hf_cache_mount> \
   <container_cpuset from cpu_tune>             # --cpuset-cpus=<cores> --cpuset-mems=<nodes>
   --env VLLM_CPU_OMP_THREADS_BIND="$VLLM_CPU_OMP_THREADS_BIND" \
@@ -244,10 +251,26 @@ See [reference.md](reference.md) for the full list. The load-bearing ones:
   zentorch 2.11 (`AssertionError: expected OutputCode, got function`). It only
   works with `VLLM_USE_AOT_COMPILE=0` set alongside it. Never set one without
   the other.
-- **`--shm-size`**: vLLM needs a large `/dev/shm`; the container default (64MB)
-  is too small. Use `--shm-size=16g` (in `data/epyc.json`).
+- **`/dev/shm` — use `--ipc=host`, not `--shm-size`.** vLLM needs a large
+  `/dev/shm` (the 64MB container default is too small). The base recipe uses
+  `--ipc=host`, which shares the host's large shared memory. **Do not also pass
+  `--shm-size`**: podman errors with *"cannot set shmsize when running in the host
+  IPC Namespace"*, and it is redundant on docker. If you instead isolate IPC (drop
+  `--ipc=host`), then add `--shm-size=16g` — one or the other, never both.
 - **NUMA / socket**: one instance is pinned to **one socket plus its memory** --
   CPU bind + `--cpuset-mems` (container) / `numactl --membind` (conda), with KV sized
   from that socket's local RAM. On a dual-socket host `cpu_tune.py` picks a free socket
   by load and `warning`s if both are busy. NPS2/NPS4 (multi-node socket) gets an
   `nps_note` that finer per-node binding could add more.
+- **Rootless podman + `--cpuset-cpus`/`--cpuset-mems`**: these are cgroup limits and
+  may be **ignored or rejected** on rootless podman without cpuset cgroup delegation
+  (cgroup v1, or v2 without the controller delegated). This is **not fatal**: CPU
+  thread binding still applies via `VLLM_CPU_OMP_THREADS_BIND` inside the container;
+  only the container-level memory pin is lost (reduced NUMA locality). If the run
+  errors specifically on the cpuset flags, drop them and proceed -- do not treat it
+  as a launch failure.
+- **HF cache mount**: the default mounts `~/.cache/huggingface`. If `HF_HOME` points
+  elsewhere (common on shared hosts, e.g. `/proj/.../vllm`), mount **that** path to
+  `/root/.cache/huggingface` instead, or the model re-downloads inside the container.
+- **Container name reuse**: a leftover `vllm-epyc` from a prior run makes `run` fail
+  with "name already in use" -- Step 6 clears it first with `$RT rm -f vllm-epyc`.

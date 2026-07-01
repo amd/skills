@@ -25,6 +25,11 @@
       "description": "Performs GPU kernel correctness and performance evaluation and LLM inference benchmarking with Magpie. Analyzes single or multiple kernels (HIP/CUDA/PyTorch), compares kernel implementations, runs vLLM/SGLang benchmarks with profiling and TraceLens, and runs gap analysis on torch traces."
     },
     {
+      "name": "serving-llms-on-epyc",
+      "source": "./skills/serving-llms-on-epyc",
+      "description": "Serve LLMs on AMD EPYC CPUs (AVX-512 / Zen4+) with vLLM + zentorch, in a container (Docker/Podman) or conda. Detects the CPU, validates runtime/env, checks vLLM model support and RAM fit, sizes threads/KV and pins one socket + its memory, launches, and verifies. Single instance; reports and stops on failure."
+    },
+    {
       "name": "serving-llms-on-instinct",
       "source": "./skills/serving-llms-on-instinct",
       "description": "Serve LLMs on AMD Instinct GPUs (MI300X/MI325X/MI350X/MI355X) with vLLM on ROCm. Handles GPU detection, environment validation, vLLM configuration, launch, and health verification."
