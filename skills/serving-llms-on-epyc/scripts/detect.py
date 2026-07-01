@@ -49,11 +49,13 @@ def _lscpu_field(lscpu_out, label):
 def _epyc_generation(model):
     """Map an AMD EPYC model name to (generation, zen_arch).
 
-    EPYC numbering encodes the generation: 7xx1=Naples (Zen1), 7xx2=Rome (Zen2),
-    7xx3=Milan (Zen3), 8xx4=Siena (Zen4c), 97x4=Bergamo (Zen4c), 9xx4=Genoa (Zen4),
-    9xx5=Turin (Zen5). The agent should carry this through every phase (e.g. AVX-512
-    + bf16 land on Zen4+, Turin has up to 128 cores per socket -> thread binding)."""
-    m = re.search(r"EPYC\s+(\d{4})", model.upper())
+    EPYC numbering encodes the generation by its first and last digit: 7xx1=Naples
+    (Zen1), 7xx2=Rome (Zen2), 7xx3=Milan (Zen3), 8xx4=Siena (Zen4c), 97x4=Bergamo
+    (Zen4c), 9xx4=Genoa (Zen4), 9xx5=Turin (Zen5). Some SKUs carry a letter in the
+    middle (e.g. 9B45 -> 9__5 -> Turin), so we match 4 alphanumerics whose first and
+    last chars are digits and key off those. The agent carries this through every
+    phase (e.g. AVX-512 + bf16 land on Zen4+, Turin has up to 128 cores/socket)."""
+    m = re.search(r"EPYC\s+(\d[0-9A-Z]{2}\d)", model.upper())
     if not m:
         return "unknown", "unknown"
     num = m.group(1)
