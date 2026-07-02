@@ -65,9 +65,13 @@ def check_identity_consistency(metadata: dict, claude: dict) -> list[str]:
             f".claude-plugin/marketplace.json `name` ({claude.get('name')!r}) "
             f"must match plugin-metadata.json `name` ({name!r})."
         )
-    if claude.get("description") != description:
+    # The marketplace schema only allows `name`, `owner`, `metadata`, and
+    # `plugins` at the root -- the human-readable blurb lives in
+    # `metadata.description`, not a top-level `description`.
+    claude_description = (claude.get("metadata") or {}).get("description")
+    if claude_description != description:
         errors.append(
-            ".claude-plugin/marketplace.json `description` must match "
+            ".claude-plugin/marketplace.json metadata.description must match "
             "plugin-metadata.json `description`."
         )
     claude_version = (claude.get("metadata") or {}).get("version")
@@ -87,7 +91,6 @@ def build_cursor_marketplace(metadata: dict, claude: dict) -> dict:
     return {
         "name": metadata["name"],
         "owner": {"name": owner_name} if owner_name else {},
-        "description": metadata["description"],
         "metadata": {
             "description": metadata["description"],
             "version": metadata["version"],

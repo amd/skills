@@ -3,7 +3,6 @@
   "owner": {
     "name": "AMD"
   },
-  "description": "Agent Skills for AMD-optimized workflows.",
   "metadata": {
     "description": "Agent Skills for AMD-optimized workflows.",
     "version": "0.1.0"
