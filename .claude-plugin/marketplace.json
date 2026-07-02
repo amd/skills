@@ -11,6 +11,7 @@
     {
       "name": "amd-skills",
       "source": "./",
+      "version": "0.1.0",
       "strict": false,
       "skills": [
         "./skills/local-ai-use",
