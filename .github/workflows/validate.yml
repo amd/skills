@@ -71,6 +71,17 @@ jobs:
       - name: Validate marketplace manifest
         run: uv run .github/scripts/validate_skills.py --marketplace-only
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install the claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate plugin with the claude CLI
+        run: claude plugin validate .
+
       - name: Validate generated Cursor manifest
         run: uv run .github/scripts/generate_cursor_marketplace.py --check
 
