@@ -23,7 +23,6 @@ Best for cross-cutting skills that do not have a natural product home.
    ```bash
    ./.github/scripts/publish.sh   # writes .cursor-plugin/marketplace.json
    ```
-   The bundle ships the skill folders in place (the plugin `source` is the repo root), so there is no generated plugin tree to commit — just your skill folder and the manifest edits.
 7. Validate the skill locally before pushing:
    ```bash
    ./.github/scripts/check.sh   # validates every SKILL.md and that manifests are in sync
@@ -265,5 +264,4 @@ The validator checks every skill under `skills/` for:
 It also checks the plugin manifests:
 
 - `.claude-plugin/marketplace.json` lists exactly one plugin (the `amd-skills` bundle) with `source` set to `./`, `strict: false`, and a non-empty human-readable `description`
-- every entry in that plugin's `skills` array is a `./skills/<name>` path that resolves to a real skill under `skills/`. Skills absent from the array are allowed — they are simply unpublished.
 - `.cursor-plugin/marketplace.json` is up to date — it mirrors `.claude-plugin/marketplace.json` and pulls shared identity (name, description, version, author) from `plugin-metadata.json` (regenerate with `./.github/scripts/publish.sh`)

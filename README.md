@@ -145,36 +145,15 @@ The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integr
 This repo also acts as an **incubator**: a skill can start under `skills/` to iterate quickly, then graduate to its product repo and be re-pointed from `.github/scripts/sources.yml` once it has a clear owner, with no change for installed users.
 
 ```
-skills/                  # Canonical catalog: every skill the agent can load
+skills/                  # All skills the agent can load
 docs/                    # Long-form documentation (e.g. skill-cards.md)
-.claude-plugin/          # Claude Code marketplace manifest (defines the bundle)
-.cursor-plugin/          # Cursor marketplace manifest (generated mirror)
+.claude-plugin/          # Claude Code marketplace manifest
+.cursor-plugin/          # Cursor marketplace manifest
 plugin-metadata.json     # Vendor-neutral identity/discovery metadata
 .github/workflows/       # CI for validating skills
 .github/scripts/         # Internal repo scripts
 .github/scripts/sources.yml  # External skill sources for federation
 ```
-
-This repository is a [Claude Code plugin marketplace](https://code.claude.com/docs/en/plugin-marketplaces):
-`.claude-plugin/marketplace.json` at the root is the catalog, and it defines a
-single curated plugin (`amd-skills`) that bundles the published skills. The
-plugin's `source` is the repo root (`./`) with `strict: false`, and its `skills`
-array lists exactly which skill folders ship, as `./skills/<name>` paths:
-
-```json
-{
-  "name": "amd-skills",
-  "source": "./",
-  "strict": false,
-  "skills": ["./skills/local-ai-use", "./skills/serving-llms-on-instinct", "..."]
-}
-```
-
-Because the plugin ships the skill folders in place, nothing is duplicated and
-there is no generated plugin tree to keep in sync. `skills/` stays the single
-source of truth, and a skill that is not listed in the `skills` array simply
-stays unpublished. This is the "canonical catalog, curated publish" model: the
-catalog can grow freely while the published bundle stays deliberate.
 
 In-repo skills are authored directly under `skills/`. Federated skills are
 declared in [`.github/scripts/sources.yml`](.github/scripts/sources.yml) and vendored into
