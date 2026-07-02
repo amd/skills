@@ -29,13 +29,12 @@ For each source, the script:
    from the source metadata when the upstream copy doesn't already ship
    one, so the imported skill satisfies the card validation gate (see
    docs/skill-cards.md).
-6. Adds each imported skill to the bundle's `skills` list in
-   `plugin-metadata.json` so it ships in the single AMD plugin (the plugin
-   tree itself is regenerated separately by generate_plugins.py, e.g. via
-   `./.github/scripts/publish.sh`).
+6. Adds each imported skill to the bundle's `skills` array in
+   `.claude-plugin/marketplace.json` (as a `./skills/<name>` path) so it
+   ships in the single AMD plugin.
 7. Removes any previously imported skill (one with a `.federated.json`)
    that is no longer listed in `.github/scripts/sources.yml`, and drops it
-   from the bundle's `skills` list.
+   from the bundle's `skills` array.
 
 Usage:
     uv run .github/scripts/import_external_skills.py            # write changes
@@ -71,8 +70,11 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CATALOG_FILE = Path(__file__).resolve().parent / "sources.yml"
 SKILLS_DIR = REPO_ROOT / "skills"
-PLUGIN_METADATA = REPO_ROOT / "plugin-metadata.json"
+CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 MARKER_FILENAME = ".federated.json"
+# The bundle references each published skill as `./skills/<name>` in the
+# marketplace plugin entry's `skills` array.
+SKILLS_PATH_PREFIX = "./skills/"
 CARD_FILENAME = "skill-card.md"
 
 FRONTMATTER_RE = re.compile(
@@ -454,32 +456,45 @@ def update_publish_list(
     removed: Iterable[str],
     dry_run: bool,
 ) -> bool:
-    """Sync the bundle's `skills` list in `plugin-metadata.json`.
+    """Sync the bundle's `skills` array in `.claude-plugin/marketplace.json`.
 
-    AMD ships a single curated plugin whose contents are the `skills` list in
-    `plugin-metadata.json` (see generate_plugins.py). Newly imported federated
-    skills are added to that list so they ship in the bundle, and skills that
-    were pruned from `.github/scripts/sources.yml` are removed. The existing
-    curation order is preserved; freshly added skills are appended in sorted
-    order for a deterministic diff.
+    AMD ships a single curated plugin whose `skills` array lists the published
+    skills as `./skills/<name>` paths. Newly imported federated skills are added
+    so they ship in the bundle, and skills that were pruned from
+    `.github/scripts/sources.yml` are removed. The existing curation order is
+    preserved; freshly added skills are appended in sorted order for a
+    deterministic diff.
 
     Returns True when the file was modified (or would be in a dry run).
     """
-    data = json.loads(PLUGIN_METADATA.read_text(encoding="utf-8"))
-    skills = data.get("skills")
+    data = json.loads(CLAUDE_MARKETPLACE.read_text(encoding="utf-8"))
+    plugins = data.get("plugins")
+    if not isinstance(plugins, list) or not plugins or not isinstance(plugins[0], dict):
+        raise ValueError(
+            f"{CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)} must define a bundle "
+            "plugin entry to sync federated skills into."
+        )
+    entry = plugins[0]
+    skills = entry.get("skills")
     if not isinstance(skills, list):
         skills = []
-        data["skills"] = skills
 
-    removed_set = set(removed)
-    kept = [s for s in skills if s not in removed_set]
-    additions = sorted({s for s in imported if s not in kept})
+    removed_paths = {f"{SKILLS_PATH_PREFIX}{name}" for name in removed}
+    kept = [s for s in skills if s not in removed_paths]
+    present = {
+        s[len(SKILLS_PATH_PREFIX) :].strip("/")
+        for s in kept
+        if isinstance(s, str) and s.startswith(SKILLS_PATH_PREFIX)
+    }
+    additions = sorted(
+        f"{SKILLS_PATH_PREFIX}{name}" for name in imported if name not in present
+    )
     new_skills = kept + additions
 
     changed = new_skills != skills
     if changed and not dry_run:
-        data["skills"] = new_skills
-        PLUGIN_METADATA.write_text(
+        entry["skills"] = new_skills
+        CLAUDE_MARKETPLACE.write_text(
             json.dumps(data, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )

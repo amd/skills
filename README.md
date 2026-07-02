@@ -146,28 +146,35 @@ This repo also acts as an **incubator**: a skill can start under `skills/` to it
 
 ```
 skills/                  # Canonical catalog: every skill the agent can load
-plugins/                 # Generated: the single AMD plugin bundling the published skills
 docs/                    # Long-form documentation (e.g. skill-cards.md)
-.claude-plugin/          # Claude Code marketplace manifest (lists the plugin)
+.claude-plugin/          # Claude Code marketplace manifest (defines the bundle)
 .cursor-plugin/          # Cursor marketplace manifest (generated mirror)
-plugin-metadata.json     # Identity/discovery metadata + the bundle's skills list
+plugin-metadata.json     # Vendor-neutral identity/discovery metadata
 .github/workflows/       # CI for validating skills
 .github/scripts/         # Internal repo scripts
 .github/scripts/sources.yml  # External skill sources for federation
 ```
 
 This repository is a [Claude Code plugin marketplace](https://code.claude.com/docs/en/plugin-marketplaces):
-`.claude-plugin/marketplace.json` at the root is the catalog, and it lists a
-single curated plugin (`amd-skills`) that bundles every published skill. That
-plugin is generated at `plugins/amd-skills/` (its own
-`.claude-plugin/plugin.json` plus a `skills/` folder holding a copy of each
-bundled skill) by [`generate_plugins.py`](.github/scripts/generate_plugins.py)
-(run via `./.github/scripts/publish.sh`). `skills/` stays the single source of
-truth — authors and the federation importer only touch it — and the curated set
-that ships in the bundle is the `skills` list in
-[`plugin-metadata.json`](plugin-metadata.json). A skill that is not in that list
-simply stays unpublished. This is the "canonical catalog, curated publish"
-model: the catalog can grow freely while the published bundle stays deliberate.
+`.claude-plugin/marketplace.json` at the root is the catalog, and it defines a
+single curated plugin (`amd-skills`) that bundles the published skills. The
+plugin's `source` is the repo root (`./`) with `strict: false`, and its `skills`
+array lists exactly which skill folders ship, as `./skills/<name>` paths:
+
+```json
+{
+  "name": "amd-skills",
+  "source": "./",
+  "strict": false,
+  "skills": ["./skills/local-ai-use", "./skills/serving-llms-on-instinct", "..."]
+}
+```
+
+Because the plugin ships the skill folders in place, nothing is duplicated and
+there is no generated plugin tree to keep in sync. `skills/` stays the single
+source of truth, and a skill that is not listed in the `skills` array simply
+stays unpublished. This is the "canonical catalog, curated publish" model: the
+catalog can grow freely while the published bundle stays deliberate.
 
 In-repo skills are authored directly under `skills/`. Federated skills are
 declared in [`.github/scripts/sources.yml`](.github/scripts/sources.yml) and vendored into

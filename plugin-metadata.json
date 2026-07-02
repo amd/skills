@@ -16,12 +16,5 @@
     "vllm",
     "lemonade",
     "local-ai"
-  ],
-  "skills": [
-    "local-ai-use",
-    "local-ai-app-integration",
-    "magpie-kernel-evaluator",
-    "serving-llms-on-instinct",
-    "tracelens-analysis-orchestrator"
   ]
 }

@@ -17,11 +17,13 @@ Enforces the rules documented in CONTRIBUTING.md:
     `## Description`, `## Owner`, and `## License` sections
 
 Also validates the single-bundle plugin model: `.claude-plugin/marketplace.json`
-lists exactly one plugin (`source: ./plugins/<name>`), the curated `skills`
-list in `plugin-metadata.json` names which skills ship in it, and each of those
-skills is packaged under `plugins/<name>/skills/<skill>/`. Skills that are not
-in the list are allowed -- they are simply unpublished (the "canonical catalog,
-curated publish" model), so a skill can live under `skills/` without shipping.
+lists exactly one plugin whose `source` is the repo root (`./`) with
+`strict: false`, and whose `skills` array names the published skill folders as
+`./skills/<name>` paths. Each listed path must resolve to a real skill under
+`skills/`. Skills that are not listed are allowed -- they are simply unpublished
+(the "canonical catalog, curated publish" model), so a skill can live under
+`skills/` without shipping. No files are duplicated: the bundle ships the
+skill folders in place, so there is no generated `plugins/` tree to keep in sync.
 
 Run from the repo root:
 
@@ -52,9 +54,11 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
-PLUGINS_DIR = REPO_ROOT / "plugins"
-PLUGIN_METADATA = REPO_ROOT / "plugin-metadata.json"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
+
+# Every published skill is referenced from the bundle's `skills` array as a
+# path of this form, relative to the plugin `source` (the repo root).
+SKILLS_PATH_PREFIX = "./skills/"
 
 # Limits from CONTRIBUTING.md and the standardized Agent Skills format.
 MAX_NAME_LEN = 64
@@ -221,17 +225,15 @@ def discover_skills(root: Path) -> list[Path]:
 
 
 def validate_claude_marketplace(skill_dirs: list[Path]) -> list[str]:
-    """Return error strings if the marketplace/bundle don't match skills/ on disk.
+    """Return error strings if the bundle plugin doesn't match skills/ on disk.
 
-    AMD ships a single curated plugin. The marketplace lists exactly one entry
-    whose `source` is `./plugins/<name>`, backed by a generated manifest at
-    `plugins/<name>/.claude-plugin/plugin.json`. The skills that go in the
-    bundle are named in the `skills` list of `plugin-metadata.json`; each must
-    exist under `skills/` and be packaged into `plugins/<name>/skills/<skill>/`.
-    Skills that are not listed are allowed -- they are simply unpublished. The
-    plugin's human-readable `description` is intentionally allowed to differ
-    from the SKILL.md descriptions (per CONTRIBUTING.md), so this only enforces
-    that names and paths line up.
+    AMD ships a single curated plugin whose `source` is the repo root (`./`)
+    with `strict: false` (so no `plugin.json` is needed). Its `skills` array
+    lists the published skills as `./skills/<name>` paths; each must resolve to
+    a real skill under `skills/`. Skills that are not listed are allowed -- they
+    are simply unpublished. The plugin's human-readable `description` is
+    intentionally allowed to differ from the SKILL.md descriptions (per
+    CONTRIBUTING.md), so this only enforces that names and paths line up.
     """
     if not CLAUDE_MARKETPLACE.exists():
         return [
@@ -269,64 +271,53 @@ def validate_claude_marketplace(skill_dirs: list[Path]) -> list[str]:
         errors.append("plugins[0] is missing a non-empty `name`.")
         return errors
 
-    expected_source = f"./plugins/{name}"
-    if source != expected_source:
+    if source != "./":
         errors.append(
-            f"plugins[0] (`{name}`): `source` must be `{expected_source}`, "
-            f"got `{source}`."
+            f"plugins[0] (`{name}`): `source` must be `./` (the repo root is the "
+            f"bundle), got `{source}`."
+        )
+    # With a repo-root source the plugin ships no `plugin.json`, so the entry
+    # must declare `strict: false` or Claude Code will look for one and fail.
+    if entry.get("strict") is not False:
+        errors.append(
+            f"plugins[0] (`{name}`): must set `strict` to `false` (no plugin.json "
+            "ships with a repo-root source)."
         )
     if not isinstance(description, str) or not description.strip():
         errors.append(f"plugins[0] (`{name}`) is missing a non-empty `description`.")
 
-    plugin_manifest = PLUGINS_DIR / name / ".claude-plugin" / "plugin.json"
-    if not plugin_manifest.exists():
-        errors.append(
-            f"plugins[0] (`{name}`): missing generated plugin manifest "
-            f"{plugin_manifest.relative_to(REPO_ROOT).as_posix()}. Run "
-            "`uv run .github/scripts/generate_plugins.py`."
-        )
-
-    errors.extend(_validate_bundle_skills(name, {p.name for p in skill_dirs}))
+    errors.extend(_validate_bundle_skills(entry, {p.name for p in skill_dirs}))
     return errors
 
 
-def _validate_bundle_skills(plugin_name: str, skill_names: set[str]) -> list[str]:
-    """Check the curated `skills` list against skills/ and the generated bundle."""
-    if not PLUGIN_METADATA.exists():
-        return [f"Missing {PLUGIN_METADATA.relative_to(REPO_ROOT)}."]
-    try:
-        metadata = json.loads(PLUGIN_METADATA.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        return [f"{PLUGIN_METADATA.relative_to(REPO_ROOT)}: invalid JSON: {exc}"]
-
-    skills = metadata.get("skills")
+def _validate_bundle_skills(entry: dict, skill_names: set[str]) -> list[str]:
+    """Check the bundle's `skills` paths resolve to real skills under skills/."""
+    skills = entry.get("skills")
     if not isinstance(skills, list) or not skills:
         return [
-            f"{PLUGIN_METADATA.relative_to(REPO_ROOT)}: `skills` must be a "
-            "non-empty list of bundled skill folder names."
+            "plugins[0] `skills` must be a non-empty list of "
+            f"`{SKILLS_PATH_PREFIX}<name>` paths naming the published skills."
         ]
 
     errors: list[str] = []
     seen: set[str] = set()
-    for skill in skills:
-        if not isinstance(skill, str) or not skill:
-            errors.append(f"{PLUGIN_METADATA.relative_to(REPO_ROOT)}: `skills` entries must be non-empty strings.")
+    for path in skills:
+        if not isinstance(path, str) or not path.startswith(SKILLS_PATH_PREFIX):
+            errors.append(
+                f"`skills` entry {path!r} must be a `{SKILLS_PATH_PREFIX}<name>` path."
+            )
+            continue
+        skill = path[len(SKILLS_PATH_PREFIX) :].strip("/")
+        if not skill or "/" in skill:
+            errors.append(f"`skills` entry {path!r} must point at a single skill folder.")
             continue
         if skill in seen:
-            errors.append(f"{PLUGIN_METADATA.relative_to(REPO_ROOT)}: duplicate skill `{skill}` in `skills`.")
+            errors.append(f"`skills` lists `{path}` more than once.")
             continue
         seen.add(skill)
         if skill not in skill_names:
             errors.append(
-                f"`skills` names `{skill}`, which has no directory under skills/."
-            )
-            continue
-        packaged = PLUGINS_DIR / plugin_name / "skills" / skill / "SKILL.md"
-        if not packaged.exists():
-            errors.append(
-                f"bundled skill `{skill}` is not packaged at "
-                f"{packaged.relative_to(REPO_ROOT).as_posix()}. Run "
-                "`uv run .github/scripts/generate_plugins.py`."
+                f"`skills` names `{path}`, which has no directory under skills/."
             )
 
     # Skills present under skills/ but absent from `skills` are intentionally

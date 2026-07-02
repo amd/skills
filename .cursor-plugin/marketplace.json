@@ -11,7 +11,15 @@
   "plugins": [
     {
       "name": "amd-skills",
-      "source": "./plugins/amd-skills",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/local-ai-use",
+        "./skills/local-ai-app-integration",
+        "./skills/magpie-kernel-evaluator",
+        "./skills/serving-llms-on-instinct",
+        "./skills/tracelens-analysis-orchestrator"
+      ],
       "description": "AMD's verified Agent Skills in one plugin: route image/audio through local AI on Ryzen AI, serve LLMs on AMD Instinct GPUs with vLLM, and analyze GPU kernel and PyTorch trace performance."
     }
   ]

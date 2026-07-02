@@ -8,10 +8,6 @@
 #   ./.github/scripts/publish.sh -h|--help  Print this help.
 #
 # Currently regenerates:
-#   - plugins/amd-skills/               (the single bundle plugin: its manifest
-#                                        plus a copy of every skill in the
-#                                        `skills` list of plugin-metadata.json,
-#                                        sourced from skills/)
 #   - .cursor-plugin/marketplace.json   (mirror of .claude-plugin/marketplace.json
 #                                        + plugin-metadata.json)
 #
@@ -33,12 +29,10 @@ usage() {
 
 case "${1:-}" in
   "")
-    uv run .github/scripts/generate_plugins.py
     uv run .github/scripts/generate_cursor_marketplace.py
     echo "Publish artifacts generated successfully."
     ;;
   --check)
-    uv run .github/scripts/generate_plugins.py --check
     uv run .github/scripts/generate_cursor_marketplace.py --check
     ;;
   -h|--help)

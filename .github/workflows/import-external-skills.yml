@@ -3,10 +3,10 @@ name: import-external-skills
 # Manually-dispatched workflow that refreshes the federated portion of the
 # catalog. It reads `.github/scripts/sources.yml`, shallow-clones each declared
 # source, vendors the named skills into `skills/<name>/`, adds them to the
-# bundle's `skills` list in `plugin-metadata.json`, regenerates the plugin
-# tree and Cursor manifest, and opens a pull request with the result. Every
-# imported skill goes through the same `validate` checks as in-repo skills
-# before it lands on `main`.
+# bundle's `skills` array in `.claude-plugin/marketplace.json`, regenerates the
+# Cursor manifest, and opens a pull request with the result. Every imported
+# skill goes through the same `validate` checks as in-repo skills before it
+# lands on `main`.
 #
 # See the "A federated catalog" section of `README.md` for the design.
 
@@ -52,7 +52,7 @@ jobs:
             uv run .github/scripts/import_external_skills.py
           fi
 
-      - name: Regenerate plugin tree and Cursor marketplace manifest
+      - name: Regenerate Cursor marketplace manifest
         if: ${{ inputs.dry_run != true }}
         run: ./.github/scripts/publish.sh
 
@@ -100,7 +100,5 @@ jobs:
           add-paths: |
             .github/scripts/sources.yml
             skills/**
-            plugins/**
-            plugin-metadata.json
             .claude-plugin/**
             .cursor-plugin/**

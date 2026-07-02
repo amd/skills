@@ -6,10 +6,10 @@
 """Generate the Cursor marketplace manifest from the canonical sources.
 
 Both ecosystems use the same marketplace model: a single curated plugin
-(`amd-skills`) bundles every published skill under `plugins/amd-skills/`
-(materialized by `generate_plugins.py`), and the marketplace lists that one
-plugin. To avoid drift, the Cursor catalog is generated rather than
-hand-maintained.
+(`amd-skills`) whose `source` is the repo root bundles the published skills
+listed in its `skills` array (the skill folders ship in place under `skills/`,
+so there is no separate plugin tree). The Cursor manifest mirrors the Claude
+marketplace one-for-one; to avoid drift it is generated, not hand-maintained.
 
 Sources of truth:
 - `plugin-metadata.json` (repo root): shared identity and discovery metadata
