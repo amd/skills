@@ -8,10 +8,10 @@
 #   ./.github/scripts/publish.sh -h|--help  Print this help.
 #
 # Currently regenerates:
-#   - plugins/<name>/                   (per-plugin manifest + a copy of the
-#                                        published skill, from skills/ +
-#                                        .claude-plugin/marketplace.json +
-#                                        plugin-metadata.json)
+#   - plugins/amd-skills/               (the single bundle plugin: its manifest
+#                                        plus a copy of every skill in the
+#                                        `skills` list of plugin-metadata.json,
+#                                        sourced from skills/)
 #   - .cursor-plugin/marketplace.json   (mirror of .claude-plugin/marketplace.json
 #                                        + plugin-metadata.json)
 #

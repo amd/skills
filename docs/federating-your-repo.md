@@ -49,7 +49,7 @@ then open a PR for review.
    ./.github/scripts/check.sh                          # validate
    ```
 
-2. Commit `skills/**`, `plugins/**`, `.github/scripts/sources.yml`, and the manifests.
+2. Commit `skills/**`, `plugins/**`, `plugin-metadata.json`, `.github/scripts/sources.yml`, and the manifests.
 3. Open a PR; a maintainer reviews and merges once CI passes.
 
 ## Catch failures before nightly

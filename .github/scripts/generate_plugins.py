@@ -9,24 +9,26 @@ A repository becomes a Claude Code plugin marketplace when it has a
 `.claude-plugin/marketplace.json` at its root and one or more *plugins* inside
 it. Each plugin is a self-contained folder with its own
 `.claude-plugin/plugin.json` and a `skills/` directory holding the skills it
-ships. This script materializes that structure for every *published* plugin:
+ships. AMD ships a single curated bundle: one plugin that contains every
+published skill, materialized under `plugins/<name>/`:
 
-    plugins/<name>/
+    plugins/amd-skills/
       .claude-plugin/
         plugin.json          # generated: name, description, version, author, ...
       skills/
-        <name>/              # a copy of skills/<name>/ (minus .federated.json)
-          SKILL.md
-          ...
+        local-ai-use/        # a copy of skills/local-ai-use/ (minus .federated.json)
+          SKILL.md ...
+        serving-llms-on-instinct/
+          SKILL.md ...
+        ...                  # one folder per skill listed in plugin-metadata.json
 
 `skills/` stays the single source of truth (the "canonical catalog, curated
 publish" pattern): authors and the federation importer only ever touch
-`skills/`, and this script packages the published subset into installable
-plugins. A skill is "published" when it has an entry in
-`.claude-plugin/marketplace.json` whose `source` is `./plugins/<name>`; a skill
-with no such entry simply stays unpublished and gets no plugin folder.
+`skills/`, and this script packages the curated subset into the installable
+plugin. The subset is the `skills` list in `plugin-metadata.json`; a skill that
+is not listed simply stays unpublished and is not copied into the bundle.
 
-Because Claude Code copies each plugin folder on install, a plugin's skills
+Because Claude Code copies the plugin folder on install, the plugin's skills
 must physically live inside it -- relative `../` paths that escape the plugin
 do not survive installation. The skill content under `plugins/` is therefore a
 duplicate of `skills/` by design, kept in sync automatically and verified in CI
@@ -34,9 +36,10 @@ with `--check`.
 
 Sources of truth:
 - `plugin-metadata.json` (repo root): shared identity (version, author,
-  homepage, repository, license) stamped into every generated `plugin.json`.
-- `.claude-plugin/marketplace.json`: the published plugin entries (name +
-  human-readable description). Hand-maintained.
+  homepage, repository, license) stamped into the generated `plugin.json`, plus
+  the `skills` list naming which skill folders the bundle ships.
+- `.claude-plugin/marketplace.json`: the single plugin entry (name + source +
+  the human-readable catalog description). Hand-maintained.
 - `skills/<name>/`: the actual skill content that gets copied in.
 
 Usage:
@@ -82,21 +85,71 @@ def render_json(data: dict) -> bytes:
     return (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
 
 
-def plugin_source_name(entry: dict) -> str | None:
-    """Return the plugin folder name for a marketplace entry, or None.
+def single_plugin_entry(marketplace: dict) -> dict:
+    """Return the sole plugin entry from the marketplace, enforcing the bundle.
 
-    Only entries whose `source` points under `./plugins/` are materialized by
-    this script. The folder name is taken from the `source` path so the
-    generated tree always matches what the marketplace advertises.
+    AMD ships one curated plugin, so `marketplace.json` must list exactly one
+    plugin. Supporting several plugins would need a per-plugin skill list (this
+    generator draws the bundle's skills from `plugin-metadata.json`), so we fail
+    loudly rather than silently give every plugin the same skills.
     """
+    plugins = marketplace.get("plugins")
+    if not isinstance(plugins, list):
+        raise ValueError(
+            f"{CLAUDE_MARKETPLACE.relative_to(ROOT)}: top-level `plugins` array "
+            "is missing or not a list."
+        )
+    if len(plugins) != 1:
+        raise ValueError(
+            f"{CLAUDE_MARKETPLACE.relative_to(ROOT)}: expected exactly one plugin "
+            f"(the AMD bundle), found {len(plugins)}. To ship more than one "
+            "plugin, extend the generator with a per-plugin skill list."
+        )
+    entry = plugins[0]
+    if not isinstance(entry, dict):
+        raise ValueError("plugins[0] must be an object.")
+    return entry
+
+
+def plugin_source_name(entry: dict) -> str:
+    """Return the plugin folder name from a marketplace entry's `source`."""
     source = entry.get("source")
     if not isinstance(source, str) or not source.startswith(PLUGINS_SOURCE_PREFIX):
-        return None
-    return source[len(PLUGINS_SOURCE_PREFIX) :].strip("/")
+        raise ValueError(
+            f"plugin `{entry.get('name')}` must set `source` to "
+            f"`{PLUGINS_SOURCE_PREFIX}<name>`, got {source!r}."
+        )
+    name = source[len(PLUGINS_SOURCE_PREFIX) :].strip("/")
+    if entry.get("name") != name:
+        raise ValueError(
+            f"plugin `name` ({entry.get('name')!r}) must match the plugin folder "
+            f"in `source` ({name!r})."
+        )
+    return name
+
+
+def bundled_skills(metadata: dict) -> list[str]:
+    """Return the curated list of skill folder names the bundle ships."""
+    skills = metadata.get("skills")
+    if not isinstance(skills, list) or not skills:
+        raise ValueError(
+            f"{PLUGIN_METADATA.relative_to(ROOT)} must list the bundled skill "
+            "folder names under a non-empty `skills` array."
+        )
+    seen: set[str] = set()
+    for name in skills:
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"{PLUGIN_METADATA.relative_to(ROOT)}: `skills` entries must be non-empty strings.")
+        if name in seen:
+            raise ValueError(
+                f"{PLUGIN_METADATA.relative_to(ROOT)}: duplicate skill {name!r} in `skills`."
+            )
+        seen.add(name)
+    return skills
 
 
 def build_plugin_manifest(entry: dict, metadata: dict) -> dict:
-    """Assemble a plugin.json from a marketplace entry + shared metadata."""
+    """Assemble a plugin.json from the marketplace entry + shared metadata."""
     manifest: dict = {
         "name": entry["name"],
         "description": entry.get("description", ""),
@@ -118,45 +171,23 @@ def collect_desired_files(metadata: dict, marketplace: dict) -> dict[Path, bytes
     copied byte-for-byte so the published copy is identical to the canonical
     skill (line endings included).
     """
-    plugins = marketplace.get("plugins")
-    if not isinstance(plugins, list):
-        raise ValueError(
-            f"{CLAUDE_MARKETPLACE.relative_to(ROOT)}: top-level `plugins` array "
-            "is missing or not a list."
-        )
+    entry = single_plugin_entry(marketplace)
+    name = plugin_source_name(entry)
+    plugin_root = PLUGINS_DIR / name
 
     desired: dict[Path, bytes] = {}
-    for idx, entry in enumerate(plugins):
-        if not isinstance(entry, dict):
-            raise ValueError(f"plugins[{idx}] must be an object.")
-        name = plugin_source_name(entry)
-        if name is None:
-            raise ValueError(
-                f"plugins[{idx}] (`{entry.get('name')}`) must set "
-                f"`source` to `{PLUGINS_SOURCE_PREFIX}<name>`."
-            )
-        if entry.get("name") != name:
-            raise ValueError(
-                f"plugins[{idx}]: `name` ({entry.get('name')!r}) must match the "
-                f"plugin folder in `source` ({name!r})."
-            )
+    manifest = build_plugin_manifest(entry, metadata)
+    desired[plugin_root / ".claude-plugin" / "plugin.json"] = render_json(manifest)
 
-        skill_dir = SKILLS_DIR / name
-        skill_md = skill_dir / "SKILL.md"
-        if not skill_md.is_file():
+    for skill_name in bundled_skills(metadata):
+        skill_dir = SKILLS_DIR / skill_name
+        if not (skill_dir / "SKILL.md").is_file():
             raise FileNotFoundError(
-                f"Plugin `{name}` has no skill at skills/{name}/SKILL.md."
+                f"Bundled skill `{skill_name}` has no skills/{skill_name}/SKILL.md."
             )
-
-        plugin_root = PLUGINS_DIR / name
-        manifest = build_plugin_manifest(entry, metadata)
-        desired[plugin_root / ".claude-plugin" / "plugin.json"] = render_json(manifest)
-
-        skill_dest_root = plugin_root / "skills" / name
+        skill_dest_root = plugin_root / "skills" / skill_name
         for src in sorted(skill_dir.rglob("*")):
-            if not src.is_file():
-                continue
-            if src.name in EXCLUDED_SKILL_FILES:
+            if not src.is_file() or src.name in EXCLUDED_SKILL_FILES:
                 continue
             rel = src.relative_to(skill_dir)
             desired[skill_dest_root / rel] = src.read_bytes()
@@ -222,6 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     metadata = load_json(PLUGIN_METADATA)
     marketplace = load_json(CLAUDE_MARKETPLACE)
     desired = collect_desired_files(metadata, marketplace)
+    skill_count = len(bundled_skills(metadata))
 
     if args.check:
         problems = check(desired)
@@ -234,17 +266,17 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        print(f"plugins/ tree is up to date ({len(desired)} file(s)).")
+        print(f"plugins/ tree is up to date ({len(desired)} file(s), {skill_count} skill(s)).")
         return 0
 
     changed = write(desired)
-    plugin_count = sum(
-        1 for p in desired if p.name == "plugin.json" and p.parent.name == ".claude-plugin"
-    )
     if changed:
-        print(f"Wrote plugins/ tree: {plugin_count} plugin(s), {changed} file(s) updated.")
+        print(
+            f"Wrote plugins/ tree: 1 plugin, {skill_count} skill(s), "
+            f"{changed} file(s) updated."
+        )
     else:
-        print(f"plugins/ tree already up to date ({plugin_count} plugin(s)).")
+        print(f"plugins/ tree already up to date ({skill_count} skill(s)).")
     return 0
 
 

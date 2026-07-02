@@ -18,12 +18,12 @@ Best for cross-cutting skills that do not have a natural product home.
 2. Update the `SKILL.md` frontmatter so the `name` and `description` clearly explain *what* the skill does and *when* an agent should reach for it.
 3. Add the supporting scripts, templates, and reference docs your instructions point to. Keep skills focused: one well-scoped task per skill is better than one mega-skill.
 4. Add a `skill-card.md` at the skill root with `## Description`, `## Owner`, and `## License` sections. This is the skill's governance card; see [Skill cards](#skill-cards) and [docs/skill-cards.md](docs/skill-cards.md).
-5. Register the skill in `.claude-plugin/marketplace.json` with a human-readable description and `source` set to `./plugins/<name>` (the marketplace description is for humans browsing the catalog; the `SKILL.md` description is what the agent uses for routing). A skill left out of the marketplace stays unpublished.
-6. Regenerate the derived artifacts so the plugin tree and Cursor manifest track the new skill:
+5. Publish the skill by adding its folder name to the `skills` list in [`plugin-metadata.json`](plugin-metadata.json). All published skills ship together in the single `amd-skills` plugin; a skill left out of that list stays unpublished. (The `SKILL.md` description is what the agent uses for routing; the plugin's catalog description in `.claude-plugin/marketplace.json` is a bundle-level blurb for humans.)
+6. Regenerate the derived artifacts so the plugin bundle and Cursor manifest track the new skill:
    ```bash
-   ./.github/scripts/publish.sh   # writes plugins/<name>/ and .cursor-plugin/marketplace.json
+   ./.github/scripts/publish.sh   # writes plugins/amd-skills/ and .cursor-plugin/marketplace.json
    ```
-   This packages the published skill into an installable plugin under `plugins/<name>/` (a generated `.claude-plugin/plugin.json` plus a copy of the skill). Commit the generated `plugins/**` alongside your skill.
+   This copies the published skill into the bundle at `plugins/amd-skills/skills/<name>/`. Commit the generated `plugins/**` alongside your skill.
 7. Validate the skill locally before pushing:
    ```bash
    ./.github/scripts/check.sh   # validates every SKILL.md and that manifests are in sync
@@ -264,6 +264,6 @@ The validator checks every skill under `skills/` for:
 
 It also checks the plugin manifests:
 
-- every entry in `.claude-plugin/marketplace.json` points at an existing skill via `source` set to `./plugins/<name>`, has a non-empty human-readable `description`, and is backed by a generated plugin manifest at `plugins/<name>/.claude-plugin/plugin.json`. Skills without an entry are allowed — they are simply unpublished.
-- the generated `plugins/` tree is up to date — each published skill is packaged as `plugins/<name>/` (a `.claude-plugin/plugin.json` plus a copy of the skill) by `.github/scripts/generate_plugins.py` (regenerate with `./.github/scripts/publish.sh`)
+- `.claude-plugin/marketplace.json` lists exactly one plugin (the `amd-skills` bundle) with `source` set to `./plugins/amd-skills`, a non-empty human-readable `description`, and a generated manifest at `plugins/amd-skills/.claude-plugin/plugin.json`
+- every skill in the `skills` list of `plugin-metadata.json` exists under `skills/` and is packaged into `plugins/amd-skills/skills/<name>/` by `.github/scripts/generate_plugins.py` (regenerate with `./.github/scripts/publish.sh`). Skills absent from the list are allowed — they are simply unpublished.
 - `.cursor-plugin/marketplace.json` is up to date — it mirrors `.claude-plugin/marketplace.json` and pulls shared identity (name, description, version, author) from `plugin-metadata.json` (regenerate with `./.github/scripts/publish.sh`)

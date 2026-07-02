@@ -16,11 +16,12 @@ Enforces the rules documented in CONTRIBUTING.md:
   - skill-card.md exists at the skill root and has non-empty
     `## Description`, `## Owner`, and `## License` sections
 
-Also validates that `.claude-plugin/marketplace.json` is in sync with the
-skills on disk: every marketplace entry must point at an existing skill via a
-generated plugin under `plugins/<name>/`. Skills that are not listed are
-allowed -- they are simply unpublished (the "canonical catalog, curated
-publish" model), so a skill can live under `skills/` without shipping yet.
+Also validates the single-bundle plugin model: `.claude-plugin/marketplace.json`
+lists exactly one plugin (`source: ./plugins/<name>`), the curated `skills`
+list in `plugin-metadata.json` names which skills ship in it, and each of those
+skills is packaged under `plugins/<name>/skills/<skill>/`. Skills that are not
+in the list are allowed -- they are simply unpublished (the "canonical catalog,
+curated publish" model), so a skill can live under `skills/` without shipping.
 
 Run from the repo root:
 
@@ -52,6 +53,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
 PLUGINS_DIR = REPO_ROOT / "plugins"
+PLUGIN_METADATA = REPO_ROOT / "plugin-metadata.json"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 
 # Limits from CONTRIBUTING.md and the standardized Agent Skills format.
@@ -219,20 +221,22 @@ def discover_skills(root: Path) -> list[Path]:
 
 
 def validate_claude_marketplace(skill_dirs: list[Path]) -> list[str]:
-    """Return error strings if marketplace entries don't match skills/ on disk.
+    """Return error strings if the marketplace/bundle don't match skills/ on disk.
 
-    Each entry is a *published* plugin: its `source` must be `./plugins/<name>`,
-    backed by a canonical skill at `skills/<name>/` and a generated plugin
-    manifest at `plugins/<name>/.claude-plugin/plugin.json` (produced by
-    `generate_plugins.py`). Skills without an entry are allowed -- they are
-    simply unpublished. The marketplace's human-readable `description` is
-    intentionally allowed to differ from the SKILL.md description (per
-    CONTRIBUTING.md), so this only enforces that names and paths line up.
+    AMD ships a single curated plugin. The marketplace lists exactly one entry
+    whose `source` is `./plugins/<name>`, backed by a generated manifest at
+    `plugins/<name>/.claude-plugin/plugin.json`. The skills that go in the
+    bundle are named in the `skills` list of `plugin-metadata.json`; each must
+    exist under `skills/` and be packaged into `plugins/<name>/skills/<skill>/`.
+    Skills that are not listed are allowed -- they are simply unpublished. The
+    plugin's human-readable `description` is intentionally allowed to differ
+    from the SKILL.md descriptions (per CONTRIBUTING.md), so this only enforces
+    that names and paths line up.
     """
     if not CLAUDE_MARKETPLACE.exists():
         return [
-            f"Missing {CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)}; expected one "
-            "entry per skill."
+            f"Missing {CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)}; expected the "
+            "AMD bundle plugin entry."
         ]
 
     try:
@@ -246,53 +250,87 @@ def validate_claude_marketplace(skill_dirs: list[Path]) -> list[str]:
             f"{CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)}: top-level `plugins` "
             "array is missing."
         ]
+    if len(plugins) != 1:
+        return [
+            f"{CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)}: expected exactly one "
+            f"plugin (the AMD bundle), found {len(plugins)}."
+        ]
+
+    entry = plugins[0]
+    if not isinstance(entry, dict):
+        return ["plugins[0] must be an object."]
 
     errors: list[str] = []
-    skill_names = {p.name for p in skill_dirs}
-    listed_names: set[str] = set()
+    name = entry.get("name")
+    source = entry.get("source")
+    description = entry.get("description")
 
-    for idx, entry in enumerate(plugins):
-        if not isinstance(entry, dict):
-            errors.append(f"plugins[{idx}] must be an object.")
-            continue
-        name = entry.get("name")
-        source = entry.get("source")
-        description = entry.get("description")
+    if not isinstance(name, str) or not name:
+        errors.append("plugins[0] is missing a non-empty `name`.")
+        return errors
 
-        if not isinstance(name, str) or not name:
-            errors.append(f"plugins[{idx}] is missing a non-empty `name`.")
-            continue
-        if name in listed_names:
-            errors.append(f"plugins[{idx}] (`{name}`): duplicate plugin name.")
-            continue
-        listed_names.add(name)
+    expected_source = f"./plugins/{name}"
+    if source != expected_source:
+        errors.append(
+            f"plugins[0] (`{name}`): `source` must be `{expected_source}`, "
+            f"got `{source}`."
+        )
+    if not isinstance(description, str) or not description.strip():
+        errors.append(f"plugins[0] (`{name}`) is missing a non-empty `description`.")
 
-        if name not in skill_names:
+    plugin_manifest = PLUGINS_DIR / name / ".claude-plugin" / "plugin.json"
+    if not plugin_manifest.exists():
+        errors.append(
+            f"plugins[0] (`{name}`): missing generated plugin manifest "
+            f"{plugin_manifest.relative_to(REPO_ROOT).as_posix()}. Run "
+            "`uv run .github/scripts/generate_plugins.py`."
+        )
+
+    errors.extend(_validate_bundle_skills(name, {p.name for p in skill_dirs}))
+    return errors
+
+
+def _validate_bundle_skills(plugin_name: str, skill_names: set[str]) -> list[str]:
+    """Check the curated `skills` list against skills/ and the generated bundle."""
+    if not PLUGIN_METADATA.exists():
+        return [f"Missing {PLUGIN_METADATA.relative_to(REPO_ROOT)}."]
+    try:
+        metadata = json.loads(PLUGIN_METADATA.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return [f"{PLUGIN_METADATA.relative_to(REPO_ROOT)}: invalid JSON: {exc}"]
+
+    skills = metadata.get("skills")
+    if not isinstance(skills, list) or not skills:
+        return [
+            f"{PLUGIN_METADATA.relative_to(REPO_ROOT)}: `skills` must be a "
+            "non-empty list of bundled skill folder names."
+        ]
+
+    errors: list[str] = []
+    seen: set[str] = set()
+    for skill in skills:
+        if not isinstance(skill, str) or not skill:
+            errors.append(f"{PLUGIN_METADATA.relative_to(REPO_ROOT)}: `skills` entries must be non-empty strings.")
+            continue
+        if skill in seen:
+            errors.append(f"{PLUGIN_METADATA.relative_to(REPO_ROOT)}: duplicate skill `{skill}` in `skills`.")
+            continue
+        seen.add(skill)
+        if skill not in skill_names:
             errors.append(
-                f"plugins[{idx}] (`{name}`) has no matching directory under skills/."
+                f"`skills` names `{skill}`, which has no directory under skills/."
             )
             continue
-
-        expected_source = f"./plugins/{name}"
-        if source != expected_source:
+        packaged = PLUGINS_DIR / plugin_name / "skills" / skill / "SKILL.md"
+        if not packaged.exists():
             errors.append(
-                f"plugins[{idx}] (`{name}`): `source` must be `{expected_source}`, "
-                f"got `{source}`."
-            )
-        plugin_manifest = PLUGINS_DIR / name / ".claude-plugin" / "plugin.json"
-        if not plugin_manifest.exists():
-            errors.append(
-                f"plugins[{idx}] (`{name}`): missing generated plugin manifest "
-                f"{plugin_manifest.relative_to(REPO_ROOT).as_posix()}. Run "
+                f"bundled skill `{skill}` is not packaged at "
+                f"{packaged.relative_to(REPO_ROOT).as_posix()}. Run "
                 "`uv run .github/scripts/generate_plugins.py`."
             )
-        if not isinstance(description, str) or not description.strip():
-            errors.append(
-                f"plugins[{idx}] (`{name}`) is missing a non-empty `description`."
-            )
 
-    # Unlisted skills are intentionally allowed (unpublished), so there is no
-    # error for the `skill_names - listed_names` difference here.
+    # Skills present under skills/ but absent from `skills` are intentionally
+    # unpublished, so there is no error for that difference here.
     return errors
 
 
