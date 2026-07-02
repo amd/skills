@@ -463,7 +463,7 @@ def update_marketplace(results: Iterable[ImportResult], dry_run: bool) -> bool:
         entry = by_name.get(name)
         expected = {
             "name": name,
-            "source": f"./skills/{name}",
+            "source": f"./plugins/{name}",
             "description": result.marketplace_description,
         }
         if entry is None:
@@ -471,9 +471,9 @@ def update_marketplace(results: Iterable[ImportResult], dry_run: bool) -> bool:
             by_name[name] = expected
             changed = True
             continue
-        # Drop the legacy `skills` key: each skill directory ships its
-        # SKILL.md at the plugin root, so a single-skill plugin auto-loads
-        # without an explicit skills path.
+        # Drop the legacy `skills` key: the plugin's skill folder is generated
+        # under plugins/<name>/skills/ by generate_plugins.py, so the entry
+        # needs no explicit skills path.
         if "skills" in entry:
             del entry["skills"]
             changed = True

@@ -17,8 +17,10 @@ Enforces the rules documented in CONTRIBUTING.md:
     `## Description`, `## Owner`, and `## License` sections
 
 Also validates that `.claude-plugin/marketplace.json` is in sync with the
-skills on disk: every skill must have a marketplace entry, and every
-marketplace entry must point at an existing skill.
+skills on disk: every marketplace entry must point at an existing skill via a
+generated plugin under `plugins/<name>/`. Skills that are not listed are
+allowed -- they are simply unpublished (the "canonical catalog, curated
+publish" model), so a skill can live under `skills/` without shipping yet.
 
 Run from the repo root:
 
@@ -49,6 +51,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
+PLUGINS_DIR = REPO_ROOT / "plugins"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 
 # Limits from CONTRIBUTING.md and the standardized Agent Skills format.
@@ -218,9 +221,13 @@ def discover_skills(root: Path) -> list[Path]:
 def validate_claude_marketplace(skill_dirs: list[Path]) -> list[str]:
     """Return error strings if marketplace entries don't match skills/ on disk.
 
-    The marketplace's human-readable `description` is intentionally allowed
-    to differ from the SKILL.md description (per CONTRIBUTING.md), so this only
-    enforces that names and source paths line up.
+    Each entry is a *published* plugin: its `source` must be `./plugins/<name>`,
+    backed by a canonical skill at `skills/<name>/` and a generated plugin
+    manifest at `plugins/<name>/.claude-plugin/plugin.json` (produced by
+    `generate_plugins.py`). Skills without an entry are allowed -- they are
+    simply unpublished. The marketplace's human-readable `description` is
+    intentionally allowed to differ from the SKILL.md description (per
+    CONTRIBUTING.md), so this only enforces that names and paths line up.
     """
     if not CLAUDE_MARKETPLACE.exists():
         return [
@@ -255,6 +262,9 @@ def validate_claude_marketplace(skill_dirs: list[Path]) -> list[str]:
         if not isinstance(name, str) or not name:
             errors.append(f"plugins[{idx}] is missing a non-empty `name`.")
             continue
+        if name in listed_names:
+            errors.append(f"plugins[{idx}] (`{name}`): duplicate plugin name.")
+            continue
         listed_names.add(name)
 
         if name not in skill_names:
@@ -263,23 +273,26 @@ def validate_claude_marketplace(skill_dirs: list[Path]) -> list[str]:
             )
             continue
 
-        expected_source = f"./skills/{name}"
+        expected_source = f"./plugins/{name}"
         if source != expected_source:
             errors.append(
                 f"plugins[{idx}] (`{name}`): `source` must be `{expected_source}`, "
                 f"got `{source}`."
+            )
+        plugin_manifest = PLUGINS_DIR / name / ".claude-plugin" / "plugin.json"
+        if not plugin_manifest.exists():
+            errors.append(
+                f"plugins[{idx}] (`{name}`): missing generated plugin manifest "
+                f"{plugin_manifest.relative_to(REPO_ROOT).as_posix()}. Run "
+                "`uv run .github/scripts/generate_plugins.py`."
             )
         if not isinstance(description, str) or not description.strip():
             errors.append(
                 f"plugins[{idx}] (`{name}`) is missing a non-empty `description`."
             )
 
-    for missing in sorted(skill_names - listed_names):
-        errors.append(
-            f"skills/{missing} has no entry in "
-            f"{CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)}."
-        )
-
+    # Unlisted skills are intentionally allowed (unpublished), so there is no
+    # error for the `skill_names - listed_names` difference here.
     return errors
 
 

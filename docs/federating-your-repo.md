@@ -45,11 +45,11 @@ then open a PR for review.
 
    ```bash
    uv run .github/scripts/import_external_skills.py    # vendor into skills/<name>/
-   uv run .github/scripts/generate_cursor_marketplace.py
+   ./.github/scripts/publish.sh                        # regenerate plugins/ + Cursor manifest
    ./.github/scripts/check.sh                          # validate
    ```
 
-2. Commit `skills/**`, `.github/scripts/sources.yml`, and the manifests.
+2. Commit `skills/**`, `plugins/**`, `.github/scripts/sources.yml`, and the manifests.
 3. Open a PR; a maintainer reviews and merges once CI passes.
 
 ## Catch failures before nightly

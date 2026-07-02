@@ -5,9 +5,10 @@
 # ///
 """Generate the Cursor marketplace manifest from the canonical sources.
 
-Both ecosystems use the same per-skill marketplace model: each skill under
-`skills/` is published as its own installable plugin. To avoid drift, the
-Cursor catalog is generated rather than hand-maintained.
+Both ecosystems use the same marketplace model: each published skill ships as
+its own installable plugin under `plugins/<name>/` (materialized by
+`generate_plugins.py`), and the marketplace lists one entry per plugin. To
+avoid drift, the Cursor catalog is generated rather than hand-maintained.
 
 Sources of truth:
 - `plugin-metadata.json` (repo root): shared identity and discovery metadata

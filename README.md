@@ -145,15 +145,27 @@ The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integr
 This repo also acts as an **incubator**: a skill can start under `skills/` to iterate quickly, then graduate to its product repo and be re-pointed from `.github/scripts/sources.yml` once it has a clear owner, with no change for installed users.
 
 ```
-skills/                  # All skills the agent can load
+skills/                  # Canonical catalog: every skill the agent can load
+plugins/                 # Generated: one installable plugin per published skill
 docs/                    # Long-form documentation (e.g. skill-cards.md)
-.claude-plugin/          # Claude Code marketplace manifest
-.cursor-plugin/          # Cursor marketplace manifest 
+.claude-plugin/          # Claude Code marketplace manifest (lists the plugins)
+.cursor-plugin/          # Cursor marketplace manifest (generated mirror)
 plugin-metadata.json     # Vendor-neutral identity/discovery metadata
 .github/workflows/       # CI for validating skills
 .github/scripts/         # Internal repo scripts
 .github/scripts/sources.yml  # External skill sources for federation
 ```
+
+This repository is a [Claude Code plugin marketplace](https://code.claude.com/docs/en/plugin-marketplaces):
+`.claude-plugin/marketplace.json` at the root is the catalog, and each entry
+points at a self-contained plugin under `plugins/<name>/` (its own
+`.claude-plugin/plugin.json` plus a `skills/` folder). `skills/` stays the
+single source of truth — authors and the federation importer only touch it —
+and `plugins/` is generated from the published subset by
+[`generate_plugins.py`](.github/scripts/generate_plugins.py) (run via
+`./.github/scripts/publish.sh`). A skill with no marketplace entry simply stays
+unpublished. This is the "canonical catalog, curated publish" model: the
+catalog can grow freely while the published listing stays deliberate.
 
 In-repo skills are authored directly under `skills/`. Federated skills are
 declared in [`.github/scripts/sources.yml`](.github/scripts/sources.yml) and vendored into

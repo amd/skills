@@ -19,6 +19,7 @@ usage() {
 case "${1:-}" in
   "")
     uv run .github/scripts/validate_skills.py
+    uv run .github/scripts/generate_plugins.py --check
     uv run .github/scripts/generate_cursor_marketplace.py --check
     ;;
   -h|--help)

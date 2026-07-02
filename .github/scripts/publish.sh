@@ -8,6 +8,10 @@
 #   ./.github/scripts/publish.sh -h|--help  Print this help.
 #
 # Currently regenerates:
+#   - plugins/<name>/                   (per-plugin manifest + a copy of the
+#                                        published skill, from skills/ +
+#                                        .claude-plugin/marketplace.json +
+#                                        plugin-metadata.json)
 #   - .cursor-plugin/marketplace.json   (mirror of .claude-plugin/marketplace.json
 #                                        + plugin-metadata.json)
 #
@@ -29,10 +33,12 @@ usage() {
 
 case "${1:-}" in
   "")
+    uv run .github/scripts/generate_plugins.py
     uv run .github/scripts/generate_cursor_marketplace.py
     echo "Publish artifacts generated successfully."
     ;;
   --check)
+    uv run .github/scripts/generate_plugins.py --check
     uv run .github/scripts/generate_cursor_marketplace.py --check
     ;;
   -h|--help)

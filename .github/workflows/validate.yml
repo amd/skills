@@ -8,6 +8,8 @@ on:
       - ".github/scripts/**"
       - "**/*.md"
       - "skills/**"
+      - "plugins/**"
+      - "plugin-metadata.json"
       - ".claude-plugin/**"
       - ".cursor-plugin/**"
       - ".github/workflows/validate.yml"
@@ -69,6 +71,9 @@ jobs:
 
       - name: Validate marketplace manifest
         run: uv run .github/scripts/validate_skills.py --marketplace-only
+
+      - name: Validate generated plugin tree
+        run: uv run .github/scripts/generate_plugins.py --check
 
       - name: Validate generated Cursor manifest
         run: uv run .github/scripts/generate_cursor_marketplace.py --check
