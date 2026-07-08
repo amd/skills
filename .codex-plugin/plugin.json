@@ -35,6 +35,8 @@
       "Write"
     ],
     "websiteURL": "https://github.com/amd/skills",
-    "brandColor": "#ED1C24"
+    "brandColor": "#ED1C24",
+    "logo": "./assets/amd.png",
+    "composerIcon": "./assets/amd.png"
   }
 }

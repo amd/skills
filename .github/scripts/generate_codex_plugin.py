@@ -60,6 +60,10 @@ CAPABILITIES = ["Read", "Write"]
 # build docs use for a local marketplace entry. The bundle needs no auth of its
 # own, but `policy.authentication` is required, so use the documented default.
 POLICY = {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}
+# Brand image used for both the catalog logo and the composer icon. Path is
+# relative to the plugin root (the repo root, since source.path is "./"), per
+# the guide's path rules.
+LOGO = "./assets/amd.png"
 
 
 def load_json(path: Path) -> dict:
@@ -149,6 +153,8 @@ def build_codex_plugin(metadata: dict, bundle: dict) -> dict:
             "capabilities": list(CAPABILITIES),
             "websiteURL": metadata.get("homepage"),
             "brandColor": metadata.get("brandColor"),
+            "logo": LOGO,
+            "composerIcon": LOGO,
         },
     }
     # Drop keys that resolved to None so the manifest stays clean when an
