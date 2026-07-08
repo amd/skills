@@ -1,7 +1,9 @@
 {
   "name": "amd-skills",
+  "displayName": "AMD Skills",
   "description": "Agent Skills for AMD-optimized workflows.",
   "version": "0.1.0",
+  "brandColor": "#ED1C24",
   "author": {
     "name": "AMD"
   },

@@ -4,7 +4,7 @@ name: import-external-skills
 # catalog. It reads `.github/scripts/sources.yml`, shallow-clones each declared
 # source, vendors the named skills into `skills/<name>/`, adds them to the
 # bundle's `skills` array in `.claude-plugin/marketplace.json`, regenerates the
-# Cursor manifest, and opens a pull request with the result. Every imported
+# Cursor and Codex manifests, and opens a pull request with the result. Every imported
 # skill goes through the same `validate` checks as in-repo skills before it
 # lands on `main`.
 #
@@ -52,7 +52,7 @@ jobs:
             uv run .github/scripts/import_external_skills.py
           fi
 
-      - name: Regenerate Cursor marketplace manifest
+      - name: Regenerate derived plugin manifests (Cursor + Codex)
         if: ${{ inputs.dry_run != true }}
         run: ./.github/scripts/publish.sh
 
@@ -102,3 +102,5 @@ jobs:
             skills/**
             .claude-plugin/**
             .cursor-plugin/**
+            .codex-plugin/**
+            .agents/plugins/**

@@ -11,6 +11,8 @@ on:
       - "plugin-metadata.json"
       - ".claude-plugin/**"
       - ".cursor-plugin/**"
+      - ".codex-plugin/**"
+      - ".agents/plugins/**"
       - ".github/workflows/validate.yml"
       - ".github/lychee.toml"
   workflow_dispatch:
@@ -84,6 +86,9 @@ jobs:
 
       - name: Validate generated Cursor manifest
         run: uv run .github/scripts/generate_cursor_marketplace.py --check
+
+      - name: Validate generated Codex manifests
+        run: uv run .github/scripts/generate_codex_plugin.py --check
 
       # Deterministic, offline-only reference check: relative paths and
       # heading anchors. External URLs are intentionally not checked here
