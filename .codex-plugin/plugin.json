@@ -37,6 +37,11 @@
     "websiteURL": "https://github.com/amd/skills",
     "brandColor": "#ED1C24",
     "logo": "./assets/amd.png",
-    "composerIcon": "./assets/amd.png"
+    "composerIcon": "./assets/amd.png",
+    "defaultPrompt": [
+      "Use AMD Skills to deploy this LLM for inference on my AMD Instinct GPU",
+      "Learn how to generate images locally and generate the image of a cat",
+      "Convert my cloud LLM app into an app that uses local inference"
+    ]
   }
 }

@@ -64,6 +64,13 @@ POLICY = {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}
 # relative to the plugin root (the repo root, since source.path is "./"), per
 # the guide's path rules.
 LOGO = "./assets/amd.png"
+# Starter prompts Codex surfaces on the install surface, one per published
+# focus area (server inference, local image gen, local-AI app integration).
+DEFAULT_PROMPT = [
+    "Use AMD Skills to deploy this LLM for inference on my AMD Instinct GPU",
+    "Learn how to generate images locally and generate the image of a cat",
+    "Convert my cloud LLM app into an app that uses local inference",
+]
 
 
 def load_json(path: Path) -> dict:
@@ -155,6 +162,7 @@ def build_codex_plugin(metadata: dict, bundle: dict) -> dict:
             "brandColor": metadata.get("brandColor"),
             "logo": LOGO,
             "composerIcon": LOGO,
+            "defaultPrompt": list(DEFAULT_PROMPT),
         },
     }
     # Drop keys that resolved to None so the manifest stays clean when an

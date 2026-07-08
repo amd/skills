@@ -265,4 +265,4 @@ It also checks the plugin manifests:
 
 - `.claude-plugin/marketplace.json` lists exactly one plugin (the `amd-skills` bundle) with `source` set to `./`, `strict: false`, and a non-empty human-readable `description`
 - `.cursor-plugin/marketplace.json` is up to date — it mirrors `.claude-plugin/marketplace.json` and pulls shared identity (name, description, version, author) from `plugin-metadata.json` (regenerate with `./.github/scripts/publish.sh`)
-- `.codex-plugin/plugin.json` and `.agents/plugins/marketplace.json` are up to date — the Codex plugin manifest and repo marketplace catalog, generated from the same canonical sources (curated `skills` list from `.claude-plugin/marketplace.json`, identity from `plugin-metadata.json`); regenerate with `./.github/scripts/publish.sh`
+- `.codex-plugin/plugin.json` and `.agents/plugins/marketplace.json` are up to date. The Codex plugin manifest and repo marketplace catalog, generated from the same canonical sources (curated `skills` list from `.claude-plugin/marketplace.json`, identity from `plugin-metadata.json`); You can regenerate with `./.github/scripts/publish.sh`.
