@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "lemonade": {
+      "type": "http",
+      "url": "http://localhost:13305/mcp"
+    }
+  }
+}

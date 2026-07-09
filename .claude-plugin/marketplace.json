@@ -33,6 +33,11 @@
       "name": "tracelens-analysis-orchestrator",
       "source": "./skills/tracelens-analysis-orchestrator",
       "description": "Orchestrates modular PyTorch profiler trace analysis with TraceLens: generates perf reports, prepares category data, runs system-level and compute-kernel subagents in parallel, validates outputs, and writes a prioritized stakeholder report (analysis.md)."
+    },
+    {
+      "name": "local-ai-privacy",
+      "source": "./skills/local-ai-privacy",
+      "description": "Redact sensitive data (PII, credentials, secrets) through a local model before forwarding prompts to cloud AI providers — keeps private data off the wire."
     }
   ]
 }
