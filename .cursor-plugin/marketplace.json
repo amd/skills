@@ -12,15 +12,30 @@
       "name": "amd-skills",
       "source": "./",
       "version": "0.1.0",
-      "strict": false,
       "skills": [
         "./skills/local-ai-use",
         "./skills/local-ai-app-integration",
-        "./skills/magpie-kernel-evaluator",
         "./skills/serving-llms-on-instinct",
         "./skills/tracelens-analysis-orchestrator"
       ],
-      "description": "AMD's verified Agent Skills in one plugin: route image/audio through local AI on Ryzen AI, serve LLMs on AMD Instinct GPUs with vLLM, and analyze GPU kernel and PyTorch trace performance."
+      "description": "AMD's verified Agent Skills in one plugin: route image/audio through local AI on Ryzen AI, serve LLMs on AMD Instinct GPUs with vLLM, and analyze GPU kernel and PyTorch trace performance.",
+      "author": {
+        "name": "AMD"
+      },
+      "homepage": "https://github.com/amd/skills",
+      "repository": "https://github.com/amd/skills",
+      "license": "MIT",
+      "keywords": [
+        "amd",
+        "rocm",
+        "hip",
+        "ryzen-ai",
+        "vllm",
+        "lemonade",
+        "local-ai"
+      ],
+      "logo": "assets/amd.png",
+      "category": "Developer Tools"
     }
   ]
 }
