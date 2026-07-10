@@ -1,122 +1,133 @@
 # Local AI Privacy: Reference
 
-Detailed reference for the `local-ai-privacy` skill. Read this only when
-the default path in `SKILL.md` doesn't cover a decision.
-
 ## Contents
 
-- [Prerequisites](#prerequisites)
-- [Redaction system prompt](#redaction-system-prompt)
+- [How it works](#how-it-works)
+- [Proxy log and verification](#proxy-log-and-verification)
+- [Troubleshooting](#troubleshooting)
+- [Proxy options](#proxy-options)
 - [Model picker](#model-picker)
 - [Entity type catalog](#entity-type-catalog)
+- [Redaction system prompt](#redaction-system-prompt)
 - [API key handling](#api-key-handling)
-- [Placeholder format and re-substitution](#placeholder-format-and-re-substitution)
-- [Verifying the MCP tool](#verifying-the-mcp-tool)
-- [What the redaction model does NOT catch](#what-the-redaction-model-does-not-catch)
+- [Placeholder format](#placeholder-format)
+- [Limitations](#limitations)
 
 ---
 
-## Prerequisites
+## How it works
 
-These three things must be true before the skill can run. Each is a one-time
-user action; the skill checks for them and tells the user what to do if any is
-missing.
+`start.py` runs once. It:
+1. Reads `ANTHROPIC_BASE_URL` from `~/.claude/settings.json` → that is the real cloud endpoint
+2. Writes `~/.claude/skills/local-ai-privacy/proxy.conf` with the cloud URL and Lemonade config
+3. Starts `proxy.py` as a background process using `pythonw.exe` (Windows) so it survives terminal close
+4. Writes the PID to `proxy.pid` so `stop.py` can kill it later
+5. Patches `settings.json`: `ANTHROPIC_BASE_URL` → `http://localhost:8080`
 
-**1. Lemonade Server running**
+After a Claude Code restart, all requests flow:
 
-```bash
-lemonade serve
+```
+Claude Code → proxy (localhost:8080) → Lemonade redaction → cloud endpoint
+                                      (local, on-device)    (clean text only)
 ```
 
-Or launch from the Lemonade desktop app. The server binds to `http://localhost:13305`.
-
-**2. Lemonade MCP registered in Claude Code (once per installation)**
-
-```bash
-claude mcp add lemonade --transport http http://localhost:13305/mcp
-```
-
-This registers the Lemonade MCP server globally in Claude Code. Do it once;
-it persists across sessions and projects. Restart Claude Code after running it.
-
-To verify it is registered:
-```bash
-claude mcp list
-```
-
-**3. Redaction model downloaded**
-
-```bash
-lemonade pull Qwen3-1.7B-GGUF
-```
-
-One-time download (~1.1 GB). After this, redaction runs fully offline.
+`stop.py` kills the proxy process and restores the original `ANTHROPIC_BASE_URL`.
 
 ---
 
-## Redaction system prompt
+## Proxy log and verification
 
-The exact prompt is stored in `data/redaction-prompt.txt` inside the skill
-folder. The agent reads this file and passes it verbatim as the `system`
-message to `lemonade_chat`. Do not modify the JSON format line — the agent
-parses the response as JSON and relies on the `masked` and `mapping` keys.
+The proxy writes to `~/.claude/skills/local-ai-privacy/proxy.log`.
 
+```bash
+# Watch live
+Get-Content "$env:USERPROFILE\.claude\skills\local-ai-privacy\proxy.log" -Wait   # PowerShell
+tail -f ~/.claude/skills/local-ai-privacy/proxy.log                               # bash
 ```
-You are a data redactor. Your only job is to find and replace sensitive
-content in the user's message.
 
-Replace every instance of the following with a placeholder of the form
-[TYPE_N] where TYPE is the entity type (all caps) and N is a zero-based
-index unique per type:
+Per-request log lines:
+```
+[proxy] 10:23:01 Redacted entities: ['API_KEY', 'EMAIL']
+[proxy] 10:23:01 Forwarding redacted request to cloud
+```
+```
+[proxy] 10:23:15 No sensitive entities found
+```
 
-- Personal identifiers: full names, usernames, employee IDs (NAME)
-- Email addresses (EMAIL)
-- Phone numbers (PHONE)
-- Physical addresses, zip codes (ADDRESS)
-- Social security numbers, national IDs (SSN)
-- Dates of birth (DOB)
-- Credit/debit card numbers (CARD)
-- Bank account or routing numbers (BANK)
-- Passwords, passphrases (PASSWORD)
-- API keys, tokens, secret keys, bearer tokens (API_KEY)
-- Private SSH/TLS keys or certificate fingerprints (PRIVATE_KEY)
-- Internal hostnames, internal IP ranges, VPN IPs (INTERNAL_HOST)
-- Database connection strings with credentials (DB_CONN)
-- Medical record numbers, patient IDs (MEDICAL_ID)
-- Any value that looks like a secret (SECRET)
+To confirm the proxy is running:
+```bash
+curl -s http://localhost:8080/__proxy_health
+# → {"status":"ok"}
+```
 
-Rules:
-1. Do not redact publicly known company names, public domain names, or
-   generic technical terms.
-2. If the same value appears multiple times, always use the same placeholder.
-3. If nothing is sensitive, return the original text unchanged.
-4. Output ONLY a JSON object — no prose, no markdown fences.
+To check `settings.json` was patched:
+```bash
+python -c "import json; d=json.load(open('$env:USERPROFILE/.claude/settings.json')); print(d['env']['ANTHROPIC_BASE_URL'])"
+# → http://localhost:8080
+```
 
-JSON format:
-{"masked": "...", "entities": ["TYPE", ...], "mapping": {"TYPE_N": "value", ...}}
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Cannot reach Lemonade Server` at start | Server not running | `lemonade serve` |
+| `ModuleNotFoundError: requests` | Missing dependency | `pip install requests` |
+| Claude Code gets connection refused | Proxy died or not started | Re-run `start.py`, check `proxy.log` |
+| Claude Code gets 502 | Cloud endpoint unreachable | Check network; verify original URL in `proxy.conf` |
+| Response shows `[SSN_0]` literally | Streaming re-substitution missed | Check `proxy.log`; model may have returned non-JSON |
+| Redaction returns original text | Lemonade gave non-JSON | Use `--redaction-model Qwen3-4B-GGUF` in `proxy.conf` |
+| `Address already in use` | Another process on 8080 | Edit `proxy_port` in `proxy.conf`, update `settings.json` manually |
+| Proxy slow on first request after restart | Model cold-load by Lemonade | Normal — subsequent requests are fast once model is loaded |
+
+If the proxy dies unexpectedly:
+```bash
+# Check the log for the error
+cat ~/.claude/skills/local-ai-privacy/proxy.log | tail -20
+
+# Restart manually
+python ~/.claude/skills/local-ai-privacy/scripts/start.py
+```
+
+---
+
+## Proxy options
+
+`proxy.conf` controls all proxy behaviour. Edit it to change defaults without
+re-running `start.py`:
+
+```json
+{
+  "cloud_url":       "https://llm-api.amd.com/Anthropic",
+  "lemonade_url":    "http://localhost:13305",
+  "redaction_model": "Qwen3-1.7B-GGUF",
+  "proxy_port":      8080
+}
+```
+
+After editing, kill and restart the proxy:
+```bash
+python ~/.claude/skills/local-ai-privacy/scripts/stop.py
+python ~/.claude/skills/local-ai-privacy/scripts/start.py
 ```
 
 ---
 
 ## Model picker
 
-| Model | Approx size | When to use |
+| Model | Approx size | Notes |
 |---|---|---|
-| `Qwen3-1.7B-GGUF` | ~1.1 GB | **Default.** Fast CPU redaction; <2 s per prompt on Ryzen AI. |
-| `Qwen3-4B-GGUF` | ~2.5 GB | When the user reports missed redactions on domain-specific secrets or multilingual content. |
+| `Qwen3-1.7B-GGUF` | ~1.1 GB | **Default.** <2 s redaction on Ryzen AI. Good for standard PII and credentials. |
+| `Qwen3-4B-GGUF` | ~2.5 GB | Better coverage of domain-specific secrets, unusual formats, multilingual content. |
 
-To use a different model, pass it as the `model` argument in the
-`lemonade:lemonade_chat` call in Step 2 of SKILL.md. Pull it first:
-
-```bash
-lemonade pull Qwen3-4B-GGUF
-```
+Pull before switching: `lemonade pull Qwen3-4B-GGUF`
 
 ---
 
 ## Entity type catalog
 
-| Placeholder prefix | What it covers |
+| Placeholder | What is redacted |
 |---|---|
 | `NAME` | Full names, usernames, employee IDs |
 | `EMAIL` | Email addresses |
@@ -127,81 +138,54 @@ lemonade pull Qwen3-4B-GGUF
 | `CARD` | Credit/debit card numbers |
 | `BANK` | Bank account or routing numbers |
 | `PASSWORD` | Passwords, passphrases |
-| `API_KEY` | API keys, bearer tokens, OAuth secrets, auth tokens |
-| `PRIVATE_KEY` | SSH private keys, TLS private keys, certificate fingerprints |
+| `API_KEY` | API keys, bearer tokens, OAuth secrets |
+| `PRIVATE_KEY` | SSH/TLS private keys, certificate fingerprints |
 | `INTERNAL_HOST` | Internal hostnames, private IP ranges, VPN endpoints |
-| `DB_CONN` | Database connection strings containing credentials |
+| `DB_CONN` | Database connection strings with credentials |
 | `MEDICAL_ID` | Medical record numbers, patient IDs |
-| `SECRET` | Anything else that looks like a secret value |
+| `SECRET` | Anything else that looks like a secret |
+
+---
+
+## Redaction system prompt
+
+Stored in `data/redaction-prompt.txt` inside the skill folder. The proxy
+reads this file on every request. Edit it to add or remove entity types —
+no code change needed, no restart required.
 
 ---
 
 ## API key handling
 
-If `LEMONADE_API_KEY` is set in the environment, the `lemonade:lemonade_chat`
-MCP tool sends the key automatically — no extra action needed. The MCP
-registration (`claude mcp add`) can also include it:
+The proxy forwards all request headers from Claude Code to the cloud
+unchanged — `x-api-key`, `Ocp-Apim-Subscription-Key`, `anthropic-version`,
+custom headers. No auth changes are needed.
 
-```bash
-claude mcp add lemonade --transport http http://localhost:13305/mcp \
-  --header "Authorization: Bearer $LEMONADE_API_KEY"
-```
+If `LEMONADE_API_KEY` is set in your environment, the proxy adds it when
+calling Lemonade.
 
 ---
 
-## Placeholder format and re-substitution
+## Placeholder format
 
-Placeholders follow `[TYPE_N]`:
+Format: `[TYPE_N]` where TYPE is the entity category in caps and N is a
+zero-based counter unique per type per request. The same original value
+always maps to the same placeholder within one request.
 
-- `TYPE` — entity category in caps (e.g. `EMAIL`, `API_KEY`)
-- `N` — zero-based counter per type per request
-- Same original value → same placeholder every time within one request
-
-The `mapping` from the `lemonade_chat` response maps each placeholder back
-to its original value. The agent keeps this in memory for the current session
-and re-substitutes when showing the cloud's response to the user.
-
-Example:
-```
-Original:  "Why is user john@corp.com hitting the limit on key sk-abc123?"
-Masked:    "Why is user [EMAIL_0] hitting the limit on key [API_KEY_0]?"
-Mapping:   {"EMAIL_0": "john@corp.com", "API_KEY_0": "sk-abc123"}
-
-Cloud:     "[EMAIL_0] is sending 120 req/s, over the limit for [API_KEY_0]."
-Shown:     "john@corp.com is sending 120 req/s, over the limit for sk-abc123."
-```
-
-The mapping is in-memory, scoped to the current session, and never written
-to disk.
+On SSE streaming responses, the proxy re-substitutes inside each
+`text_delta` event. On non-streaming responses it re-substitutes in
+all `content` blocks before returning to Claude Code.
 
 ---
 
-## Verifying the MCP tool
+## Limitations
 
-To confirm `lemonade_chat` is reachable before invoking the skill:
+- Secrets encoded in base64, ROT13, or custom obfuscation are not detected
+- Implicit references ("the key I mentioned earlier") with no literal value present
+- Non-text content blocks (images, binary data)
+- Very long messages exceeding the model's context window (~32K tokens for 1.7B)
+- The proxy only handles the Anthropic Messages API — tool results and
+  system prompts are not currently redacted (user messages only)
 
-```bash
-# Ping the MCP server
-curl -s http://localhost:13305/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'
-
-# List available tools (lemonade_chat should appear)
-curl -s http://localhost:13305/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-  | python -m json.tool
-```
-
----
-
-## What the redaction model does NOT catch
-
-- **Obfuscated secrets:** base64, ROT13, or custom encoding will not be flagged.
-- **Implicit references:** "use the key I mentioned earlier" with no value present.
-- **Binary or non-text payloads** embedded in JSON.
-- **Very long prompts** exceeding the model's context window (~32K tokens for
-  `Qwen3-1.7B-GGUF`). Split the prompt or use `Qwen3-4B-GGUF` for better coverage.
-
-For strict compliance requirements (HIPAA, PCI-DSS), combine this skill with a
-purpose-built PII scanner on top of the redaction output.
+For strict compliance (HIPAA, PCI-DSS), layer a deterministic PII scanner
+on top.

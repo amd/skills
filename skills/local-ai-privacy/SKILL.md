@@ -1,128 +1,119 @@
 ---
 name: local-ai-privacy
 description: >-
-  Redacts sensitive data from prompts before they reach cloud AI providers
-  using a local Lemonade model. Use when the user wants to keep private data
-  private while still using cloud LLMs; mentions PII, credentials, API keys,
-  patient data, customer records, proprietary code, HIPAA, GDPR, or
-  confidentiality; asks to "sanitize before sending to cloud", "mask sensitive
-  data", "keep my data local", or "protect my privacy with Claude Code"; or
-  works with codebases containing secrets and wants cloud assistance without
-  data leakage. Do not use for image generation, TTS, or STT — use local-ai-use
-  instead.
-allowed-tools: Bash(curl:*), Bash(lemonade:*)
+  Keeps sensitive data private when using Claude Code with a cloud LLM.
+  Use when the user wants to protect PII, credentials, API keys, patient data,
+  customer records, or proprietary code from reaching the cloud; mentions
+  HIPAA, GDPR, or data confidentiality; asks to "sanitize before sending to
+  cloud", "mask sensitive data", "keep my data local", or "protect my privacy
+  with Claude Code". Starts a local redacting proxy that intercepts every
+  Claude Code request, redacts sensitive content via a local Lemonade model,
+  and forwards only the clean version to the cloud — transparently, with no
+  change to how the user types prompts.
+  Do not use for image generation, TTS, or STT — use local-ai-use instead.
+allowed-tools: Bash(curl:*), Bash(lemonade:*), Bash(python:*)
 ---
 
-# Local AI Privacy (redact before cloud)
+# Local AI Privacy (redacting proxy)
 
-Intercept the user's content, redact sensitive data locally using a small
-Lemonade model, then forward only the sanitized version to the cloud. Nothing
-sensitive crosses the network boundary.
+Intercepts every Claude Code request at the network level, redacts sensitive
+content locally via a small Lemonade model, and forwards only the sanitized
+version to the cloud. Completely transparent — the user types normally, the
+cloud only ever sees masked values.
 
-## Prerequisites check (do this first, every time)
+```
+You type:  "My SSN is 123-45-6789"
+               │
+               ▼
+     proxy (localhost:8080)          ← intercepts before cloud
+               │
+               ├─ Lemonade local ────  redacts "123-45-6789" → [SSN_0]
+               │   Qwen3-1.7B-GGUF       (stays on your machine)
+               │
+               ▼
+     Cloud model sees only:          ← "My SSN is [SSN_0]"
+     AMD gateway / Anthropic
+               │
+               ▼
+     Response streams back through proxy
+     [SSN_0] → 123-45-6789 re-substituted before Claude Code renders it
+```
 
-Before redacting anything, verify the two prerequisites. If either fails, stop
-and guide the user — never skip redaction and send unmasked content.
+## Step 1: check prerequisites
 
-**1. Lemonade Server running:**
+**Lemonade Server running:**
 ```bash
 curl -s http://localhost:13305/api/v1/health
 ```
-Expected: HTTP 200. If not reachable, tell the user:
-> "Start Lemonade Server first: run `lemonade serve` in a terminal."
-
-**2. Lemonade MCP registered in Claude Code:**
-The `lemonade:lemonade_chat` tool must be available. If it is not registered,
-tell the user to run this once:
+If not running, start it:
 ```bash
-claude mcp add lemonade --transport http http://localhost:13305/mcp
+lemonade serve
 ```
-Then restart Claude Code. After that, the tool persists for all future sessions.
 
-**3. Redaction model present:**
+**Redaction model present:**
 ```bash
 curl -s "http://localhost:13305/api/v1/models?show_all=true" | python -m json.tool | grep Qwen3-1.7B-GGUF
 ```
-If the model is missing, pull it:
+If missing (one-time download, ~1.1 GB):
 ```bash
 lemonade pull Qwen3-1.7B-GGUF
 ```
-See [reference.md](reference.md#model-picker) for larger alternatives.
 
----
+## Step 2: run the setup script (once)
 
-## Step 1: read the redaction system prompt
-
-Read the system prompt from the skill's data file. Use the path where this
-skill is installed (e.g. `~/.claude/skills/local-ai-privacy/data/redaction-prompt.txt`
-or `.claude/skills/local-ai-privacy/data/redaction-prompt.txt`). The exact
-path depends on where the user installed the skill — find it with:
+Find the skill's scripts directory and run `start.py`:
 
 ```bash
-find ~/.claude .claude -name "redaction-prompt.txt" 2>/dev/null | head -1
+python "$(find ~/.claude .claude -name start.py -path '*/local-ai-privacy/*' 2>/dev/null | head -1)"
 ```
 
-Read that file. Its contents are the system prompt you will pass to the
-local model in Step 2.
+This does three things automatically:
+1. Saves your current cloud endpoint so the proxy knows where to forward
+2. Starts the proxy as a background process (survives terminal close)
+3. Patches `~/.claude/settings.json` so Claude Code routes through the proxy
 
-## Step 2: call lemonade:lemonade_chat to redact
+Expected output:
+```
+[local-ai-privacy] Lemonade Server reachable at http://localhost:13305
+[local-ai-privacy] Redaction model Qwen3-1.7B-GGUF available
+[local-ai-privacy] Saved proxy config to ~/.claude/skills/local-ai-privacy/proxy.conf
+[local-ai-privacy] Proxy started (PID 12345), log: ...proxy.log
+[local-ai-privacy] Proxy ready at http://localhost:8080
+[local-ai-privacy] Patched settings.json: ANTHROPIC_BASE_URL → http://localhost:8080
 
-Call the `lemonade:lemonade_chat` MCP tool:
-
-```json
-{
-  "model": "Qwen3-1.7B-GGUF",
-  "messages": [
-    {"role": "system", "content": "<contents of redaction-prompt.txt>"},
-    {"role": "user",   "content": "<the content to protect>"}
-  ],
-  "temperature": 0,
-  "max_tokens": 4096
-}
+[local-ai-privacy] Setup complete. Now:
+[local-ai-privacy]   1. Restart Claude Code
+[local-ai-privacy]   2. Every prompt you type will be redacted locally before reaching the cloud
+[local-ai-privacy]   3. To stop: python stop.py
 ```
 
-The tool response is text. Parse it as JSON. Extract:
-- `masked` — the sanitized version of the content (use this for the cloud)
-- `mapping` — the `{"TYPE_N": "original value"}` map (keep in memory)
+## Step 3: restart Claude Code
 
-If the tool call fails or is unavailable:
-- Run `lemonade status` and surface the output to the user
-- **Do not fall back to sending unmasked content to the cloud**
-- Stop and wait for the user to resolve the server issue
+Close this session and open a new one. From this point on, **every prompt
+is automatically redacted** — no skill invocation needed, no changes to how
+you type. The proxy runs in the background and intercepts all requests.
 
-## Step 3: use the masked content for cloud reasoning
+To verify it is working, check the proxy log:
+```bash
+cat ~/.claude/skills/local-ai-privacy/proxy.log
+```
+You will see lines like:
+```
+[proxy] Redacted entities: ['SSN', 'EMAIL']
+[proxy] Forwarding redacted request to cloud
+```
 
-Send `masked` to the cloud model, not the original. The cloud reasons over
-the redacted version and returns a response that may reference placeholders
-(e.g. `[API_KEY_0]`).
+## To stop (restore direct cloud connection)
 
-Before showing any cloud response to the user, substitute placeholders back
-using the `mapping`. The user always sees real values; the cloud never does.
+```bash
+python "$(find ~/.claude .claude -name stop.py -path '*/local-ai-privacy/*' 2>/dev/null | head -1)"
+```
 
-## Routing rules
-
-| Situation | Action |
-|---|---|
-| Content clearly contains or might contain sensitive data | Always redact (Steps 1–3) before any cloud call |
-| Content is demonstrably safe (public docs, generic code with no secrets) | May skip redaction at your discretion. When in doubt, redact. |
-| Cloud response contains `[TYPE_N]` placeholders | Re-substitute from `mapping` before showing the user |
-| `lemonade:lemonade_chat` unavailable | Stop. Run `lemonade status`. Report to user. Never send unmasked. |
-
-## What must always be redacted
-
-Never send these to the cloud unmasked:
-- Passwords, API keys, bearer tokens, OAuth secrets
-- SSNs, passport numbers, national IDs
-- Credit card or bank account numbers
-- Private keys (SSH, TLS, GPG)
-- Internal hostnames, VPN endpoints, private IP ranges
-- Full names combined with contact details
-- Medical record identifiers
-- Database connection strings with credentials
+Then restart Claude Code. Your original `ANTHROPIC_BASE_URL` is restored.
 
 ---
 
 ## Reference
 
-For the entity type catalog, model picker, placeholder format details, and
-troubleshooting, see [reference.md](reference.md).
+For proxy options, troubleshooting, entity types, and model picker see
+[reference.md](reference.md).
