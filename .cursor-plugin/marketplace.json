@@ -16,7 +16,6 @@
       "skills": [
         "./skills/local-ai-use",
         "./skills/local-ai-app-integration",
-        "./skills/magpie-kernel-evaluator",
         "./skills/serving-llms-on-instinct",
         "./skills/tracelens-analysis-orchestrator"
       ],
