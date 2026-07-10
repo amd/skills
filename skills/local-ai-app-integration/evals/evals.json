@@ -1,0 +1,78 @@
+{
+  "skill": "local-ai-app-integration",
+  "default_runners": [["halo", "Linux"]],
+  "tests": [
+    {
+      "id": "launcher-module-written",
+      "prompt": "Write a lemond launcher module for this Python app. Do not download or install anything \u2014 just write the file.",
+      "runners": [["halo", "Linux"], ["halo", "Windows"]],
+      "setup": {
+        "files": {
+          "main.py": "from openai import OpenAI\nclient = OpenAI()\n"
+        }
+      },
+      "expect": {
+        "workspace_contains": ["lemond_launcher.py"],
+        "logs_contains": ["secrets", "socket", "subprocess"]
+      }
+    },
+    {
+      "id": "http-client-timeout-is-120s",
+      "prompt": "Update main.py to re-point the OpenAI client at a local lemond instance. Do not download or install anything \u2014 just edit the file.",
+      "setup": {
+        "files": {
+          "main.py": "from openai import OpenAI\nclient = OpenAI()\n"
+        }
+      },
+      "expect": {
+        "workspace_contains": ["main.py"],
+        "logs_contains": ["120"]
+      }
+    },
+    {
+      "id": "health-check-uses-http-not-stdout",
+      "prompt": "Write a health-check helper for lemond in this Python app. Do not download or install anything \u2014 just write the code.",
+      "setup": {
+        "files": {
+          "main.py": "from openai import OpenAI\nclient = OpenAI()\n"
+        }
+      },
+      "expect": {
+        "logs_contains": ["/api/v1/health"],
+        "should_not": [
+          "Read or parse lemond's stdout or stderr to detect readiness"
+        ]
+      }
+    },
+    {
+      "id": "no-preload-call-in-written-code",
+      "prompt": "Write a lemond launcher for this Python app that waits for the server to be ready. Do not download or install anything.",
+      "setup": {
+        "files": {
+          "main.py": "from openai import OpenAI\nclient = OpenAI()\n"
+        }
+      },
+      "expect": {
+        "logs_contains": ["/api/v1/health"],
+        "should_not": [
+          "Call POST /api/v1/load to pre-load the model at startup"
+        ]
+      }
+    },
+    {
+      "id": "api-key-gate-bypassed-in-local-mode",
+      "prompt": "Edit main.py so it works in local mode without an OPENAI_API_KEY. Do not download or install anything \u2014 just edit the file.",
+      "setup": {
+        "files": {
+          "main.py": "import os\nfrom openai import OpenAI\n\napi_key = os.environ.get('OPENAI_API_KEY', '')\nif not api_key:\n    raise SystemExit('No API key set. Please enter your OpenAI key.')\n\nclient = OpenAI(api_key=api_key)\n"
+        }
+      },
+      "expect": {
+        "workspace_contains": ["main.py"],
+        "should": [
+          "Remove or bypass the API-key guard so the app starts in local mode without requiring OPENAI_API_KEY to be set"
+        ]
+      }
+    }
+  ]
+}

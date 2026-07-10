@@ -46,7 +46,7 @@ jobs:
     name: Select behavioral tests
     runs-on: ubuntu-latest
     outputs:
-      skills: ${{ steps.select.outputs.skills }}
+      entries: ${{ steps.select.outputs.entries }}
       any: ${{ steps.select.outputs.any }}
     steps:
       - name: Check out repository
@@ -58,47 +58,47 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Select skills
+      - name: Select matrix entries
         id: select
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             if [ -n "${{ github.event.inputs.skills }}" ]; then
-              skills=$(uv run .github/scripts/select_behavioral.py --names "${{ github.event.inputs.skills }}")
+              entries=$(uv run .github/scripts/select_behavioral.py --names "${{ github.event.inputs.skills }}")
             else
-              skills=$(uv run .github/scripts/select_behavioral.py --all)
+              entries=$(uv run .github/scripts/select_behavioral.py --all)
             fi
           else
             base="${{ github.event.pull_request.base.sha }}"
             head="${{ github.event.pull_request.head.sha }}"
-            skills=$(git diff --name-only "$base" "$head" \
+            entries=$(git diff --name-only "$base" "$head" \
               | uv run .github/scripts/select_behavioral.py --changed)
           fi
-          echo "Selected skills: $skills"
-          echo "skills=$skills" >> "$GITHUB_OUTPUT"
-          if [ "$skills" = "[]" ]; then
+          echo "Selected entries: $entries"
+          echo "entries=$entries" >> "$GITHUB_OUTPUT"
+          if [ "$entries" = "[]" ]; then
             echo "any=false" >> "$GITHUB_OUTPUT"
           else
             echo "any=true" >> "$GITHUB_OUTPUT"
           fi
 
   behavioral:
-    name: Behavioral (${{ matrix.skill }} on ${{ matrix.os }})
+    name: Behavioral (${{ matrix.entry.skill }} on ${{ matrix.entry.target }})
     needs: discover
     # Run whenever the change affects something testable.
     if: needs.discover.outputs.any == 'true'
-    # Self-hosted Strix Halo runners. The OS label (Linux / Windows) comes from
-    # the matrix below so each skill is exercised on both platforms.
-    runs-on: [self-hosted, strix_halo, "${{ matrix.os }}"]
+    # Runner labels come from the matrix entry, which the discover step derives
+    # from each test's optional `runners` field in evals.json (e.g. Strix-Halo
+    # + Windows). `self-hosted` is always included by evals_common.
+    runs-on: ${{ matrix.entry.labels }}
     # Behavioral runs install local models and can take a while; cap it so a
     # hung agent or stalled model pull fails the job instead of burning minutes.
     timeout-minutes: 45
     strategy:
-      # One skill / OS failing should not hide the others' results.
+      # One skill / target failing should not hide the others' results.
       fail-fast: false
       matrix:
-        skill: ${{ fromJson(needs.discover.outputs.skills) }}
-        os: [Linux, Windows]
+        entry: ${{ fromJson(needs.discover.outputs.entries) }}
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
       ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
@@ -106,7 +106,7 @@ jobs:
         Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
         user: a1_ucicd
       # Lets the harness default to this skill if a test relies on the env.
-      BEHAVIORAL_SKILL: ${{ matrix.skill }}
+      BEHAVIORAL_SKILL: ${{ matrix.entry.skill }}
       # Cost cap: sonnet only. The harness also enforces this under CI.
       BEHAVIORAL_MODEL: sonnet
     steps:
@@ -129,26 +129,21 @@ jobs:
       - name: Install behavioral test dependencies
         run: pip install -r eval/behavioral/requirements.txt
 
-      - name: Run behavioral test for ${{ matrix.skill }} (Linux)
-        if: matrix.os == 'Linux'
-        working-directory: eval/behavioral
+      - name: Run evals for ${{ matrix.entry.skill }} (Linux)
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          test_file="tests/test_$(echo '${{ matrix.skill }}' | tr '-' '_').py"
-          echo "Running $test_file"
-          pytest "$test_file"
+          python eval/behavioral/run_evals.py "${{ matrix.entry.skill }}" \
+            --runner-target "${{ matrix.entry.target }}"
 
-      - name: Run behavioral test for ${{ matrix.skill }} (Windows)
-        if: matrix.os == 'Windows'
-        working-directory: eval/behavioral
+      - name: Run evals for ${{ matrix.entry.skill }} (Windows)
+        if: runner.os == 'Windows'
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $skill = "${{ matrix.skill }}"
-          $test_file = "tests/test_$($skill -replace '-','_').py"
-          Write-Host "Running $test_file"
-          pytest $test_file
+          python eval/behavioral/run_evals.py "${{ matrix.entry.skill }}" `
+            --runner-target "${{ matrix.entry.target }}"
 
   # Single aggregate gate. Mark THIS check required in branch protection.
   #
@@ -163,13 +158,13 @@ jobs:
       DISCOVER_RESULT: ${{ needs.discover.result }}
       BEHAVIORAL_RESULT: ${{ needs.behavioral.result }}
       AFFECTED: ${{ needs.discover.outputs.any }}
-      SKILLS: ${{ needs.discover.outputs.skills }}
+      ENTRIES: ${{ needs.discover.outputs.entries }}
     steps:
       - name: Verify behavioral results
         run: |
           echo "discover:    $DISCOVER_RESULT"
           echo "behavioral:  $BEHAVIORAL_RESULT"
-          echo "affected:    $AFFECTED ($SKILLS)"
+          echo "affected:    $AFFECTED ($ENTRIES)"
 
           # If discovery itself failed, surface that rather than guessing.
           if [ "$DISCOVER_RESULT" != "success" ]; then

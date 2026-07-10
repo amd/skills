@@ -1,0 +1,23 @@
+{
+  "skill": "local-ai-use",
+  "tests": [
+    {
+      "id": "generate-image-of-a-cat",
+      "prompt": "Learn how to generate images locally, then generate an image of a cat and save it to out.png.",
+      "runners": [["halo", "Linux"], ["halo", "Windows"]],
+      "expect": {
+        "logs_contains": ["local-ai-use"],
+        "workspace_contains": ["AGENTS.md", "out.png"],
+        "should": [
+          "Install Lemonade Server if it is not already installed",
+          "Download the SD-Turbo model if the model is not already downloaded",
+          "Add a 'Local AI Use' block to AGENTS.md"
+        ],
+        "should_not": [
+          "Pull unrelated modalities for this image generation task",
+          "Reach for a cloud image path instead of local Lemonade"
+        ]
+      }
+    }
+  ]
+}

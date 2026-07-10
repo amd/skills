@@ -206,27 +206,57 @@ Structural validation proves a skill is *well-formed*; behavioral tests prove it
 *works*. A behavioral test runs a real agent against the skill once and grades
 what the agent did — see the harness in [`eval/behavioral/`](eval/behavioral/).
 
+Tests are declared as **data**, one file per skill, at
+`skills/<skill>/evals/evals.json`. The harness excludes this `evals/` folder
+when it stages the skill into the agent's sandbox, so the eval definitions never
+pollute the workspace the agent sees. The full schema is documented in
+[`eval/behavioral/evals_common.py`](eval/behavioral/evals_common.py); the shape
+is:
+
+```json
+{
+  "skill": "local-ai-use",
+  "default_runners": [["halo", "Linux"]],
+  "tests": [
+    {
+      "id": "generate-image-of-a-cat",
+      "prompt": "Learn how to generate images locally, then save a cat to out.png.",
+      "runners": [["halo", "Linux"], ["halo", "Windows"]],
+      "setup": { "files": { "main.py": "from openai import OpenAI\n" } },
+      "expect": {
+        "logs_contains":      ["local-ai-use"],
+        "workspace_contains": ["out.png"],
+        "should":             ["Download the SD-Turbo model"],
+        "should_not":         ["Reach for a cloud image path"]
+      }
+    }
+  ]
+}
+```
+
 Conventions:
 
-- **One file per skill, centralized.** Put the test at
-  `eval/behavioral/tests/test_<skill>.py`, swapping the skill name's hyphens for
-  underscores (`local-ai-use` → `test_local_ai_use.py`). Tests live here, not
-  inside `skills/<name>/`, because the harness copies the skill folder into the
-  agent's sandbox at runtime — test files in there would pollute the workspace.
-- **Write checks against behavior.** Combine deterministic assertions
-  (`logs_contains`, `workspace_contains`) with LLM-judged expectations
-  (`should`, `should_not`). See `test_local_ai_use.py` for the pattern.
+- **Use our check vocabulary.** Combine deterministic checks (`logs_contains`,
+  `workspace_contains`) with LLM-judged expectations (`should`, `should_not`).
+- **`setup.files`** seeds files into the workspace before the run (for tests that
+  hand the agent an existing file to edit).
+- **`runners`** is optional and requests the runner labels a test needs — e.g.
+  `"Windows"` or `"halo"` (aliases `strix_halo`); `self-hosted` is always
+  implied. A test fans out into one CI job per listed target. Omit it to inherit
+  the file's `default_runners`, or the repo default (Strix-Halo Linux + Windows).
 
 Run one locally (needs the `claude` CLI authenticated and any per-skill
 prerequisites, e.g. a reachable Lemonade Server for `local-ai-use`):
 
 ```bash
 pip install -r eval/behavioral/requirements.txt
-cd eval/behavioral && pytest tests/test_local_ai_use.py
+python eval/behavioral/run_evals.py local-ai-use
+# or a single case: python eval/behavioral/run_evals.py local-ai-use --test generate-image-of-a-cat
 ```
 
-In CI, the `behavioral` workflow runs these tests, but **only** when a
-maintainer adds the `run_behavioral` label to a PR for safety.
+In CI, the `behavioral` workflow builds a `(skill, runner-target)` matrix from
+the changed skills' eval files and runs each job on the requested self-hosted
+labels.
 
 ## Pre-publish checklist
 

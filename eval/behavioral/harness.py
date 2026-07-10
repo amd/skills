@@ -124,7 +124,10 @@ def _stage_workspace(skill: str) -> Path:
     workspace = Path(tempfile.mkdtemp(prefix=f"behavioral-{skill}-"))
     dest = workspace / ".claude" / "skills" / skill
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(skill_src, dest)
+    # Exclude the skill's own `evals/` folder from the sandbox: it holds the
+    # eval definitions (prompts, expectations, seeded files), not skill content,
+    # and staging it would pollute the workspace the agent sees and grade over.
+    shutil.copytree(skill_src, dest, ignore=shutil.ignore_patterns("evals"))
     return workspace
 
 
@@ -297,27 +300,50 @@ class Run:
         # tool names, command strings, etc.
         self.logs = "\n".join(json.dumps(ev, ensure_ascii=False) for ev in events)
 
+    def evaluate(self, kind: str, arg: str) -> tuple[bool, str]:
+        """Run one check and return ``(passed, detail)`` WITHOUT asserting.
+
+        This is the shared core used both by the inline-asserting methods below
+        (for hand-written pytest tests) and by the JSON executor
+        (``run_evals.py``), which collects every result instead of stopping at
+        the first failure. ``kind`` is one of ``logs_contains``,
+        ``workspace_contains``, ``should``, ``should_not``.
+        """
+        if kind == "logs_contains":
+            ok = arg.lower() in self.logs.lower()
+            return ok, f"transcript contains '{arg}'"
+        if kind == "workspace_contains":
+            ok = (self.workspace / arg).is_file()
+            detail = f"workspace contains '{arg}'"
+            if not ok:
+                detail += f" (files: {self.files or 'none'})"
+            return ok, detail
+        if kind == "should":
+            observed, reason = _grade_with_llm(arg, self, self.judge_model)
+            return observed, f"{arg} -- {reason}"
+        if kind == "should_not":
+            observed, reason = _grade_with_llm(arg, self, self.judge_model)
+            return (not observed), f"{arg} -- {reason}"
+        raise ValueError(f"unknown check kind: {kind!r}")
+
     def logs_contains(self, text: str) -> "Run":
-        ok = text.lower() in self.logs.lower()
-        self._report(ok, "logs_contains", f"transcript contains '{text}'")
+        ok, detail = self.evaluate("logs_contains", text)
+        self._report(ok, "logs_contains", detail)
         return self
 
     def workspace_contains(self, path: str) -> "Run":
-        ok = (self.workspace / path).is_file()
-        detail = f"workspace contains '{path}'"
-        if not ok:
-            detail += f" (files: {self.files or 'none'})"
+        ok, detail = self.evaluate("workspace_contains", path)
         self._report(ok, "workspace_contains", detail)
         return self
 
     def should(self, statement: str) -> "Run":
-        observed, reason = _grade_with_llm(statement, self, self.judge_model)
-        self._report(observed, "should", f"{statement} -- {reason}")
+        ok, detail = self.evaluate("should", statement)
+        self._report(ok, "should", detail)
         return self
 
     def should_not(self, statement: str) -> "Run":
-        observed, reason = _grade_with_llm(statement, self, self.judge_model)
-        self._report(not observed, "should_not", f"{statement} -- {reason}")
+        ok, detail = self.evaluate("should_not", statement)
+        self._report(ok, "should_not", detail)
         return self
 
     def _report(self, passed: bool, kind: str, detail: str) -> None:
@@ -355,6 +381,19 @@ class Agent:
         if self.workspace is not None:
             shutil.rmtree(self.workspace, ignore_errors=True)
             self.workspace = None
+
+    def stage_files(self, files: dict[str, str]) -> None:
+        """Seed ``{relative_path: contents}`` into the workspace before a run.
+
+        Used for tests that hand the agent an existing file to edit (e.g. an
+        app's ``main.py``). Parent directories are created as needed.
+        """
+        if self.workspace is None:
+            raise RuntimeError("Agent.stage_files() must be called inside a 'with' block")
+        for rel, contents in files.items():
+            dest = self.workspace / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(contents, encoding="utf-8")
 
     def prompt(self, text: str) -> Run:
         """Run ``text`` through the agent once and return a Run to assert on."""
