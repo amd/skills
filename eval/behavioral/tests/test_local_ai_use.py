@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+
 """Behavioral tests for the `local-ai-use` skill.
 
 Run locally (needs the `claude` CLI authenticated and a reachable Lemonade

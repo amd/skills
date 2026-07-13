@@ -3,6 +3,10 @@
 # requires-python = ">=3.10"
 # dependencies = []
 # ///
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+
 """One-shot setup for the `local-ai-use` skill.
 
 Performs the setup steps from SKILL.md:

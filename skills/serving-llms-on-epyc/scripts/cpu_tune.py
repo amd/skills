@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
 """
 Derive vLLM-on-CPU runtime knobs from the host, for a single instance pinned to
 ONE socket (with its memory). Read-only.

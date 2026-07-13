@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+
 """Compare the same prompt with and without a given skill.
 
 This is a thin wrapper around ``claude_eval.py``: it runs the prompt twice

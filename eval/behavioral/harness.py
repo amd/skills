@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+
 """Behavioral-test harness for repo skills (local, pytest-based, non-CI).
 
 A behavioral test runs a skill-driven prompt through the agent **once**, then

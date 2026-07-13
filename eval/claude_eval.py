@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+
 """Simple eval runner: invokes Claude Code with a prompt and reports time + token usage.
 
 Usage:
