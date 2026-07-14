@@ -24,7 +24,7 @@ Expect this process to take 5–30 minutes depending on trace size.
 | Graph only | No | No |
 
 For vLLM / SGLang inference traces, the canonical collection guide in
-[TraceLens Inference Analysis](https://github.com/AMD-AGI/TraceLens/blob/main/docs/Inference_analysis.md)
+[TraceLens Inference Analysis](https://github.com/AMD-AGI/TraceLens/blob/main/docs_original/Inference_analysis.md)
 provides detailed instructions about collecting traces.
 Including capture mode graphs will produce better results but may require patching vLLM or SGLang.
 
