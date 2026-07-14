@@ -6,114 +6,121 @@ description: >-
   customer records, or proprietary code from reaching the cloud; mentions
   HIPAA, GDPR, or data confidentiality; asks to "sanitize before sending to
   cloud", "mask sensitive data", "keep my data local", or "protect my privacy
-  with Claude Code". Starts a local redacting proxy that intercepts every
+  with Claude Code". Sets up a local redacting proxy that intercepts every
   Claude Code request, redacts sensitive content via a local Lemonade model,
-  and forwards only the clean version to the cloud — transparently, with no
+  and forwards only the masked version to the cloud — transparently, with no
   change to how the user types prompts.
   Do not use for image generation, TTS, or STT — use local-ai-use instead.
-allowed-tools: Bash(curl:*), Bash(lemonade:*), Bash(python:*)
+allowed-tools: Bash(curl:*), Bash(lemonade:*), Bash(python:*), Bash(python3:*)
 ---
 
 # Local AI Privacy (redacting proxy)
 
-Intercepts every Claude Code request at the network level, redacts sensitive
-content locally via a small Lemonade model, and forwards only the sanitized
-version to the cloud. Completely transparent — the user types normally, the
-cloud only ever sees masked values.
+Redacts sensitive content locally before it ever reaches the cloud. A local
+proxy sits between Claude Code and Anthropic: it swaps real values for
+placeholders (`123-45-6789` → `[SSN_1]`), forwards only the masked request, and
+swaps the real values back into the reply — all on your machine.
 
 ```
-You type:  "My SSN is 123-45-6789"
-               │
-               ▼
-     proxy (localhost:8080)          ← intercepts before cloud
-               │
-               ├─ Lemonade local ────  redacts "123-45-6789" → [SSN_0]
-               │   Qwen3-1.7B-GGUF       (stays on your machine)
-               │
-               ▼
-     Cloud model sees only:          ← "My SSN is [SSN_0]"
-     AMD gateway / Anthropic
-               │
-               ▼
-     Response streams back through proxy
-     [SSN_0] → 123-45-6789 re-substituted before Claude Code renders it
+1. You type raw PII in the Claude Code terminal            ── your machine
+      "My SSN is 123-45-6789, email a@b.com…"
+                    │
+2. Claude Code sends the request to ANTHROPIC_BASE_URL,
+   which now points at the local proxy (localhost:8317)    ── your machine
+                    ▼
+3. The proxy asks the local model to find PII and
+   swaps in placeholders                                   ── your machine
+      "My SSN is [SSN_1], email [EMAIL_1]…"
+                    │
+4. Proxy sends ONLY the masked request to the cloud ───────► api.anthropic.com
+                    ▼
+5. The cloud model replies using the placeholders          ── Anthropic servers
+                    │
+6. Proxy swaps [SSN_1] → 123-45-6789 back in, locally       ── your machine
+                    ▼
+7. Claude Code shows you the reply with real values
 ```
 
-## Step 1: check prerequisites
+Protection happens at **step 3, automatically, on every request** — there is
+nothing to invoke per prompt. This skill's job is the one-time setup and
+teardown of that proxy.
+
+---
+
+## Setup (run once)
+
+### 1. Check prerequisites
 
 **Lemonade Server running:**
 ```bash
 curl -s http://localhost:13305/api/v1/health
 ```
-If not running, start it:
-```bash
-lemonade serve
-```
+If not running: `lemonade serve`
 
 **Redaction model present:**
 ```bash
-curl -s "http://localhost:13305/api/v1/models?show_all=true" | python -m json.tool | grep Qwen3-1.7B-GGUF
+curl -s "http://localhost:13305/api/v1/models?show_all=true" | python3 -m json.tool | grep Qwen3.6-35B-A3B-NoThinking
 ```
-If missing (one-time download, ~1.1 GB):
-```bash
-lemonade pull Qwen3-1.7B-GGUF
-```
+If missing (one-time, ~18 GB — a 35B MoE): `lemonade pull Qwen3.6-35B-A3B-NoThinking`
 
-## Step 2: run the setup script (once)
-
-Find the skill's scripts directory and run `start.py`:
+### 2. Start the proxy
 
 ```bash
-python "$(find ~/.claude .claude -name start.py -path '*/local-ai-privacy/*' 2>/dev/null | head -1)"
+python3 "$(find ~/.claude .claude -name start.py -path '*/local-ai-privacy/*' 2>/dev/null | head -1)"
 ```
 
-This does three things automatically:
-1. Saves your current cloud endpoint so the proxy knows where to forward
-2. Starts the proxy as a background process (survives terminal close)
-3. Patches `~/.claude/settings.json` so Claude Code routes through the proxy
+`start.py` saves your current cloud endpoint, starts the proxy in the
+background, and — **only if the proxy comes up healthy** — patches
+`ANTHROPIC_BASE_URL` in `settings.json` to route through it. If the proxy fails
+to start it aborts and leaves `settings.json` untouched, so setup can never
+break your connection. It auto-picks a free port if 8317 is taken.
 
-Expected output:
-```
-[local-ai-privacy] Lemonade Server reachable at http://localhost:13305
-[local-ai-privacy] Redaction model Qwen3-1.7B-GGUF available
-[local-ai-privacy] Saved proxy config to ~/.claude/skills/local-ai-privacy/proxy.conf
-[local-ai-privacy] Proxy started (PID 12345), log: ...proxy.log
-[local-ai-privacy] Proxy ready at http://localhost:8080
-[local-ai-privacy] Patched settings.json: ANTHROPIC_BASE_URL → http://localhost:8080
+### 3. Restart Claude Code
 
-[local-ai-privacy] Setup complete. Now:
-[local-ai-privacy]   1. Restart Claude Code
-[local-ai-privacy]   2. Every prompt you type will be redacted locally before reaching the cloud
-[local-ai-privacy]   3. To stop: python stop.py
-```
+Close and reopen so Claude Code reads the new base URL. From now on **every**
+request is redacted automatically.
 
-## Step 3: restart Claude Code
+---
 
-Close this session and open a new one. From this point on, **every prompt
-is automatically redacted** — no skill invocation needed, no changes to how
-you type. The proxy runs in the background and intercepts all requests.
+## Everyday use
 
-To verify it is working, check the proxy log:
-```bash
-cat ~/.claude/skills/local-ai-privacy/proxy.log
-```
-You will see lines like:
-```
-[proxy] Redacted entities: ['SSN', 'EMAIL']
-[proxy] Forwarding redacted request to cloud
-```
+Nothing. Just type normally — the proxy redacts every request transparently, as
+shown in the diagram above. You do not need to invoke this skill again.
 
-## To stop (restore direct cloud connection)
+---
+
+## Verify it's working (optional)
+
+Because redaction happens *before* the cloud model, the model itself can't show
+you the mask — it never sees your raw data. To check the masking with your own
+eyes, run this **in a terminal** (it hits only the local model, never the
+cloud):
 
 ```bash
-python "$(find ~/.claude .claude -name stop.py -path '*/local-ai-privacy/*' 2>/dev/null | head -1)"
+curl -s localhost:8317/redact -H 'Content-Type: application/json' \
+  -d '{"text":"My SSN is 123-45-6789, email a@b.com"}' | python3 -m json.tool
 ```
 
+You'll see each value mapped to a placeholder (`123-45-6789 → [SSN_1]`). You can
+also watch live traffic:
+```bash
+tail -f ~/.claude/skills/local-ai-privacy/proxy.log
+# → Forwarding redacted request (N known entities)
+```
+
+---
+
+## Stop (restore direct cloud connection)
+
+```bash
+python3 "$(find ~/.claude .claude -name stop.py -path '*/local-ai-privacy/*' 2>/dev/null | head -1)"
+```
 Then restart Claude Code. Your original `ANTHROPIC_BASE_URL` is restored.
 
 ---
 
 ## Reference
 
-For proxy options, troubleshooting, entity types, and model picker see
+For endpoints (`/health`, `/redact`, `/v1/messages`), the placeholder map,
+proxy options, troubleshooting, and the model picker, see
 [reference.md](reference.md).

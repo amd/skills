@@ -40,12 +40,12 @@ PROXY_PY    = SKILL_DIR / "scripts" / "proxy.py"
 CONF_FILE   = Path.home() / ".claude" / "skills" / "local-ai-privacy" / "proxy.conf"
 SETTINGS_FILE = Path.home() / ".claude" / "settings.json"
 
-PROXY_PORT  = 8080
-PROXY_HOST  = "127.0.0.1"
-PROXY_URL   = f"http://{PROXY_HOST}:{PROXY_PORT}"
+PROXY_HOST         = "127.0.0.1"
+DEFAULT_PROXY_PORT = 8317
 
 LEMONADE_URL    = "http://localhost:13305"
-REDACTION_MODEL = "Qwen3-1.7B-GGUF"
+# Override without editing this file:  LOCALAI_REDACTION_MODEL=... python3 start.py
+REDACTION_MODEL = os.environ.get("LOCALAI_REDACTION_MODEL", "Qwen3.6-35B-A3B-NoThinking")
 
 
 def _print(msg: str) -> None:
@@ -118,13 +118,13 @@ def get_current_base_url(settings: dict) -> str:
 # proxy.conf
 # ---------------------------------------------------------------------------
 
-def write_conf(cloud_url: str) -> None:
+def write_conf(cloud_url: str, port: int) -> None:
     CONF_FILE.parent.mkdir(parents=True, exist_ok=True)
     conf = {
         "cloud_url":       cloud_url,
         "lemonade_url":    LEMONADE_URL,
         "redaction_model": REDACTION_MODEL,
-        "proxy_port":      PROXY_PORT,
+        "proxy_port":      port,
     }
     CONF_FILE.write_text(json.dumps(conf, indent=2), encoding="utf-8")
     _print(f"Saved proxy config to {CONF_FILE}")
@@ -134,20 +134,71 @@ def write_conf(cloud_url: str) -> None:
 # Start proxy as a background process
 # ---------------------------------------------------------------------------
 
-def proxy_is_running() -> bool:
+def _port_in_use(port: int) -> bool:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1)
+        return s.connect_ex((PROXY_HOST, port)) == 0
+
+
+def _our_proxy_on(port: int) -> bool:
+    """True only if OUR proxy (not some other service) answers on this port."""
     try:
         with urllib.request.urlopen(
-            f"{PROXY_URL}/__proxy_health", timeout=2
+            f"http://{PROXY_HOST}:{port}/health", timeout=2
         ) as r:
-            return r.status == 200
+            return r.status == 200 and b'"ok"' in r.read()
     except Exception:
         return False
 
 
-def start_proxy() -> None:
-    if proxy_is_running():
-        _print("Proxy already running — skipping launch")
-        return
+def _pick_port(preferred: int) -> int:
+    """Reuse the preferred port if it's free or already ours; otherwise find a
+    free one. Never return a port owned by an unrelated service — that is what
+    previously repointed Claude Code at the wrong server."""
+    if _our_proxy_on(preferred) or not _port_in_use(preferred):
+        return preferred
+    import socket
+    _print(f"Port {preferred} is in use by another service — choosing a free port")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((PROXY_HOST, 0))
+        return s.getsockname()[1]
+
+
+def proxy_is_running(port: int) -> bool:
+    return _our_proxy_on(port)
+
+
+def stop_existing() -> None:
+    """Stop a proxy we previously started, so start.py always runs the CURRENT
+    code. Reusing a long-lived process silently kept old code (and old config)
+    in memory across edits — a nasty trap during development."""
+    pid_file = CONF_FILE.parent / "proxy.pid"
+    pid = None
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text().strip())
+        except ValueError:
+            pid = None
+    if pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            _print(f"Stopped previous proxy (PID {pid}) to load current code")
+        except ProcessLookupError:
+            pass
+        except Exception as exc:
+            _print(f"Could not stop previous proxy (PID {pid}): {exc}")
+    pid_file.unlink(missing_ok=True)
+    # Wait for the default port to actually free up.
+    for _ in range(30):
+        if not _port_in_use(DEFAULT_PROXY_PORT):
+            break
+        time.sleep(0.1)
+
+
+def start_proxy(port: int) -> bool:
+    """Launch the proxy and return True only once it answers its health check."""
+    proxy_url = f"http://{PROXY_HOST}:{port}"
 
     # pythonw.exe on Windows runs without a console window and survives terminal close.
     # On Linux/macOS use python with nohup.
@@ -188,27 +239,31 @@ def start_proxy() -> None:
     # Wait up to 10 s for the proxy to become reachable
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        if proxy_is_running():
-            _print(f"Proxy ready at {PROXY_URL}")
-            return
+        if proc.poll() is not None:
+            break  # process already exited (e.g. port bind failure)
+        if proxy_is_running(port):
+            _print(f"Proxy ready at {proxy_url}")
+            return True
         time.sleep(0.5)
 
-    _print("WARNING: Proxy did not respond within 10 s — check the log:")
+    _print("FAIL: Proxy did not come up — NOT changing settings.json. See log:")
     _print(f"  {log_file}")
+    pid_file.unlink(missing_ok=True)
+    return False
 
 
 # ---------------------------------------------------------------------------
 # Patch settings.json
 # ---------------------------------------------------------------------------
 
-def patch_settings(settings: dict) -> None:
+def patch_settings(settings: dict, proxy_url: str) -> None:
     env = settings.setdefault("env", {})
-    if env.get("ANTHROPIC_BASE_URL") == PROXY_URL:
+    if env.get("ANTHROPIC_BASE_URL") == proxy_url:
         _print("settings.json already points at the proxy — no change")
         return
-    env["ANTHROPIC_BASE_URL"] = PROXY_URL
+    env["ANTHROPIC_BASE_URL"] = proxy_url
     write_settings(settings)
-    _print(f"Patched settings.json: ANTHROPIC_BASE_URL → {PROXY_URL}")
+    _print(f"Patched settings.json: ANTHROPIC_BASE_URL → {proxy_url}")
 
 
 # ---------------------------------------------------------------------------
@@ -222,20 +277,35 @@ def main() -> None:
     check_lemonade()
     check_redaction_model()
 
-    settings  = read_settings()
-    cloud_url = get_current_base_url(settings)
+    settings     = read_settings()
+    current_base = get_current_base_url(settings)
 
-    if cloud_url == PROXY_URL:
-        # Already patched from a previous run — just make sure proxy is alive
-        _print("settings.json already points at proxy.")
-        conf = json.loads(CONF_FILE.read_text()) if CONF_FILE.exists() else {}
-        cloud_url = conf.get("cloud_url", "https://api.anthropic.com")
+    prev_conf = json.loads(CONF_FILE.read_text()) if CONF_FILE.exists() else {}
+    prev_port = prev_conf.get("proxy_port")
+    prev_proxy_url = f"http://{PROXY_HOST}:{prev_port}" if prev_port else None
+
+    if prev_proxy_url and current_base == prev_proxy_url:
+        # Already patched by a previous run — recover the real upstream from conf
+        # so we never save the proxy's own URL as the cloud endpoint.
+        _print("settings.json already points at the proxy.")
+        cloud_url = prev_conf.get("cloud_url", "https://api.anthropic.com")
     else:
+        cloud_url = current_base
         _print(f"Cloud endpoint: {cloud_url}")
 
-    write_conf(cloud_url)
-    start_proxy()
-    patch_settings(settings)
+    # Always relaunch our own proxy so code/config edits take effect. Without
+    # this, a re-run would reuse a long-running process still executing old code.
+    stop_existing()
+
+    port      = _pick_port(DEFAULT_PROXY_PORT)
+    proxy_url = f"http://{PROXY_HOST}:{port}"
+
+    write_conf(cloud_url, port)
+    if not start_proxy(port):
+        _print("Aborting setup — Claude Code was left pointing at the cloud, unchanged.")
+        _print("Fix the problem above (see proxy.log), then re-run start.py.")
+        sys.exit(1)
+    patch_settings(settings, proxy_url)
 
     print()
     _print("Setup complete. Now:")

@@ -22,7 +22,6 @@ CONF_DIR      = Path.home() / ".claude" / "skills" / "local-ai-privacy"
 CONF_FILE     = CONF_DIR / "proxy.conf"
 PID_FILE      = CONF_DIR / "proxy.pid"
 SETTINGS_FILE = Path.home() / ".claude" / "settings.json"
-PROXY_URL     = "http://127.0.0.1:8080"
 
 
 def _print(msg: str) -> None:
@@ -55,15 +54,17 @@ def restore_settings() -> None:
     settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
     env = settings.get("env", {})
 
-    if env.get("ANTHROPIC_BASE_URL") != PROXY_URL:
+    # The proxy may have been started on a non-default port, so derive its URL
+    # from the saved config rather than assuming 8080.
+    conf = json.loads(CONF_FILE.read_text(encoding="utf-8")) if CONF_FILE.exists() else {}
+    proxy_url = f"http://127.0.0.1:{conf.get('proxy_port', 8317)}"
+    original_url = conf.get("cloud_url")
+
+    current = env.get("ANTHROPIC_BASE_URL", "")
+    is_local_proxy = current == proxy_url or current.startswith("http://127.0.0.1:") or current.startswith("http://localhost:")
+    if not is_local_proxy:
         _print("settings.json does not point at the proxy — nothing to restore.")
         return
-
-    # Get original cloud URL from conf file
-    original_url = None
-    if CONF_FILE.exists():
-        conf = json.loads(CONF_FILE.read_text(encoding="utf-8"))
-        original_url = conf.get("cloud_url")
 
     if original_url:
         env["ANTHROPIC_BASE_URL"] = original_url
