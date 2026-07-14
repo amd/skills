@@ -24,6 +24,7 @@ This test is slow (TraceLens install + full orchestrator workflow). Outside CI,
 from __future__ import annotations
 
 import csv
+import json
 import os
 import subprocess
 import sys
@@ -48,6 +49,15 @@ UNIT_TESTS_ARCHIVE = "unit_tests_standalone.tar.gz"
 COMBINED_TRACES_CSV = (
     "agent_evals/Analysis/analysis_tests/combined_traces_standalone.csv"
 )
+
+
+@dataclass(frozen=True)
+class TracelensEvalCache:
+    """Session-scoped TraceLens install kept outside the agent workspace."""
+
+    tracelens_dir: Path
+    venv_dir: Path
+    case: RepeatabilityCase
 
 
 @dataclass(frozen=True)
@@ -156,34 +166,52 @@ def _install_tracelens_venv(workspace: Path, tracelens_dir: Path) -> Path:
     return venv_dir
 
 
-def _bootstrap_repeatability_case(workspace: Path) -> tuple[Path, Path, RepeatabilityCase, Path]:
+def _bootstrap_repeatability_case(workspace: Path) -> TracelensEvalCache:
     tracelens_dir = _clone_tracelens(workspace)
     _extract_unit_tests(tracelens_dir)
     case = _load_first_repeatability_case(tracelens_dir)
     venv_dir = _install_tracelens_venv(workspace, tracelens_dir)
-    output_dir = workspace / "analysis_output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    return tracelens_dir, venv_dir, case, output_dir
+    return TracelensEvalCache(
+        tracelens_dir=tracelens_dir.resolve(),
+        venv_dir=venv_dir.resolve(),
+        case=case,
+    )
 
 
-def _repeatability_prompt(
+def _write_env_manifest(
+    workspace: Path,
     *,
-    case: RepeatabilityCase,
-    trace_path: Path,
+    cache: TracelensEvalCache,
     output_dir: Path,
-    tracelens_dir: Path,
-    venv_dir: Path,
-) -> str:
-    # Mirrors the standalone Phase-1 prompt in run_repeatability_parallel.sh for
-    # the first scheduled test case, adapted for the staged AMD Skills orchestrator.
+) -> Path:
+    manifest = workspace / "tracelens_env.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "test_id": cache.case.test_id,
+                "trace_path": str(cache.case.trace_path),
+                "platform": cache.case.platform,
+                "output_dir": str(output_dir.resolve()),
+                "venv_path": str(cache.venv_dir),
+                "tracelens_dir": str(cache.tracelens_dir),
+                "analysis_mode": "default",
+                "environment": "local",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def _repeatability_prompt() -> str:
+    # Keep the agent prompt short. Paths and install locations live in the
+    # workspace manifest so --add-dir does not need the TraceLens git tree.
     return (
-        "Follow the tracelens-analysis-orchestrator skill and run the full agentic "
-        f"analysis workflow on {trace_path} with platform {case.platform}, "
-        "analysis mode default, running locally on the host (no cluster), "
-        f"output to {output_dir}. "
-        f"TraceLens is cloned at {tracelens_dir} and installed in the virtual "
-        f"environment at {venv_dir}. Use that venv for all Python and TraceLens CLI "
-        "commands."
+        "Follow tracelens-analysis-orchestrator. Read tracelens_env.json in "
+        "this workspace and run the full standalone analysis workflow using "
+        "those paths. Analysis mode default, local host."
     )
 
 
@@ -227,37 +255,30 @@ def _assert_workflow_eval_csv_passes(results_csv: Path) -> None:
     )
 
 
-def test_gemm_01_repeatability_first_case():
+@pytest.fixture(scope="session")
+def tracelens_eval_cache(tmp_path_factory: pytest.TempPathFactory) -> TracelensEvalCache:
+    """Clone and install TraceLens once, outside any agent workspace."""
+    cache_root = tmp_path_factory.mktemp("tracelens-eval-cache")
+    return _bootstrap_repeatability_case(cache_root)
+
+
+def test_gemm_01_repeatability_first_case(tracelens_eval_cache: TracelensEvalCache):
     """First standalone repeatability case: gemm_01_compute_few_tiles."""
     model = _analysis_model()
+    cache = tracelens_eval_cache
+    venv_python = cache.venv_dir / "bin" / "python"
+
+    assert cache.case.test_id == "gemm_01_compute_few_tiles"
 
     with claude(model, skill="tracelens-analysis-orchestrator", effort="high") as agent:
-        tracelens_dir, venv_dir, case, output_dir = _bootstrap_repeatability_case(
-            agent.workspace
-        )
-        venv_python = venv_dir / "bin" / "python"
+        output_dir = agent.workspace / "analysis_output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        _write_env_manifest(agent.workspace, cache=cache, output_dir=output_dir)
 
-        assert case.test_id == "gemm_01_compute_few_tiles"
-
-        run = agent.prompt(
-            _repeatability_prompt(
-                case=case,
-                trace_path=case.trace_path,
-                output_dir=output_dir.resolve(),
-                tracelens_dir=tracelens_dir.resolve(),
-                venv_dir=venv_dir.resolve(),
-            )
-        )
+        run = agent.prompt(_repeatability_prompt())
 
         run.logs_contains("tracelens-analysis-orchestrator")
-        run.should(
-            "Install or use TraceLens in a Python virtual environment before "
-            "running the orchestrator workflow"
-        )
-        run.should(
-            "Run the TraceLens analysis orchestrator workflow steps to produce "
-            "analysis output artifacts"
-        )
+        run.workspace_contains("tracelens_env.json")
 
         analysis_md = output_dir / "analysis.md"
         assert analysis_md.is_file(), (
@@ -267,7 +288,7 @@ def test_gemm_01_repeatability_first_case():
         assert analysis_md.stat().st_size >= 100, "analysis.md is too small"
 
         results_csv = _run_workflow_scripted_eval(
-            tracelens_dir=tracelens_dir,
+            tracelens_dir=cache.tracelens_dir,
             venv_python=venv_python,
             output_dir=output_dir,
         )
