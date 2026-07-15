@@ -1,146 +1,98 @@
 ---
 name: hrr-replay-findings
 description: >-
-  Run HIP Runtime Replay (HRR) against a capture archive and analyze the result.
-  Classifies replay divergence or GPU faults (OOB/read-only write, illegal access,
-  NaN/Inf D2H divergence, hang, OOM), extracts fault address, failing event/call
-  index, and implicated kernel/allocation. Summarizes what an HRR capture holds.
-  Use when given an HRR archive (capture.hrr/pid-*), when asked to replay a
-  recording, or when triaging replay PASS vs MAF across workloads (vLLM, PyTorch,
-  hipBLASLt StreamK).
+  Run HIP Runtime Replay (HRR) against a customer capture archive and analyze
+  the result. Classifies replay faults (OOB/read-only write, illegal access,
+  NaN/Inf divergence, hang, OOM) and extracts fault address, failing event index,
+  and implicated kernel. Requires only the archive and a shipped hrr-playback
+  binary — no source checkout or GPU configuration knowledge. Use when given an
+  HRR archive (capture.hrr/pid-*), a replay request, or Memory access fault output.
 ---
 
 # HRR Replay Findings
 
-**Run replay** on an HRR archive, then produce a **structured finding** from the output.
-Analysis is read-only (no patches); replay needs a GPU and a built `hrr-playback`.
+Run replay on an HRR **archive**, then emit a **structured finding**. The user
+supplies the recording; the agent handles playback discovery, GPU selection, and
+analysis.
 
-## When to use
+## What the user provides
 
-- User provides an HRR archive (`capture.hrr/pid-*`) and wants replay + triage
-- Compare replay across GPUs or playback builds
-- First step before deeper crash root-cause work
+| Input | Required? |
+|-------|-----------|
+| HRR archive (`capture.hrr/pid-*` with `events.bin`) | **Yes** |
+| `hrr-playback` binary (on `PATH` or path via `HRR_PLAYBACK`) | **Yes** for replay |
+| Source code, ROCm build tree, GPU index | **No** |
 
-## Quick workflow
+Optional: container image (`IMAGE`) if not using the default ROCm/vLLM image.
+
+## Quick workflow (agent)
 
 ```
-1. Resolve archive (largest events.bin under capture.hrr/pid-*)
-2. Run replay → save log (run_hrr_replay.sh)
-3. Parse log → structured finding (analyze_replay_finding.py)
-4. Interpret + recommend next steps
+1. Find archive — largest events.bin under capture.hrr/pid-*
+2. Find hrr-playback — PATH, HRR_PLAYBACK, or ask user once if missing
+3. run_hrr_replay.sh --archive ... --analyze  (GPU auto-selected)
+4. Present finding + plain-language interpretation
 ```
 
-## Step 0 — Prerequisites
-
-| Requirement | How to verify |
-|-------------|---------------|
-| `hrr-playback` built | `HRR_PLAYBACK` points to executable, or on `PATH` |
-| GPU free (~full VRAM for large captures) | `rocm-smi --showmeminfo vram` |
-| Docker replay (recommended) | `HIP_SO` + `HSA_SO` from CLR/rocr build; `IMAGE` env |
-
-**This workspace** (if `scripts/maf-hrr-docker-playback.sh` exists): set `HRR_REPO_ROOT` to the repo root and the skill runner delegates to that script.
-
-## Step 1 — Archive metadata (no GPU)
+## Run replay + analyze
 
 ```bash
-SKILL=skills/hrr-replay-findings   # or .cursor/skills/hrr-replay-findings in a project
+SKILL=skills/hrr-replay-findings
 
-export HRR_PLAYBACK=/path/to/hrr-playback
+# Only set HRR_PLAYBACK if hrr-playback is not already on PATH
 ./$SKILL/scripts/run_hrr_replay.sh \
   --archive /path/to/capture.hrr/pid-NNN \
-  --info
-```
-
-## Step 2 — Run replay + save log
-
-```bash
-export HRR_REPO_ROOT=/path/to/hrr-repo          # optional: use repo docker helper
-export HRR_PLAYBACK=/path/to/hrr-playback
-export HIP_SO=/path/to/libamdhip64.so.7.*
-export HSA_SO=/path/to/libhsa-runtime64.so.1
-export GPU=1
-
-./$SKILL/scripts/run_hrr_replay.sh \
-  --archive /path/to/capture.hrr/pid-NNN \
-  --log /path/to/replay.log \
   --analyze
 ```
 
-`--analyze` runs the parser and writes `replay.finding.md` next to the log.
+Writes `hrr-replay-pid-NNN-<timestamp>.log` and `.finding.md` in the current directory.
 
-**Native replay** (no Docker): `HRR_REPLAY_MODE=native` or omit `HIP_SO` with GPU device visible.
-
-**Extra hrr-playback flags** pass after `--`:
+Archive metadata only (no GPU):
 
 ```bash
-./$SKILL/scripts/run_hrr_replay.sh --archive ... --log replay.log -- --single-thread
+./$SKILL/scripts/run_hrr_replay.sh --archive /path/to/capture.hrr/pid-NNN --info
 ```
 
-## Step 3 — Analyze an existing log only
+## Analyze an existing log
 
-If replay already ran:
+If replay already ran elsewhere:
 
 ```bash
 python3 $SKILL/scripts/analyze_replay_finding.py \
   --log replay.log \
-  --archive capture.hrr/pid-NNN \
-  --hrr-playback "$HRR_PLAYBACK" \
-  --format markdown \
-  -o finding.md
+  --archive /path/to/capture.hrr/pid-NNN \
+  --format markdown -o finding.md
 ```
-
-## Step 4 — Report template
-
-```markdown
-## Interpretation
-
-- Fault class `read_only_page_fault` on `Cijk_*_SK3_*` → likely hipBLASLt StreamK edge/OOB write.
-- `d2h_fail=0` at MAF → on-GPU divergence before host numerical mismatch.
-- Archive incomplete (no EOF trailer) → common for crash captures with event recovery.
-```
-
-## Fault taxonomy
-
-| `fault_class` | Meaning | Typical log signals |
-|---------------|---------|---------------------|
-| `replay_pass` | Replay finished cleanly | `[HRR] PASS`, `d2h_fail=0` |
-| `read_only_page_fault` | Write to non-writable page | `Reason: Write access to a read-only page` |
-| `illegal_memory_access` | Other GPU memory fault | `Memory access fault`, `MEMORY_FAULT` |
-| `nan_inf_divergence` | Host saw bad numerics | `d2h_fail>0`, `[HRR] FAIL` |
-| `hang` | Queue/device hang | `HSA_STATUS_ERROR_*`, no PASS/MAF |
-| `replay_oom` | Replay ran out of VRAM | `out of memory`, `hipMalloc` + `Fatal:` |
-| `replay_fatal_api` | HIP API error aborted replay | `[HRR] Fatal: T* Event *` |
-| `replay_aborted` | Aborted without classified fault | `aborting replay` |
-| `unknown` | Insufficient signals | — |
-
-## Capture explainer (short)
-
-- **events.bin** — HIP API stream (alloc, memcpy, launches, sync), kernargs, optional D2H snapshots
-- **blobs/** — code objects, graphs, memcpy payloads
-- **Trailer** — present on clean exit; absent on crash (reader recovers complete events)
-
-Replay remaps recorded device pointers to live allocations. Divergence = replay state ≠ capture at some event index.
-
-See [reference.md](reference.md).
 
 ## Agent instructions
 
-When the user gives an **archive only**:
+**Do not** ask the user for GPU index, source paths, or HIP library paths unless replay fails and support provided a custom library bundle.
 
-1. Run `--info` if `hrr-playback` is available
-2. Check GPU VRAM; free device or pick another `GPU=` if OOM risk
-3. Run `run_hrr_replay.sh --archive ... --log ... --analyze`
-4. Present finding + interpretation; do not guess root cause without evidence
+1. Locate archive (`pid-*` with largest `events.bin`).
+2. Resolve `hrr-playback` (`command -v hrr-playback` or `HRR_PLAYBACK`).
+3. Run `run_hrr_replay.sh --archive ... --analyze`.
+4. If `replay_oom`: auto-retry on another GPU (script picks most free VRAM) or report insufficient VRAM.
+5. Present finding; do not invent root cause without log evidence.
 
-When the user gives a **log only**: skip replay; run `analyze_replay_finding.py`.
+**Do not** require checkout of TheRock, CLR, or internal lab scripts.
 
-## Do not
+## Fault taxonomy
 
-- Guess ROCm commit or root cause without evidence
-- Modify archives unless user requests `--repair`
-- Assume one PASS archive means all archives pass
+| `fault_class` | Meaning |
+|---------------|---------|
+| `replay_pass` | Clean replay |
+| `read_only_page_fault` | Write to read-only page |
+| `illegal_memory_access` | Other GPU memory fault |
+| `nan_inf_divergence` | D2H numerical mismatch |
+| `hang` | Device/queue hang |
+| `replay_oom` | Out of VRAM during replay |
+| `replay_fatal_api` | HIP API error stopped replay |
+| `unknown` | Insufficient log data |
 
-## Additional resources
+## Capture explainer (short)
 
-- [reference.md](reference.md) — log patterns, kernel name decode
-- [examples.md](examples.md) — sample commands and findings
+- **events.bin** — recorded HIP API sequence (alloc, memcpy, kernel launches, sync)
+- **blobs/** — code objects and sidecar payloads
+- **Trailer** — missing when the original run crashed; reader still recovers complete events
+
+See [reference.md](reference.md) and [examples.md](examples.md).

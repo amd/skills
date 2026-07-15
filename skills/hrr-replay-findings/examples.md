@@ -1,80 +1,50 @@
 # Examples
 
-## Example 1 — Run replay then analyze
+## Example 1 — Archive only (typical customer handoff)
+
+Customer sends `capture.hrr/pid-1842/`. Support ships matching `hrr-playback`.
 
 ```bash
-export HRR_PLAYBACK=/path/to/hrr-playback
-export HIP_SO=/path/to/libamdhip64.so.7.*
-export HSA_SO=/path/to/libhsa-runtime64.so.1
-export GPU=0
+export HRR_PLAYBACK=/opt/rocm/bin/hrr-playback   # only if not on PATH
 
 skills/hrr-replay-findings/scripts/run_hrr_replay.sh \
-  --archive capture.hrr/pid-12345 \
-  --log replay.log \
+  --archive capture.hrr/pid-1842 \
   --analyze
 ```
 
-Produces `replay.log` and `replay.finding.md`.
+No GPU index, no source tree, no HIP paths.
 
 ---
 
-## Example 2 — Analyze log only (replay already ran)
+## Example 2 — Analyze log only
 
 ```bash
 python3 skills/hrr-replay-findings/scripts/analyze_replay_finding.py \
   --log replay.log \
-  --archive capture.hrr/pid-12345 \
+  --archive capture.hrr/pid-1842 \
   --format markdown
 ```
 
-**Expected finding (abridged):**
+---
+
+## Example 3 — Expected MAF finding (abridged)
 
 | Field | Value |
 |-------|-------|
 | outcome | MAF |
 | fault_class | read_only_page_fault |
-| kernel_name | Cijk_..._MT128x192x128_..._SK3_... |
+| kernel_name | Cijk_..._SK3_... |
 | d2h_fail | 0 |
+
+`d2h_fail=0` → fault happened on GPU before host numerical checks failed.
 
 ---
 
-## Example 3 — clean replay pass
-
-**Input:** `replay-pass.log`
+## Example 4 — OOM (environment, not capture bug)
 
 | Field | Value |
 |-------|-------|
-| outcome | PASS |
-| fault_class | replay_pass |
-| kernels_launched | (from replay summary) |
-| d2h_fail | 0 |
-
-**Interpretation:** Replay completed without GPU fault or D2H mismatch.
-
----
-
-## Example 3 — replay OOM (insufficient VRAM)
-
-**Input:** `replay-oom.log`
-
-| Field | Value |
-|-------|-------|
-| outcome | ABORT |
 | fault_class | replay_oom |
-| failing_call_index | (from `Fatal: T* Event *`) |
 | failing_api | hipMalloc |
 
-**Interpretation:** Replay aborted for lack of device memory — free VRAM or reduce conflicting workloads before attributing to capture fidelity.
-
----
-
-## Example 4 — multi-run sweep summary
-
-```bash
-python3 skills/hrr-replay-findings/scripts/analyze_replay_finding.py \
-  --log replay-gpu0.log \
-  --sweep-tsv replay-sweep.summary.tsv \
-  --format markdown
-```
-
-Use when several replays of the same archive were run (e.g. across GPUs). Consistent `fault_class` and kernel across runs suggests deterministic replay divergence, not GPU-specific hardware variation.
+Retry after freeing GPU memory; script auto-picks the GPU with most free VRAM.
