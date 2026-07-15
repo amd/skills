@@ -112,6 +112,8 @@ The same archive can **PASS** on one `hrr-playback` build and fault on another. 
 
 `run_hrr_replay.sh` prepends these to `LD_LIBRARY_PATH`. If `hrr-playback` lives in `<prefix>/bin/`, `<prefix>/lib` is added automatically.
 
+## Parser script
+
 ```bash
 python3 skills/hrr-replay-findings/scripts/analyze_replay_finding.py --help
 ```
