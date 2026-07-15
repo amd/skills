@@ -1,20 +1,10 @@
 #!/usr/bin/env bash
 # Run HRR replay on the host GPU and optionally analyze the log.
-#
-# Needs: archive directory + hrr-playback (on PATH or HRR_PLAYBACK).
-# No Docker, no source tree, no GPU index (auto-picked by free VRAM).
-#
-# Usage:
-#   ./run_hrr_replay.sh --archive capture.hrr/pid-123 --analyze
-#   ./run_hrr_replay.sh --archive capture.hrr/pid-123 --info
-#
-# Optional env:
-#   HRR_PLAYBACK   path to hrr-playback if not on PATH
-#   GPU            force device index; otherwise auto-pick most free VRAM
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ANALYZER="$SCRIPT_DIR/analyze_replay_finding.py"
+ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 
 ARCHIVE=""
 LOG=""
@@ -38,15 +28,40 @@ ARCHIVE="$(readlink -f "$ARCHIVE" 2>/dev/null || realpath "$ARCHIVE" 2>/dev/null
 [[ -d "$ARCHIVE" ]] || { echo "error: archive not found: $ARCHIVE" >&2; exit 1; }
 
 resolve_playback() {
-  if [[ -n "${HRR_PLAYBACK:-}" && -x "$HRR_PLAYBACK" ]]; then
-    echo "$HRR_PLAYBACK"
-    return
-  fi
+  local c candidates=()
+  [[ -n "${HRR_PLAYBACK:-}" ]] && candidates+=("$HRR_PLAYBACK")
   if command -v hrr-playback >/dev/null 2>&1; then
-    command -v hrr-playback
-    return
+    candidates+=("$(command -v hrr-playback)")
   fi
+  candidates+=(
+    "$ROCM_PATH/bin/hrr-playback"
+    "/opt/rocm/bin/hrr-playback"
+  )
+  local p
+  for p in "${candidates[@]}"; do
+    [[ -n "$p" && -x "$p" ]] || continue
+    echo "$p"
+    return
+  done
   echo ""
+}
+
+setup_library_path() {
+  local play="$1"
+  local bin_dir lib_dir paths=()
+  bin_dir="$(cd "$(dirname "$play")" && pwd)"
+  lib_dir="$(cd "$bin_dir/.." && pwd)/lib"
+  paths+=("$ROCM_PATH/lib" "/opt/rocm/lib")
+  [[ -d "$lib_dir" ]] && paths+=("$lib_dir")
+  [[ -d "$bin_dir/../lib" ]] && paths+=("$(cd "$bin_dir/../lib" && pwd)")
+  local seen="" p
+  for p in "${paths[@]}"; do
+    [[ -d "$p" ]] || continue
+    [[ ":$seen:" == *":$p:"* ]] && continue
+    seen="${seen:+$seen:}$p"
+    LD_LIBRARY_PATH="${p}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  done
+  export LD_LIBRARY_PATH
 }
 
 pick_gpu() {
@@ -55,7 +70,7 @@ pick_gpu() {
     return
   fi
   if command -v rocm-smi >/dev/null 2>&1; then
-    local best="" best_free=-1
+    local best="" best_free=-1 idx free
     while read -r idx free; do
       [[ -n "$idx" ]] || continue
       if (( free > best_free )); then
@@ -73,28 +88,28 @@ pick_gpu() {
       return
     fi
   fi
-  echo "[run_hrr_replay] default GPU 0 (set GPU=N to override)" >&2
+  echo "[run_hrr_replay] default GPU 0" >&2
   echo "0"
 }
 
 HRR_PLAY="$(resolve_playback)"
 GPU="$(pick_gpu)"
 
+if [[ -z "$HRR_PLAY" ]]; then
+  echo "error: hrr-playback not found. Checked PATH, \$ROCM_PATH/bin ($ROCM_PATH), /opt/rocm/bin." >&2
+  echo "error: Ask the user where hrr-playback is installed, then set HRR_PLAYBACK for this run." >&2
+  exit 1
+fi
+
+setup_library_path "$HRR_PLAY"
+echo "[run_hrr_replay] playback=$HRR_PLAY" >&2
+
 if [[ "$DO_INFO" == "1" ]]; then
-  [[ -n "$HRR_PLAY" ]] || {
-    echo "error: hrr-playback not found. Set HRR_PLAYBACK=/path/to/hrr-playback" >&2
-    exit 1
-  }
   exec "$HRR_PLAY" "$ARCHIVE" --info "${EXTRA_ARGS[@]}"
 fi
 
-[[ -n "$HRR_PLAY" ]] || {
-  echo "error: hrr-playback not found. Set HRR_PLAYBACK=/path/to/hrr-playback" >&2
-  exit 1
-}
-
 [[ -r /dev/kfd ]] || {
-  echo "error: /dev/kfd not accessible — AMD GPU driver required for native replay" >&2
+  echo "error: /dev/kfd not accessible — AMD GPU driver required" >&2
   exit 1
 }
 
@@ -103,7 +118,7 @@ if [[ -z "$LOG" ]]; then
 fi
 mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
 
-echo "[run_hrr_replay] native GPU=$GPU archive=$ARCHIVE"
+echo "[run_hrr_replay] GPU=$GPU archive=$ARCHIVE" >&2
 set +e
 ROCR_VISIBLE_DEVICES="$GPU" "$HRR_PLAY" "$ARCHIVE" "${EXTRA_ARGS[@]}" 2>&1 | tee "$LOG"
 RC=${PIPESTATUS[0]}
@@ -114,7 +129,7 @@ echo "[run_hrr_replay] log=$LOG exit=$RC"
 if [[ "$DO_ANALYZE" == "1" ]]; then
   FINDING="${LOG%.log}.finding.md"
   python3 "$ANALYZER" --log "$LOG" --archive "$ARCHIVE" \
-    ${HRR_PLAY:+--hrr-playback "$HRR_PLAY"} \
+    --hrr-playback "$HRR_PLAY" \
     --format markdown -o "$FINDING"
   echo "[run_hrr_replay] finding=$FINDING"
 fi

@@ -102,7 +102,15 @@ Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT128x192x128_..._SK3_..._WS64_WG16
 
 The same archive can **PASS** on one `hrr-playback` build and fault on another. Record which playback binary produced each result.
 
-## Parser script
+## ROCm layout (assumed)
+
+| Path | Role |
+|------|------|
+| `/opt/rocm/bin/hrr-playback` | Default playback tool location |
+| `/opt/rocm/lib` | HIP/HSA and ROCm runtime libraries |
+| `$ROCM_PATH` | Override prefix if ROCm is not under `/opt/rocm` |
+
+`run_hrr_replay.sh` prepends these to `LD_LIBRARY_PATH`. If `hrr-playback` lives in `<prefix>/bin/`, `<prefix>/lib` is added automatically.
 
 ```bash
 python3 skills/hrr-replay-findings/scripts/analyze_replay_finding.py --help

@@ -1,50 +1,32 @@
 # Examples
 
-## Example 1 — Archive only (typical customer handoff)
+## What the user says
 
-Customer sends `capture.hrr/pid-1842/`. Support ships matching `hrr-playback`.
+**Full replay + analysis**
 
-```bash
-export HRR_PLAYBACK=/opt/rocm/bin/hrr-playback   # only if not on PATH
+> Replay and analyze my HRR archive at `/data/crash/capture.hrr/pid-1842`
 
-skills/hrr-replay-findings/scripts/run_hrr_replay.sh \
-  --archive capture.hrr/pid-1842 \
-  --analyze
-```
+**Archive summary only**
 
-No GPU index, no source tree, no HIP paths.
+> Summarize this HRR capture: `capture.hrr/pid-1842`
 
----
+**Existing log**
 
-## Example 2 — Analyze log only
+> Analyze this HRR replay log: `replay.log` (archive is `capture.hrr/pid-1842`)
 
-```bash
-python3 skills/hrr-replay-findings/scripts/analyze_replay_finding.py \
-  --log replay.log \
-  --archive capture.hrr/pid-1842 \
-  --format markdown
-```
+The user does not mention scripts, `HRR_PLAYBACK`, or GPU numbers.
 
----
+## What the agent does
 
-## Example 3 — Expected MAF finding (abridged)
+1. Finds `hrr-playback` on `PATH` or `/opt/rocm/bin/hrr-playback`
+2. If missing, asks: *"Where is hrr-playback installed?"*
+3. Runs `run_hrr_replay.sh --archive ... --analyze`
+4. Presents the finding
 
-| Field | Value |
-|-------|-------|
-| outcome | MAF |
-| fault_class | read_only_page_fault |
-| kernel_name | Cijk_..._SK3_... |
-| d2h_fail | 0 |
+## If hrr-playback is not in a standard location
 
-`d2h_fail=0` → fault happened on GPU before host numerical checks failed.
+User answers: *"It's in `/opt/amd-hrr/bin/hrr-playback`"*
 
----
+Agent sets `HRR_PLAYBACK=/opt/amd-hrr/bin/hrr-playback` for that session only and re-runs.
 
-## Example 4 — OOM (environment, not capture bug)
-
-| Field | Value |
-|-------|-------|
-| fault_class | replay_oom |
-| failing_api | hipMalloc |
-
-Retry after freeing GPU memory; script auto-picks the GPU with most free VRAM.
+If a `lib/` directory sits beside `bin/`, the runner picks it up automatically.
