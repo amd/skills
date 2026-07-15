@@ -1,10 +1,24 @@
 # Examples
 
-## Example 1 — GPU memory fault during replay (StreamK GEMM)
+## Example 1 — Run replay then analyze
 
-**Input:** `replay.log` + archive `capture.hrr/pid-12345`
+```bash
+export HRR_PLAYBACK=/path/to/hrr-playback
+export HIP_SO=/path/to/libamdhip64.so.7.*
+export HSA_SO=/path/to/libhsa-runtime64.so.1
+export GPU=0
 
-**Command:**
+skills/hrr-replay-findings/scripts/run_hrr_replay.sh \
+  --archive capture.hrr/pid-12345 \
+  --log replay.log \
+  --analyze
+```
+
+Produces `replay.log` and `replay.finding.md`.
+
+---
+
+## Example 2 — Analyze log only (replay already ran)
 
 ```bash
 python3 skills/hrr-replay-findings/scripts/analyze_replay_finding.py \
@@ -20,15 +34,11 @@ python3 skills/hrr-replay-findings/scripts/analyze_replay_finding.py \
 | outcome | MAF |
 | fault_class | read_only_page_fault |
 | kernel_name | Cijk_..._MT128x192x128_..._SK3_... |
-| fault_address | 0x7b9224c09000 |
-| failing_event_seq | (from last `[HRR progress]` line) |
 | d2h_fail | 0 |
-
-**Interpretation:** On-GPU fault at a hipBLASLt StreamK GEMM; `d2h_fail=0` means host numerical checks had not failed yet — not a NaN/Inf divergence.
 
 ---
 
-## Example 2 — clean replay pass
+## Example 3 — clean replay pass
 
 **Input:** `replay-pass.log`
 

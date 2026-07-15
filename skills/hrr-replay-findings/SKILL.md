@@ -1,78 +1,102 @@
 ---
 name: hrr-replay-findings
 description: >-
-  Read-only analysis of HIP Runtime Replay (HRR) recordings and replay logs.
+  Run HIP Runtime Replay (HRR) against a capture archive and analyze the result.
   Classifies replay divergence or GPU faults (OOB/read-only write, illegal access,
   NaN/Inf D2H divergence, hang, OOM), extracts fault address, failing event/call
   index, and implicated kernel/allocation. Summarizes what an HRR capture holds.
-  Use when given an HRR archive (capture.hrr/pid-*), hrr-playback log, capture log,
-  multi-replay sweep TSV, Memory access fault output, or when triaging replay PASS
-  vs MAF across workloads (vLLM, PyTorch finetune, hipBLASLt StreamK).
+  Use when given an HRR archive (capture.hrr/pid-*), when asked to replay a
+  recording, or when triaging replay PASS vs MAF across workloads (vLLM, PyTorch,
+  hipBLASLt StreamK).
 ---
 
-# HRR Replay Findings (read-only)
+# HRR Replay Findings
 
-Turn **replay output + optional archive metadata** into a **structured finding**.
-This skill is **read-only** — it does not patch, rebuild, or re-run capture unless
-the user explicitly asks in a follow-up.
+**Run replay** on an HRR archive, then produce a **structured finding** from the output.
+Analysis is read-only (no patches); replay needs a GPU and a built `hrr-playback`.
 
 ## When to use
 
-- Replay or capture log shows `[HRR] PASS`, `Memory access fault`, `Fatal:`, or `d2h_fail`
-- Comparing replay outcomes across GPUs, runs, or playback builds
-- First triage step **before** end-to-end crash analysis (patch/build/validate workflow)
+- User provides an HRR archive (`capture.hrr/pid-*`) and wants replay + triage
+- Compare replay across GPUs or playback builds
+- First step before deeper crash root-cause work
 
 ## Quick workflow
 
 ```
-1. Identify inputs (archive, replay log, capture log, sweep TSV)
-2. Run analyze_replay_finding.py (below)
-3. Present the structured finding + capture explainer (reference.md)
-4. Only if user asks: reproduce, bisect, or patch
+1. Resolve archive (largest events.bin under capture.hrr/pid-*)
+2. Run replay → save log (run_hrr_replay.sh)
+3. Parse log → structured finding (analyze_replay_finding.py)
+4. Interpret + recommend next steps
 ```
 
-## Step 1 — Gather inputs
+## Step 0 — Prerequisites
 
-| Input | How to find |
-|-------|-------------|
-| **Archive** | Largest `events.bin` under `capture.hrr/pid-*` |
-| **Replay log** | `hrr-playback` stdout/stderr (saved to a file) |
-| **Capture log** | Application log from the captured run; optional `[capture] HIP_SO=` line |
-| **Sweep TSV** | Tab-separated summary from multiple replay runs (`*.summary.tsv`) |
+| Requirement | How to verify |
+|-------------|---------------|
+| `hrr-playback` built | `HRR_PLAYBACK` points to executable, or on `PATH` |
+| GPU free (~full VRAM for large captures) | `rocm-smi --showmeminfo vram` |
+| Docker replay (recommended) | `HIP_SO` + `HSA_SO` from CLR/rocr build; `IMAGE` env |
 
-## Step 2 — Run the parser (default)
+**This workspace** (if `scripts/maf-hrr-docker-playback.sh` exists): set `HRR_REPO_ROOT` to the repo root and the skill runner delegates to that script.
+
+## Step 1 — Archive metadata (no GPU)
 
 ```bash
-SCRIPT=skills/hrr-replay-findings/scripts/analyze_replay_finding.py
+SKILL=skills/hrr-replay-findings   # or .cursor/skills/hrr-replay-findings in a project
 
-python3 "$SCRIPT" \
-  --log /path/to/replay.log \
-  --log /path/to/capture.log \
+export HRR_PLAYBACK=/path/to/hrr-playback
+./$SKILL/scripts/run_hrr_replay.sh \
   --archive /path/to/capture.hrr/pid-NNN \
-  --hrr-playback /path/to/hrr-playback \
+  --info
+```
+
+## Step 2 — Run replay + save log
+
+```bash
+export HRR_REPO_ROOT=/path/to/hrr-repo          # optional: use repo docker helper
+export HRR_PLAYBACK=/path/to/hrr-playback
+export HIP_SO=/path/to/libamdhip64.so.7.*
+export HSA_SO=/path/to/libhsa-runtime64.so.1
+export GPU=1
+
+./$SKILL/scripts/run_hrr_replay.sh \
+  --archive /path/to/capture.hrr/pid-NNN \
+  --log /path/to/replay.log \
+  --analyze
+```
+
+`--analyze` runs the parser and writes `replay.finding.md` next to the log.
+
+**Native replay** (no Docker): `HRR_REPLAY_MODE=native` or omit `HIP_SO` with GPU device visible.
+
+**Extra hrr-playback flags** pass after `--`:
+
+```bash
+./$SKILL/scripts/run_hrr_replay.sh --archive ... --log replay.log -- --single-thread
+```
+
+## Step 3 — Analyze an existing log only
+
+If replay already ran:
+
+```bash
+python3 $SKILL/scripts/analyze_replay_finding.py \
+  --log replay.log \
+  --archive capture.hrr/pid-NNN \
+  --hrr-playback "$HRR_PLAYBACK" \
   --format markdown \
   -o finding.md
 ```
 
-Optional multi-run table:
-
-```bash
-python3 "$SCRIPT" \
-  --log replay-gpu0.log --log replay-gpu1.log \
-  --sweep-tsv replay-sweep.summary.tsv \
-  --format json
-```
-
-## Step 3 — Report template
-
-Use the parser output and add **one paragraph** of interpretation:
+## Step 4 — Report template
 
 ```markdown
 ## Interpretation
 
 - Fault class `read_only_page_fault` on `Cijk_*_SK3_*` → likely hipBLASLt StreamK edge/OOB write.
-- `d2h_fail=0` at MAF → replay diverged on-GPU before any host numerical check failed.
-- Archive incomplete (no EOF trailer) → common for crash captures with event recovery enabled.
+- `d2h_fail=0` at MAF → on-GPU divergence before host numerical mismatch.
+- Archive incomplete (no EOF trailer) → common for crash captures with event recovery.
 ```
 
 ## Fault taxonomy
@@ -83,7 +107,7 @@ Use the parser output and add **one paragraph** of interpretation:
 | `read_only_page_fault` | Write to non-writable page | `Reason: Write access to a read-only page` |
 | `illegal_memory_access` | Other GPU memory fault | `Memory access fault`, `MEMORY_FAULT` |
 | `nan_inf_divergence` | Host saw bad numerics | `d2h_fail>0`, `[HRR] FAIL` |
-| `hang` | Queue/device hang without clean summary | `HSA_STATUS_ERROR_*`, no PASS/MAF line |
+| `hang` | Queue/device hang | `HSA_STATUS_ERROR_*`, no PASS/MAF |
 | `replay_oom` | Replay ran out of VRAM | `out of memory`, `hipMalloc` + `Fatal:` |
 | `replay_fatal_api` | HIP API error aborted replay | `[HRR] Fatal: T* Event *` |
 | `replay_aborted` | Aborted without classified fault | `aborting replay` |
@@ -91,30 +115,32 @@ Use the parser output and add **one paragraph** of interpretation:
 
 ## Capture explainer (short)
 
-An HRR **capture** is a time-ordered **event stream** plus **sidecar blobs**:
+- **events.bin** — HIP API stream (alloc, memcpy, launches, sync), kernargs, optional D2H snapshots
+- **blobs/** — code objects, graphs, memcpy payloads
+- **Trailer** — present on clean exit; absent on crash (reader recovers complete events)
 
-- **events.bin** — HIP API calls (alloc, memcpy, kernel launch, sync), kernel names, kernarg payloads, optional D2H snapshots
-- **blobs/** — code objects, graph capture data, memcpy payloads
-- **Trailer** — clean shutdown marker when capture exits normally; **absent** when the app crashed (reader recovers complete events)
+Replay remaps recorded device pointers to live allocations. Divergence = replay state ≠ capture at some event index.
 
-Replay **re-executes** API sequence on a live GPU, remapping recorded device pointers to new allocations. Divergence means replay state ≠ capture state at some event index — not necessarily that capture missed data.
+See [reference.md](reference.md).
 
-Full layout: [reference.md](reference.md).
+## Agent instructions
 
-## Cross-workload notes
+When the user gives an **archive only**:
 
-- **hipBLASLt / Tensile `Cijk_*`**: decode `MT<M>x<N>x<K>`, `_SK3_` = StreamK; see reference.md
-- **PyTorch `_*` kernels**: last `[HRR progress] last=` demangled name is the active kernel before fault
-- **Suballoc OOB lines**: `SUBALLOC OOB: kernel arg[N]` — pointer in segment but outside active tensor block
-- **D2H checks**: `d2h_pass` / `d2h_fail` — host numerical validation; independent of on-GPU MAF
+1. Run `--info` if `hrr-playback` is available
+2. Check GPU VRAM; free device or pick another `GPU=` if OOM risk
+3. Run `run_hrr_replay.sh --archive ... --log ... --analyze`
+4. Present finding + interpretation; do not guess root cause without evidence
+
+When the user gives a **log only**: skip replay; run `analyze_replay_finding.py`.
 
 ## Do not
 
-- Guess ROCm commit, hipBLASLt tag, or root cause without evidence
-- Treat `PASS` on one archive as proof all archives pass on the same build
-- Modify archives (use `hrr-playback --repair` only when user requests)
+- Guess ROCm commit or root cause without evidence
+- Modify archives unless user requests `--repair`
+- Assume one PASS archive means all archives pass
 
 ## Additional resources
 
-- Capture layout and log patterns: [reference.md](reference.md)
-- Worked examples: [examples.md](examples.md)
+- [reference.md](reference.md) — log patterns, kernel name decode
+- [examples.md](examples.md) — sample commands and findings
