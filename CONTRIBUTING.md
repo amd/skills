@@ -209,11 +209,11 @@ what the agent did — see the harness in [`eval/behavioral/`](eval/behavioral/)
 Conventions:
 
 - **One file per skill, inside the skill.** Put the test at
-  `skills/<name>/evals/test_<skill>.py`, swapping the skill name's hyphens for
-  underscores (`local-ai-use` → `test_local_ai_use.py`). Each skill owns its
-  behavioral tests under its `evals/` folder. The harness excludes `evals/`
-  when it copies the skill into the agent's sandbox at runtime, so the tests
-  ship with the skill without polluting the workspace the agent sees.
+  `skills/<name>/evals/evals.py` — always that exact name, for every skill.
+  Each skill owns its behavioral tests under its `evals/` folder. The harness
+  excludes `evals/` when it copies the skill into the agent's sandbox at
+  runtime, so the tests ship with the skill without polluting the workspace the
+  agent sees.
 - **Write checks against behavior.** Combine deterministic assertions
   (`logs_contains`, `workspace_contains`) with LLM-judged expectations
   (`should`, `should_not`). See `test_local_ai_use.py` for the pattern.
@@ -223,7 +223,7 @@ prerequisites, e.g. a reachable Lemonade Server for `local-ai-use`):
 
 ```bash
 pip install -r eval/behavioral/requirements.txt
-pytest skills/local-ai-use/evals/test_local_ai_use.py
+pytest skills/local-ai-use/evals/evals.py
 ```
 
 In CI, the `behavioral` workflow runs these tests, but **only** when a

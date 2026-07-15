@@ -136,7 +136,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test_file="skills/${{ matrix.skill }}/evals/test_$(echo '${{ matrix.skill }}' | tr '-' '_').py"
+          test_file="skills/${{ matrix.skill }}/evals/evals.py"
           echo "Running $test_file"
           pytest "$test_file"
 
@@ -145,8 +145,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $skill = "${{ matrix.skill }}"
-          $test_file = "skills/$skill/evals/test_$($skill -replace '-','_').py"
+          $test_file = "skills/${{ matrix.skill }}/evals/evals.py"
           Write-Host "Running $test_file"
           pytest $test_file
 

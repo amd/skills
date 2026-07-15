@@ -5,13 +5,12 @@
 # ///
 """Select which behavioral tests to run, by skill name.
 
-Behavioral tests live one-per-skill (see CONTRIBUTING.md) inside the skill:
+Behavioral tests live one-per-skill (see CONTRIBUTING.md) inside the skill,
+always at the same path:
 
-    skills/<skill>/evals/test_<skill_with_underscores>.py
+    skills/<skill>/evals/evals.py
 
-Skill names are lowercase-with-hyphens; the test filename swaps the hyphens for
-underscores (``local-ai-use`` -> ``test_local_ai_use.py``) because that is what
-Python import / pytest collection require.
+Skill names are lowercase-with-hyphens.
 
 This script maps a set of changed files (read from stdin, one path per line)
 to the skills whose behavioral test should run, and is also used to enumerate
@@ -39,9 +38,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SKILLS_DIR = REPO_ROOT / "skills"
 
-TEST_PREFIX = "test_"
-TEST_SUFFIX = ".py"
 EVALS_DIRNAME = "evals"
+EVALS_FILENAME = "evals.py"
 
 # Touching any of these means the shared harness (not one skill) changed, so we
 # re-run every behavioral test rather than trying to guess the blast radius.
@@ -57,14 +55,9 @@ INFRA_FILES = {
 }
 
 
-def skill_to_test(skill: str) -> str:
-    """`local-ai-use` -> `test_local_ai_use.py`."""
-    return f"{TEST_PREFIX}{skill.replace('-', '_')}{TEST_SUFFIX}"
-
-
 def test_path_for(skill: str) -> Path:
-    """`local-ai-use` -> skills/local-ai-use/evals/test_local_ai_use.py."""
-    return SKILLS_DIR / skill / EVALS_DIRNAME / skill_to_test(skill)
+    """`local-ai-use` -> skills/local-ai-use/evals/evals.py."""
+    return SKILLS_DIR / skill / EVALS_DIRNAME / EVALS_FILENAME
 
 
 def is_testable(skill: str) -> bool:
