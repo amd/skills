@@ -39,12 +39,29 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from claude_eval import SKILLS_DIR  # noqa: E402
 
 DEFAULT_SKILL = os.environ.get("BEHAVIORAL_SKILL", "local-ai-use")
+
+# Where per-run logs (transcript + check outcomes) are written so they can be
+# uploaded and investigated after the fact -- on pass OR fail. Defaults to
+# ``eval/behavioral/results/`` (git-ignored); override with the env var. The
+# path is anchored to this file, not the cwd, so it is stable no matter where
+# pytest is invoked from.
+RESULTS_DIR = Path(
+    os.environ.get(
+        "BEHAVIORAL_RESULTS_DIR",
+        str(Path(__file__).resolve().parent / "results"),
+    )
+)
+
+# Distinguishes multiple prompt() calls within a single test so their logs
+# don't clobber each other.
+_RUN_COUNTERS: dict[str, int] = {}
 DEFAULT_MODEL = os.environ.get("BEHAVIORAL_MODEL", "sonnet")
 DEFAULT_EFFORT = os.environ.get("BEHAVIORAL_EFFORT", "high")
 
@@ -272,14 +289,47 @@ def _grade_with_llm(statement: str, run: "Run", judge_model: str | None) -> tupl
     return passed, f"llm_judge: {reason}"
 
 
+def _run_log_dir(skill: str) -> Path:
+    """A unique per-run directory under RESULTS_DIR for this test's logs.
+
+    Named ``<skill>__<test_function>`` from ``PYTEST_CURRENT_TEST`` so logs are
+    easy to trace back to their test. A second prompt() call in the same test
+    gets a ``-2``, ``-3``, ... suffix so it doesn't clobber the first.
+    """
+    node = os.environ.get("PYTEST_CURRENT_TEST", "").split(" (")[0]
+    func = node.split("::")[-1] if node else "run"
+    func = re.sub(r"[^A-Za-z0-9._-]+", "_", func).strip("_") or "run"
+
+    key = f"{skill}/{func}"
+    idx = _RUN_COUNTERS.get(key, 0)
+    _RUN_COUNTERS[key] = idx + 1
+    suffix = "" if idx == 0 else f"-{idx + 1}"
+
+    run_dir = RESULTS_DIR / f"{skill}__{func}{suffix}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
 class Run:
     """The captured result of one agent run, with inline-asserting checks.
 
     Each check prints a ``[PASS]``/``[FAIL]`` line and raises ``AssertionError``
     on failure, so the owning pytest test fails at that line.
+
+    Every run also writes its transcript and check outcomes under
+    ``RESULTS_DIR`` up front, so a failing (raising) assertion still leaves a
+    complete log behind for later investigation.
     """
 
-    def __init__(self, *, workspace: Path, events: list[dict], judge_model: str | None) -> None:
+    def __init__(
+        self,
+        *,
+        workspace: Path,
+        events: list[dict],
+        judge_model: str | None,
+        skill: str = DEFAULT_SKILL,
+        prompt_text: str = "",
+    ) -> None:
         tool_uses: list[tuple[str, str]] = []
         tool_results: list[str] = []
         for ev in events:
@@ -292,6 +342,7 @@ class Run:
 
         self.workspace = workspace
         self.judge_model = judge_model
+        self.skill = skill
         self.files = _list_workspace_files(workspace)
         self.tool_names = {name for name, _ in tool_uses if name}
         self.result_text = result_text
@@ -304,6 +355,11 @@ class Run:
         # `logs` is the full raw transcript, searchable for skill activation,
         # tool names, command strings, etc.
         self.logs = "\n".join(json.dumps(ev, ensure_ascii=False) for ev in events)
+
+        # Persist the transcript immediately (before any check can raise) so the
+        # log is always uploadable, pass or fail. `checks.log` is appended to as
+        # each check runs.
+        self._checks_path = self._persist(events, prompt_text)
 
     def logs_contains(self, text: str) -> "Run":
         ok = text.lower() in self.logs.lower()
@@ -328,8 +384,44 @@ class Run:
         self._report(not observed, "should_not", f"{statement} -- {reason}")
         return self
 
+    def _persist(self, events: list[dict], prompt_text: str) -> Path | None:
+        """Write the transcript + a summary to this run's log dir.
+
+        Returns the path to ``checks.log`` (created on first check) or ``None``
+        if the results dir can't be written -- logging must never break a test.
+        """
+        try:
+            run_dir = _run_log_dir(self.skill)
+            (run_dir / "transcript.jsonl").write_text(
+                "\n".join(json.dumps(ev, ensure_ascii=False) for ev in events) + "\n",
+                encoding="utf-8",
+            )
+            summary = (
+                f"skill:   {self.skill}\n"
+                f"model:   {self.judge_model}\n"
+                f"time:    {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"prompt:  {prompt_text}\n"
+                f"tools:   {sorted(self.tool_names) or 'none'}\n"
+                f"files:   {self.files or 'none'}\n"
+                f"--- final message ---\n{self.result_text}\n"
+            )
+            (run_dir / "summary.txt").write_text(summary, encoding="utf-8")
+            return run_dir / "checks.log"
+        except OSError as exc:
+            print(f"  [warn] could not write run logs: {exc}", flush=True)
+            return None
+
     def _report(self, passed: bool, kind: str, detail: str) -> None:
-        print(f"  [{'PASS' if passed else 'FAIL'}] ({kind}) {detail}", flush=True)
+        line = f"[{'PASS' if passed else 'FAIL'}] ({kind}) {detail}"
+        print(f"  {line}", flush=True)
+        # Append the outcome before asserting so a failing check is still
+        # recorded in the uploaded log.
+        if self._checks_path is not None:
+            try:
+                with self._checks_path.open("a", encoding="utf-8") as fh:
+                    fh.write(line + "\n")
+            except OSError:
+                pass
         assert passed, f"({kind}) {detail}"
 
 
@@ -371,7 +463,13 @@ class Agent:
 
         print(f"\n[behavioral] skill='{self.skill}' model='{self.model}': {text}", flush=True)
         events = _run_agent(text, self.workspace, self.model, self.effort)
-        return Run(workspace=self.workspace, events=events, judge_model=self.model)
+        return Run(
+            workspace=self.workspace,
+            events=events,
+            judge_model=self.model,
+            skill=self.skill,
+            prompt_text=text,
+        )
 
 
 def claude(

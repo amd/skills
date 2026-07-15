@@ -149,6 +149,17 @@ jobs:
           Write-Host "Running $test_file"
           pytest $test_file
 
+      # Upload the per-run logs (transcript + check outcomes) regardless of
+      # whether the tests passed or failed, so a failure can be investigated.
+      - name: Upload behavioral logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: behavioral-logs-${{ matrix.skill }}-${{ matrix.os }}
+          path: eval/behavioral/results/
+          if-no-files-found: warn
+          retention-days: 14
+
   # Single aggregate gate. Mark THIS check required in branch protection.
   #
   #   * nothing testable changed -> pass (neutral).
