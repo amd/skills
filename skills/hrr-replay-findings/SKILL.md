@@ -21,9 +21,7 @@ analysis.
 |-------|-----------|
 | HRR archive (`capture.hrr/pid-*` with `events.bin`) | **Yes** |
 | `hrr-playback` binary (on `PATH` or path via `HRR_PLAYBACK`) | **Yes** for replay |
-| Source code, ROCm build tree, GPU index | **No** |
-
-Optional: container image (`IMAGE`) if not using the default ROCm/vLLM image.
+| Source code, ROCm build tree, GPU index, Docker | **No** |
 
 ## Quick workflow (agent)
 
@@ -66,15 +64,23 @@ python3 $SKILL/scripts/analyze_replay_finding.py \
 
 ## Agent instructions
 
-**Do not** ask the user for GPU index, source paths, or HIP library paths unless replay fails and support provided a custom library bundle.
+**Execute immediately.** Do not say you will "locate the skill", "inspect expectations", or "look up documentation" — run the commands below in the same turn.
 
-1. Locate archive (`pid-*` with largest `events.bin`).
-2. Resolve `hrr-playback` (`command -v hrr-playback` or `HRR_PLAYBACK`).
-3. Run `run_hrr_replay.sh --archive ... --analyze`.
-4. If `replay_oom`: auto-retry on another GPU (script picks most free VRAM) or report insufficient VRAM.
-5. Present finding; do not invent root cause without log evidence.
+When the user gives an **archive** (and optionally `hrr-playback` path):
 
-**Do not** require checkout of TheRock, CLR, or internal lab scripts.
+```bash
+export HRR_PLAYBACK=<path-if-not-on-PATH>   # skip if hrr-playback is on PATH
+SKILL/scripts/run_hrr_replay.sh --archive <archive-pid-dir> --analyze
+```
+
+1. If `hrr-playback` path omitted: `command -v hrr-playback` or ask **once** for the binary path.
+2. Run `run_hrr_replay.sh --archive ... --analyze` (GPU is auto-selected).
+3. Read the generated `.finding.md` and summarize for the user.
+4. On `replay_oom`: report insufficient VRAM; do not blame the capture.
+
+When the user gives a **log only**: run `analyze_replay_finding.py` on that log.
+
+**Never** require source checkout, GPU index, or HIP library paths from the user.
 
 ## Fault taxonomy
 

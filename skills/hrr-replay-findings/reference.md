@@ -100,11 +100,7 @@ Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT128x192x128_..._SK3_..._WS64_WG16
 
 ## Playback build fidelity
 
-The same archive can **PASS** on one `hrr-playback` build and fault on another. Record which playback binary (and container image, if used) produced each result. Do not assume one outcome generalizes.
-
-### Advanced (support bundles only)
-
-If AMD shipped matched `libamdhip64` / `libhsa` libraries with the playback tool, set `HIP_SO` and `HSA_SO` when running docker replay. **Customers are not expected to build or locate these themselves.**
+The same archive can **PASS** on one `hrr-playback` build and fault on another. Record which playback binary produced each result.
 
 ## Parser script
 

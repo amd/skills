@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
-# Run HRR replay against an archive and optionally analyze the log.
+# Run HRR replay on the host GPU and optionally analyze the log.
 #
-# Customer-facing: needs only an archive directory and hrr-playback (on PATH or
-# HRR_PLAYBACK). No source tree, no GPU index, no HIP library paths required.
+# Needs: archive directory + hrr-playback (on PATH or HRR_PLAYBACK).
+# No Docker, no source tree, no GPU index (auto-picked by free VRAM).
 #
 # Usage:
 #   ./run_hrr_replay.sh --archive capture.hrr/pid-123 --analyze
 #   ./run_hrr_replay.sh --archive capture.hrr/pid-123 --info
 #
-# Optional env (agent may set; user does not need to know):
+# Optional env:
 #   HRR_PLAYBACK   path to hrr-playback if not on PATH
 #   GPU            force device index; otherwise auto-pick most free VRAM
-#   IMAGE          container for docker replay (default: ROCm/vLLM image)
-#   HRR_REPLAY_MODE  auto|native|docker
-#   HIP_SO, HSA_SO   advanced: override container HIP/HSA libs (support bundles only)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,7 +20,6 @@ ARCHIVE=""
 LOG=""
 DO_ANALYZE=0
 DO_INFO=0
-MODE="${HRR_REPLAY_MODE:-auto}"
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -32,8 +28,6 @@ while [[ $# -gt 0 ]]; do
     --log) LOG="$2"; shift 2 ;;
     --analyze) DO_ANALYZE=1; shift ;;
     --info) DO_INFO=1; shift ;;
-    --native) MODE=native; shift ;;
-    --docker) MODE=docker; shift ;;
     --) shift; EXTRA_ARGS+=("$@"); break ;;
     *) EXTRA_ARGS+=("$1"); shift ;;
   esac
@@ -88,78 +82,32 @@ GPU="$(pick_gpu)"
 
 if [[ "$DO_INFO" == "1" ]]; then
   [[ -n "$HRR_PLAY" ]] || {
-    echo "error: hrr-playback not found. Install it on PATH or set HRR_PLAYBACK=/path/to/hrr-playback" >&2
+    echo "error: hrr-playback not found. Set HRR_PLAYBACK=/path/to/hrr-playback" >&2
     exit 1
   }
   exec "$HRR_PLAY" "$ARCHIVE" --info "${EXTRA_ARGS[@]}"
 fi
+
+[[ -n "$HRR_PLAY" ]] || {
+  echo "error: hrr-playback not found. Set HRR_PLAYBACK=/path/to/hrr-playback" >&2
+  exit 1
+}
+
+[[ -r /dev/kfd ]] || {
+  echo "error: /dev/kfd not accessible — AMD GPU driver required for native replay" >&2
+  exit 1
+}
 
 if [[ -z "$LOG" ]]; then
   LOG="hrr-replay-$(basename "$ARCHIVE")-$(date -u +%Y%m%dT%H%M%SZ).log"
 fi
 mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
 
-use_docker=0
-if [[ "$MODE" == "docker" ]]; then
-  use_docker=1
-elif [[ "$MODE" == "native" ]]; then
-  use_docker=0
-elif command -v docker >/dev/null 2>&1 && [[ ! -r /dev/kfd ]]; then
-  use_docker=1
-else
-  use_docker=0
-fi
-
-run_native() {
-  [[ -n "$HRR_PLAY" ]] || {
-    echo "error: hrr-playback not found. Install on PATH or set HRR_PLAYBACK." >&2
-    exit 1
-  }
-  echo "[run_hrr_replay] native playback GPU=$GPU archive=$ARCHIVE"
-  set +e
-  ROCR_VISIBLE_DEVICES="$GPU" "$HRR_PLAY" "$ARCHIVE" "${EXTRA_ARGS[@]}" 2>&1 | tee "$LOG"
-  return "${PIPESTATUS[0]}"
-}
-
-run_docker() {
-  [[ -n "$HRR_PLAY" ]] || {
-    echo "error: hrr-playback not found. Set HRR_PLAYBACK to the shipped playback binary." >&2
-    exit 1
-  }
-  command -v docker >/dev/null 2>&1 || { echo "error: docker not found" >&2; exit 1; }
-  IMAGE="${IMAGE:-rocm/vllm:rocm7.13.0_gfx950-dcgpu_ubuntu24.04_py3.13_pytorch_2.10.0_vllm_0.19.1}"
-  ROC_LIB=/opt/python/lib/python3.13/site-packages/_rocm_sdk_core/lib
-  docker_env=( -e ROCR_VISIBLE_DEVICES="$GPU" -e LD_LIBRARY_PATH="$ROC_LIB:/opt/rocm/lib" )
-  vols=( -v "$ARCHIVE":/data/hrr-archive:ro -v "$HRR_PLAY":/opt/hrr-tools/hrr-playback:ro )
-  # Stock container HIP/HSA by default — no source build or library paths required.
-  if [[ -f "${HIP_SO:-}" ]]; then
-    docker_env+=( -e HRR_INJECT=1 )
-    vols+=( -v "$HIP_SO":/opt/python/lib/python3.13/site-packages/_rocm_sdk_core/lib/libamdhip64.so.7:ro )
-    [[ -f "${HSA_SO:-}" ]] && vols+=( -v "$HSA_SO":/opt/python/lib/python3.13/site-packages/_rocm_sdk_core/lib/libhsa-runtime64.so.1:ro )
-    echo "[run_hrr_replay] docker with custom HIP/HSA overlay (support bundle)" >&2
-  else
-    echo "[run_hrr_replay] docker with stock container ROCm stack" >&2
-  fi
-  echo "[run_hrr_replay] image=$IMAGE GPU=$GPU archive=$ARCHIVE"
-  sudo docker rm -f "${HRR_NAME:-hrr-replay}" 2>/dev/null || true
-  set +e
-  sudo -E docker run --rm --privileged --init \
-    --name "${HRR_NAME:-hrr-replay}" \
-    --device /dev/kfd -v /dev/dri:/dev/dri --shm-size=4g \
-    --security-opt seccomp=unconfined --ulimit core=-1:-1 \
-    "${docker_env[@]}" "${vols[@]}" \
-    "$IMAGE" /opt/hrr-tools/hrr-playback /data/hrr-archive "${EXTRA_ARGS[@]}" \
-    2>&1 | tee "$LOG"
-  return "${PIPESTATUS[0]}"
-}
-
-if [[ "$use_docker" == "1" ]]; then
-  run_docker
-  RC=$?
-else
-  run_native
-  RC=$?
-fi
+echo "[run_hrr_replay] native GPU=$GPU archive=$ARCHIVE"
+set +e
+ROCR_VISIBLE_DEVICES="$GPU" "$HRR_PLAY" "$ARCHIVE" "${EXTRA_ARGS[@]}" 2>&1 | tee "$LOG"
+RC=${PIPESTATUS[0]}
+set -e
 
 echo "[run_hrr_replay] log=$LOG exit=$RC"
 
