@@ -22,6 +22,8 @@ on:
       - "skills/**"
       - "eval/behavioral/**"
       - "eval/claude_eval.py"
+      - "conftest.py"
+      - "pytest.ini"
       - ".github/workflows/behavioral.yml"
       - ".github/scripts/select_behavioral.py"
   workflow_dispatch:
@@ -131,22 +133,20 @@ jobs:
 
       - name: Run behavioral test for ${{ matrix.skill }} (Linux)
         if: matrix.os == 'Linux'
-        working-directory: eval/behavioral
         shell: bash
         run: |
           set -euo pipefail
-          test_file="tests/test_$(echo '${{ matrix.skill }}' | tr '-' '_').py"
+          test_file="skills/${{ matrix.skill }}/evals/test_$(echo '${{ matrix.skill }}' | tr '-' '_').py"
           echo "Running $test_file"
           pytest "$test_file"
 
       - name: Run behavioral test for ${{ matrix.skill }} (Windows)
         if: matrix.os == 'Windows'
-        working-directory: eval/behavioral
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
           $skill = "${{ matrix.skill }}"
-          $test_file = "tests/test_$($skill -replace '-','_').py"
+          $test_file = "skills/$skill/evals/test_$($skill -replace '-','_').py"
           Write-Host "Running $test_file"
           pytest $test_file
 

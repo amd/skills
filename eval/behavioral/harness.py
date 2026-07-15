@@ -128,7 +128,11 @@ def _stage_workspace(skill: str) -> Path:
     workspace = Path(tempfile.mkdtemp(prefix=f"behavioral-{skill}-"))
     dest = workspace / ".claude" / "skills" / skill
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(skill_src, dest)
+    # The skill's behavioral tests live under ``skills/<skill>/evals/``. They are
+    # part of the skill folder but must NOT be staged into the agent's sandbox --
+    # copying them in would pollute the workspace the agent (and the LLM judge)
+    # sees. Exclude them (and stray caches) so the sandbox holds only the skill.
+    shutil.copytree(skill_src, dest, ignore=shutil.ignore_patterns("evals", "__pycache__"))
     return workspace
 
 

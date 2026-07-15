@@ -99,7 +99,9 @@ def staged_skill_dir(skill: str | None) -> Iterator[Path | None]:
     try:
         dest = tmp_root / ".claude" / "skills" / skill
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(skill_src, dest)
+        # Keep the staged skill clean: its ``evals/`` behavioral tests (and any
+        # caches) are not part of what the agent should see at runtime.
+        shutil.copytree(skill_src, dest, ignore=shutil.ignore_patterns("evals", "__pycache__"))
         yield tmp_root
     finally:
         shutil.rmtree(tmp_root, ignore_errors=True)

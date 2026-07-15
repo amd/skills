@@ -5,14 +5,13 @@
 # ///
 """Select which behavioral tests to run, by skill name.
 
-Behavioral tests live one-per-skill (see CONTRIBUTING.md) at:
+Behavioral tests live one-per-skill (see CONTRIBUTING.md) inside the skill:
 
-    eval/behavioral/tests/test_<skill_with_underscores>.py
+    skills/<skill>/evals/test_<skill_with_underscores>.py
 
-and exercise the matching skill under skills/<skill>/. Skill names are
-lowercase-with-hyphens; the test filename swaps the hyphens for underscores
-(``local-ai-use`` -> ``test_local_ai_use.py``) because that is what Python
-import / pytest collection require.
+Skill names are lowercase-with-hyphens; the test filename swaps the hyphens for
+underscores (``local-ai-use`` -> ``test_local_ai_use.py``) because that is what
+Python import / pytest collection require.
 
 This script maps a set of changed files (read from stdin, one path per line)
 to the skills whose behavioral test should run, and is also used to enumerate
@@ -38,21 +37,21 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-TESTS_DIR = REPO_ROOT / "eval" / "behavioral" / "tests"
 SKILLS_DIR = REPO_ROOT / "skills"
 
 TEST_PREFIX = "test_"
 TEST_SUFFIX = ".py"
+EVALS_DIRNAME = "evals"
 
 # Touching any of these means the shared harness (not one skill) changed, so we
 # re-run every behavioral test rather than trying to guess the blast radius.
 # Paths are repo-root-relative and use forward slashes to match `git diff`.
 INFRA_FILES = {
     "eval/behavioral/harness.py",
-    "eval/behavioral/conftest.py",
-    "eval/behavioral/pytest.ini",
     "eval/behavioral/requirements.txt",
     "eval/claude_eval.py",
+    "conftest.py",
+    "pytest.ini",
     ".github/scripts/select_behavioral.py",
     ".github/workflows/behavioral.yml",
 }
@@ -63,29 +62,25 @@ def skill_to_test(skill: str) -> str:
     return f"{TEST_PREFIX}{skill.replace('-', '_')}{TEST_SUFFIX}"
 
 
-def test_to_skill(filename: str) -> str:
-    """`test_local_ai_use.py` -> `local-ai-use` (inverse of skill_to_test)."""
-    stem = filename[len(TEST_PREFIX) : -len(TEST_SUFFIX)]
-    return stem.replace("_", "-")
+def test_path_for(skill: str) -> Path:
+    """`local-ai-use` -> skills/local-ai-use/evals/test_local_ai_use.py."""
+    return SKILLS_DIR / skill / EVALS_DIRNAME / skill_to_test(skill)
 
 
 def is_testable(skill: str) -> bool:
-    """A skill is testable when both its test file and skill folder exist."""
-    has_test = (TESTS_DIR / skill_to_test(skill)).is_file()
+    """A skill is testable when both its test file and its SKILL.md exist."""
+    has_test = test_path_for(skill).is_file()
     has_skill = (SKILLS_DIR / skill / "SKILL.md").is_file()
     return has_test and has_skill
 
 
 def all_testable_skills() -> list[str]:
-    """Every skill that currently has a behavioral test and a skill folder."""
-    if not TESTS_DIR.is_dir():
+    """Every skill that currently has a behavioral test under evals/."""
+    if not SKILLS_DIR.is_dir():
         return []
-    skills = set()
-    for path in TESTS_DIR.glob(f"{TEST_PREFIX}*{TEST_SUFFIX}"):
-        skill = test_to_skill(path.name)
-        if is_testable(skill):
-            skills.add(skill)
-    return sorted(skills)
+    return sorted(
+        p.name for p in SKILLS_DIR.iterdir() if p.is_dir() and is_testable(p.name)
+    )
 
 
 def select_from_changes(changed: list[str]) -> list[str]:
@@ -98,18 +93,12 @@ def select_from_changes(changed: list[str]) -> list[str]:
 
     selected = set()
     for path in normalized:
-        # A change inside skills/<name>/...
+        # A change inside skills/<name>/... (this includes the skill's own
+        # behavioral test at skills/<name>/evals/test_<name>.py).
         if path.startswith("skills/"):
             parts = path.split("/")
             if len(parts) >= 2 and is_testable(parts[1]):
                 selected.add(parts[1])
-        # A change to a behavioral test file itself.
-        if path.startswith("eval/behavioral/tests/") and path.endswith(TEST_SUFFIX):
-            name = Path(path).name
-            if name.startswith(TEST_PREFIX):
-                skill = test_to_skill(name)
-                if is_testable(skill):
-                    selected.add(skill)
     return sorted(selected)
 
 
