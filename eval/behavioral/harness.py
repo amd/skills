@@ -10,7 +10,7 @@ asserts what the agent *should* and *should not* have done. Tests read like:
     from harness import claude
 
     def test_image_generation():
-        with claude("sonnet", skill="local-ai-use") as agent:
+        with claude("opus", skill="local-ai-use") as agent:
             run = agent.prompt("Use local AI, then generate a cat to out.png.")
 
             # Deterministic checks (cheap, fail fast).
@@ -45,13 +45,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from claude_eval import SKILLS_DIR  # noqa: E402
 
 DEFAULT_SKILL = os.environ.get("BEHAVIORAL_SKILL", "local-ai-use")
-DEFAULT_MODEL = os.environ.get("BEHAVIORAL_MODEL", "sonnet")
+DEFAULT_MODEL = os.environ.get("BEHAVIORAL_MODEL", "opus")
 DEFAULT_EFFORT = os.environ.get("BEHAVIORAL_EFFORT", "high")
 
-# Automated runs are capped at sonnet: a behavioral run makes real cloud calls
-# (agent run + LLM judge), so a workflow picking an expensive model can quietly
-# run up a large bill. No override -- the cap is non-negotiable in CI.
-AUTOMATED_MODEL = "sonnet"
+# Automated runs are pinned to opus: a behavioral run makes real cloud calls
+# (agent run + LLM judge), so pinning the model keeps CI results consistent.
+# No override -- the pin is non-negotiable in CI.
+AUTOMATED_MODEL = "opus"
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -64,12 +64,12 @@ def _is_automated_env() -> bool:
 
 
 def _enforce_model_policy(model: str | None) -> str | None:
-    """Coerce non-sonnet models to sonnet in CI; pass through otherwise."""
-    if model is None or not _is_automated_env() or "sonnet" in model.lower():
+    """Coerce non-opus models to opus in CI; pass through otherwise."""
+    if model is None or not _is_automated_env() or "opus" in model.lower():
         return model
     print(
         f"[behavioral] automated run: coercing model '{model}' -> "
-        f"'{AUTOMATED_MODEL}' to cap token usage.",
+        f"'{AUTOMATED_MODEL}' to pin the CI model.",
         flush=True,
     )
     return AUTOMATED_MODEL
@@ -334,7 +334,7 @@ class Agent:
 
     Use as a context manager so the temp workspace is always cleaned up::
 
-        with claude("sonnet", skill="local-ai-use") as agent:
+        with claude("opus", skill="local-ai-use") as agent:
             run = agent.prompt("...")
     """
 
