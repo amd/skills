@@ -7,7 +7,8 @@
 Run locally (needs the `claude` CLI authenticated and a reachable Lemonade
 Server -- otherwise the suite skips):
 
-    cd eval/behavioral && pytest ../../skills/local-ai-use/evals/evals.py
+    cd eval/behavioral
+    python -m pytest -c pytest.ini -p conftest ../../skills/local-ai-use/evals/evals.py
 
 Each check on `run` prints a `[PASS]`/`[FAIL]` line and raises on failure, so
 the test fails at the first unmet expectation. `logs_contains` /

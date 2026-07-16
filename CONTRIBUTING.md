@@ -222,7 +222,8 @@ prerequisites, e.g. a reachable Lemonade Server for `local-ai-use`):
 
 ```bash
 pip install -r eval/behavioral/requirements.txt
-cd eval/behavioral && pytest ../../skills/local-ai-use/evals/evals.py
+cd eval/behavioral
+python -m pytest -c pytest.ini -p conftest ../../skills/local-ai-use/evals/evals.py
 ```
 
 In CI, the `behavioral` workflow runs the affected skill's tests when a PR

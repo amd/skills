@@ -6,7 +6,9 @@
 
 Run locally (needs the `claude` CLI authenticated):
 
-    cd eval/behavioral && pytest ../../skills/local-ai-app-integration/evals/evals.py
+    cd eval/behavioral
+    python -m pytest -c pytest.ini -p conftest \
+        ../../skills/local-ai-app-integration/evals/evals.py
 
 Prompts are scoped to code-generation only ("Do not download or install
 anything") to avoid the agent attempting the GitHub download, which hangs

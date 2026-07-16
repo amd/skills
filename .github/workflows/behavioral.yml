@@ -137,7 +137,7 @@ jobs:
           set -euo pipefail
           test_file="../../skills/${{ matrix.skill }}/evals/evals.py"
           echo "Running $test_file"
-          pytest "$test_file"
+          python -m pytest -c pytest.ini -p conftest "$test_file"
 
       - name: Run behavioral test for ${{ matrix.skill }} (Windows)
         if: matrix.os == 'Windows'
@@ -148,7 +148,7 @@ jobs:
           $skill = "${{ matrix.skill }}"
           $test_file = "../../skills/$skill/evals/evals.py"
           Write-Host "Running $test_file"
-          pytest $test_file
+          python -m pytest -c pytest.ini -p conftest $test_file
 
   # Single aggregate gate. Mark THIS check required in branch protection.
   #
