@@ -17,8 +17,9 @@ Prerequisites (local run):
 
     pytest skills/tracelens-analysis-orchestrator/evals/evals.py -s
 
-This test is slow (TraceLens install + full orchestrator workflow). Outside CI,
-``TRACELENS_BEHAVIORAL_MODEL`` defaults to ``opus``; CI coerces to ``sonnet``.
+This test is slow (TraceLens install + full orchestrator workflow). Both
+locally and in CI the model defaults to ``opus`` (override locally with
+``TRACELENS_BEHAVIORAL_MODEL``).
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-from harness import _is_automated_env, claude
+from harness import claude
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32",
@@ -72,8 +73,6 @@ class RepeatabilityCase:
 
 
 def _analysis_model() -> str:
-    if _is_automated_env():
-        return "sonnet"
     return os.environ.get(
         "TRACELENS_BEHAVIORAL_MODEL",
         os.environ.get("BEHAVIORAL_MODEL", "opus"),

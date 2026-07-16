@@ -19,7 +19,7 @@ from harness import claude
 
 
 def test_generate_image_of_a_cat():
-    agent_configs = [(claude, "sonnet")]
+    agent_configs = [(claude, "opus")]
     for agent, model in agent_configs:
         with agent(model, skill="local-ai-use") as agent:
             run = agent.prompt(
