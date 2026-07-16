@@ -15,7 +15,7 @@ Prerequisites (local run):
     pip install -r eval/behavioral/requirements.txt
     git, python3, and network access to clone AMD-AGI/TraceLens and install deps
 
-    pytest eval/behavioral/tests/test_tracelens_analysis_orchestrator.py -s
+    cd eval/behavioral && pytest ../../skills/tracelens-analysis-orchestrator/evals/evals.py
 
 This test is slow (TraceLens install + full orchestrator workflow). Outside CI,
 ``TRACELENS_BEHAVIORAL_MODEL`` defaults to ``opus``; CI coerces to ``opus``.
