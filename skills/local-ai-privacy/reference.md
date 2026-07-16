@@ -1,258 +1,202 @@
 # Local AI Privacy: Reference
 
+One flow, three scripts, one shared engine:
+
+| File | Role |
+|---|---|
+| `scripts/redact.py` | The redaction gate - the only thing that ever opens the originals |
+| `scripts/harden.py` | Locks deny/allow permission rules into `~/.claude/settings.json` |
+| `scripts/redaction_core.py` | Shared engine: placeholder map, regex detectors, local-LLM client |
+| `data/deidentify-prompt.txt` | Default prompt: hide *who*, keep *what* |
+| `data/redaction-prompt.txt` | Strict prompt: flag anything sensitive at all |
+
 ## Contents
 
-- [How it works](#how-it-works)
-- [Endpoints](#endpoints)
-- [Proxy log and verification](#proxy-log-and-verification)
-- [Troubleshooting](#troubleshooting)
-- [Proxy options](#proxy-options)
-- [Model picker](#model-picker)
+- [redact.py: usage and flags](#redactpy-usage-and-flags)
 - [What gets detected](#what-gets-detected)
-- [Redaction system prompt](#redaction-system-prompt)
-- [API key handling](#api-key-handling)
-- [Placeholder format and the session map](#placeholder-format-and-the-session-map)
+- [Placeholder format](#placeholder-format)
+- [File-type handling](#file-type-handling)
+- [Exit codes](#exit-codes)
+- [Manifest schema](#manifest-schema)
+- [harden.py and hardening](#hardenpy-and-hardening)
+- [Model picker](#model-picker)
 - [Limitations](#limitations)
 
 ---
 
-## How it works
+## redact.py: usage and flags
 
-`start.py` runs once. It:
-1. Reads `ANTHROPIC_BASE_URL` from `~/.claude/settings.json` → that is the real cloud endpoint
-2. Writes `~/.claude/skills/local-ai-privacy/proxy.conf` with the cloud URL and Lemonade config
-3. Starts `proxy.py` as a background process (survives terminal close) and writes its PID to `proxy.pid`
-4. **Only if the proxy answers its health check**, patches `settings.json`: `ANTHROPIC_BASE_URL` → `http://127.0.0.1:8317`. If the proxy fails to come up, `start.py` aborts and leaves `settings.json` untouched, so setup can never strand Claude Code on a dead endpoint. If port 8317 is already taken it auto-selects a free port and writes that everywhere.
+Reads the ORIGINAL files, redacts them locally, writes masked copies to an
+output directory, and prints a receipt. Its stdout is part of the trust
+boundary: only masked paths, statuses, and entity **type counts** are
+printed - never file content, never raw values, and error messages show
+exception class names only (a message could echo content).
 
-After a Claude Code restart, all requests flow:
-
-```
-Claude Code → proxy (127.0.0.1:8317) → local model redaction → real cloud endpoint
-                                        (on-device)             (masked text only)
-            ← rehydrated response     ←                        ←
+```bash
+python3 redact.py INPUT [INPUT ...] -o OUTPUT_DIR
 ```
 
-The proxy keeps a single **in-memory** map for the life of the process:
-`real value → placeholder` (and back). Every endpoint shares it, so the preview
-the user approves and the request that actually reaches the cloud use identical
-placeholders, and the reply can be rehydrated unambiguously. The map is never
-written to disk; restarting the proxy clears it.
-
-`stop.py` kills the proxy process and restores the original `ANTHROPIC_BASE_URL`
-(reading the actual port back from `proxy.conf`).
-
----
-
-## Endpoints
-
-| Method / path | Purpose | Touches cloud? |
+| Flag | Default | Meaning |
 |---|---|---|
-| `GET /health` | Liveness check (`{"status":"ok"}`). Used by `start.py` and the skill. | No |
-| `POST /redact` | **Preview.** Body `{"text": "..."}` (or a full request). Runs the local model, updates the session map, and returns the entities that will be masked. | **No — local only** |
-| `POST /v1/messages` | **Load-bearing.** Redacts `system` + every message + tool blocks, forwards only the masked body to the cloud, then rehydrates placeholders in the response. | Yes (masked) |
-| anything else | Passed through unchanged (e.g. `GET /v1/models`). | Yes |
+| `-o, --output` | (required) | Directory for redacted copies. Must be outside the inputs. |
+| `--lemonade-url` | `http://localhost:13305` | Lemonade server |
+| `--model` | `Qwen3.6-35B-A3B-NoThinking` | Redaction model (see [Model picker](#model-picker)) |
+| `--prompt-file` | `data/deidentify-prompt.txt` | Redaction system prompt |
+| `--retries` | `3` | LLM retries per chunk before failing closed |
+| `--max-tokens` | `8192` | Local model reply cap (raise for thinking models) |
+| `--max-file-mb` | `20` | Files larger than this are skipped |
 
-`/redact` response shape:
-```json
-{
-  "ok": true,
-  "masked": "My SSN is [SSN_1], email [EMAIL_1] — draft a dispute letter.",
-  "entities": [
-    {"type": "SSN",   "original": "123-45-6789", "placeholder": "[SSN_1]"},
-    {"type": "EMAIL", "original": "a@b.com",      "placeholder": "[EMAIL_1]"}
-  ]
-}
-```
+Hidden files, symlinks, and anything under the output dir are skipped.
+`LEMONADE_API_KEY` is honored if set. No third-party Python packages are
+required.
 
-Call it yourself from a terminal to confirm the masking without touching the
-cloud (see the "Verify it's working" section in SKILL.md).
+**The prompt matters:** the default `deidentify-prompt.txt` redacts *who*
+(names, contacts, IDs, DOB, facility names, secrets) but keeps *what* (lab
+values, medications, diagnoses, diet, visit dates), so the copies stay
+analyzable. For maximum-strictness redaction of anything sensitive at all -
+including clinical content, proprietary code, and business figures - pass
+`--prompt-file data/redaction-prompt.txt`. Both are plain text; edit them
+to widen or narrow detection, no code change needed.
 
----
+## What gets detected
 
-## Proxy log and verification
+Three passes feed one placeholder map (same value → same placeholder across
+all files in a run):
 
-The proxy writes to `~/.claude/skills/local-ai-privacy/proxy.log`.
+1. **Deterministic regex** - SSN, email, phone, credit card (Luhn-validated),
+   IPv4, `MRN: <value>`, `DOB: <value>`. These can't be missed by a flaky
+   model, and they double as the **post-redaction scrub check**: every output
+   is re-scanned, and a file with any remaining hit is withheld instead of
+   written.
+2. **Local LLM** (open-ended) - names, addresses, relatives, facility names,
+   freeform secrets; anything the prompt describes, in 8,000-char chunks.
+3. **Name-token aliasing** (deterministic) - once a person-typed value like
+   "Margaret Walsh" or "Dr. Anita Krishnan" is in the map, its component
+   words ("Margaret", "Walsh", "Krishnan") and initials ("MW", "AK") are
+   masked everywhere at word boundaries, mapped to the same placeholder. The
+   LLM reliably flags a person in structured fields ("Patient:", "From:")
+   but can miss casual prose mentions ("Hi Margaret", a "- AK" sign-off);
+   this pass makes every later mention deterministic once the person has
+   been found once.
 
-```bash
-tail -f ~/.claude/skills/local-ai-privacy/proxy.log
-```
+Filenames are ingested too: `john-smith-labs.csv` becomes
+`[NAME_1]-labs.csv` in the output dir, the receipt, and the manifest, so
+identity can't leak through paths.
 
-Representative log lines:
-```
-[proxy] 10:23:01 Preview: 2 entities in submitted text
-[proxy] 10:23:04 Forwarding redacted request (2 known entities)
-```
+## Placeholder format
 
-Confirm the proxy is running:
-```bash
-curl -s http://localhost:8317/health
-# → {"status":"ok"}
-```
+`[TYPE_N]` - the entity category in caps plus a 1-based counter unique per
+type (`[NAME_1]`, `[SSN_2]`). Placeholders are assigned by the engine, not
+the model, and are stable for the whole run: the same real value always gets
+the same placeholder in every file. The engine refuses to re-redact its own
+tokens, so placeholders never nest (`[SSN_1]` → `[SSN_2]` → …). The
+value↔placeholder map lives only in RAM and is discarded when the script
+exits - nothing sensitive is ever written to disk.
 
-Try a preview without leaving your machine:
-```bash
-curl -s http://localhost:8317/redact -H 'Content-Type: application/json' \
-  -d '{"text":"My SSN is 123-45-6789 and email a@b.com"}' | python3 -m json.tool
-```
+## File-type handling
 
-Check `settings.json` was patched:
-```bash
-python3 -c "import json,os; d=json.load(open(os.path.expanduser('~/.claude/settings.json'))); print(d['env']['ANTHROPIC_BASE_URL'])"
-# → http://127.0.0.1:8317
-```
+| Type | Handling |
+|---|---|
+| `.txt .md .csv .tsv .json .xml .yaml .html .log .ini .toml`, extensionless text | Redacted as text |
+| `.pdf` | Text extracted via `pdftotext` (poppler) or `pypdf`, redacted, written as `<name>.pdf.txt`. No extractor installed, or no text layer → **skipped, never copied** |
+| `.docx` | Text extracted from the XML, written as `<name>.docx.txt` |
+| Images (`.png .jpg .tiff` …) | OCR via `tesseract` if installed, redacted text written as `<name>.<ext>.txt`. The image itself is **never copied**. No tesseract → skipped |
+| Other binaries | Skipped, never copied |
 
----
+## Exit codes
 
-## Troubleshooting
-
-| Symptom | Cause | Fix |
+| Code | Meaning | Claude's obligation |
 |---|---|---|
-| `Cannot reach Lemonade Server` at start | Server not running | `lemonade serve` |
-| `ModuleNotFoundError: requests` | Missing dependency | `pip install requests` |
-| Claude Code gets connection refused | Proxy died or not started | Re-run `start.py`, check `proxy.log` |
-| Claude Code gets 502 (`Cloud error`) | Cloud endpoint unreachable | Check network; verify original URL in `proxy.conf` |
-| Claude Code gets 502 (`redaction could not be completed`) | Lemonade unreachable, or the model kept returning unparseable output across all retries. The proxy **fails closed** — it blocks rather than sending unredacted data to the cloud | Check Lemonade is up and see `proxy.log`; retry. For persistent parse failures, raise `redaction_retries` or set a stronger `redaction_model` (e.g. `Qwen3-4B-GGUF`) in `proxy.conf` |
-| Response shows `[SSN_1]` literally | Cloud model altered the placeholder so rehydration missed it | Usually transient; the injected system note tells the model to preserve tokens. Check `proxy.log` |
-| A `[SSN_1]` shows literally right after a proxy restart | The in-memory map was cleared, so a placeholder with no raw value left in the transcript can't be rehydrated | Usually self-heals: your raw text is still in the transcript and is re-masked to the same placeholder on the next request. If not, start a fresh message |
-| `Address already in use` at start | Another service on 8317 | `start.py` now auto-picks a free port; no action needed |
-| Proxy slow on first request after restart | Model cold-load by Lemonade | Normal — subsequent requests are fast once the model is loaded |
+| `0` | Everything redacted (unsupported files may be skipped - see receipt) | Analyze the output dir |
+| `1` | Partial: some files withheld (post-check hit) or failed (LLM unusable) | Analyze only what was written; lead with the withheld/failed list |
+| `2` | Preflight failed (Lemonade down, model missing, bad paths); nothing processed | Surface the printed fix; **never** touch the originals |
+| `3` | Ran, but nothing could be redacted | Same as 2 |
 
-If the proxy dies unexpectedly:
-```bash
-tail -20 ~/.claude/skills/local-ai-privacy/proxy.log
-python3 ~/.claude/skills/local-ai-privacy/scripts/start.py
-```
+## Manifest schema
 
----
-
-## Proxy options
-
-`proxy.conf` controls all proxy behaviour. Edit it to change defaults without
-re-running `start.py`:
+`OUTPUT_DIR/manifest.json` - all paths masked, no raw values anywhere:
 
 ```json
 {
-  "cloud_url":            "https://api.anthropic.com",
-  "lemonade_url":         "http://localhost:13305",
-  "redaction_model":      "Qwen3.6-35B-A3B-NoThinking",
-  "proxy_port":           8317,
-  "redaction_retries":    3,
-  "redaction_max_tokens": 8192
+  "created": "2026-07-14T12:00:00",
+  "tool": "local-ai-privacy redact.py",
+  "model": "Qwen3.6-35B-A3B-NoThinking",
+  "files": [
+    {"file": "health-data/[NAME_1]-labs.csv", "status": "redacted",
+     "kind": "text", "output": "health-data/[NAME_1]-labs.csv",
+     "entities": {"NAME": 2, "SSN": 1}, "note": null}
+  ],
+  "totals": {"redacted": 4, "skipped": 1, "withheld": 0, "failed": 0,
+             "entities": {"NAME": 8, "SSN": 2}}
 }
 ```
 
-`redaction_retries` (default `3`) is how many times the proxy re-asks the
-local model when it returns unparseable output before giving up. Small models
-are non-deterministic, so a couple of retries drives the failure rate near
-zero. If all attempts fail the proxy **fails closed** — it returns a 502 and
-blocks the request rather than forwarding unredacted text to the cloud.
+`status` is one of `redacted | skipped | withheld | failed`.
 
-`redaction_max_tokens` (default `8192`) caps the local model's reply. Keep it
-generous so a large or reasoning model can't get its JSON truncated (which would
-fail closed). Raise it (e.g. `16384`) for a thinking model.
+## harden.py and hardening
 
-After editing, restart the proxy:
-```bash
-python3 ~/.claude/skills/local-ai-privacy/scripts/stop.py
-python3 ~/.claude/skills/local-ai-privacy/scripts/start.py
-```
-
----
+- **Automatic (harden.py):** the skill flow runs
+  `harden.py <originals> <output-dir>` as its FIRST tool call, before the
+  gate ever opens a file — so even if redaction fails and the user retries
+  in a fresh session, that session already has the block in place. It
+  merges two rules into `~/.claude/settings.json`: **deny** `Read` on the
+  originals (the harness then mechanically blocks reads, independent of
+  model behavior) and **allow** `Read` on the copies (no more prompts for
+  them). Idempotent, preserves all other settings, writes
+  `settings.json.bak` first, refuses to write anything that doesn't
+  re-parse, and never touches a malformed settings file. Paths under home
+  become `~/...` rules; others `//abs` rules. Effective from the **next**
+  session - permissions snapshot at session start. Each protected folder
+  accumulates its own rule pair.
+- **Zero-trust:** run the `redact.py` command in your own terminal *before*
+  prompting Claude, then share only the output dir. No model of any kind is
+  in the loop while the originals are open.
+- **Verify:** `diff -r <originals> <output-dir>` locally - the receipt
+  prints the exact command. Redacted copies contain only `[TYPE_N]`
+  placeholders, so reviewing them is safe.
+- **Residual gap:** a `Read` deny rule does not cover `cat`/`python3 -c`
+  through Bash. The skill's hard rules forbid that, and Bash prompts make
+  it visible, but the mechanically airtight option remains the zero-trust
+  variant.
 
 ## Model picker
 
 | Model | Approx size | Notes |
 |---|---|---|
-| `Qwen3.6-35B-A3B-NoThinking` | ~18 GB | **Default.** 35B MoE with ~3B active params — strong PII coverage at near-small-model speed, and no reasoning overhead so it returns clean JSON. |
-| `Qwen3.6-35B-A3B-ThinkingCoder` | ~18 GB | Same base, but emits `<think>` reasoning first. Higher latency on every request and needs a larger `redaction_max_tokens`; usually not worth it for extraction. |
-| `Qwen3-1.7B-GGUF` | ~1.1 GB | Lightweight fallback. Fastest and lowest RAM, but weaker coverage of unusual/edge-case PII. |
+| `Qwen3.6-35B-A3B-NoThinking` | ~18 GB | **Default.** 35B MoE with ~3B active params - strong PII coverage at near-small-model speed, and no reasoning overhead so it returns clean JSON. |
+| `Qwen3.6-35B-A3B-ThinkingCoder` | ~18 GB | Same base, but emits `<think>` reasoning first. Higher latency and needs a larger `--max-tokens`; usually not worth it for extraction. |
+| `Qwen3-1.7B-GGUF` | ~1.1 GB | Lightweight fallback. Fastest and lowest RAM, but weaker coverage of unusual/edge-case PII. The regex pass and post-check still backstop the structured kinds. |
 
-Switch by setting `redaction_model` in `proxy.conf` (or `LOCALAI_REDACTION_MODEL=... python3 start.py`), then restart the proxy. Pull first if needed: `lemonade pull <model>`. For a thinking model, also raise `redaction_max_tokens` (e.g. `16384`) so reasoning can't truncate the JSON.
-
----
-
-## What gets detected
-
-Detection is **open-ended**, not a fixed list. The model is asked to flag
-anything sensitive, private, confidential, or proprietary, and to pick its own
-short label. The labels below are just common examples of what it returns:
-
-`NAME`, `EMAIL`, `PHONE`, `ADDRESS`, `SSN` / `GOVERNMENT_ID`, `DOB`, `CARD`,
-`BANK`, `PASSWORD`, `API_KEY`, `PRIVATE_KEY`, `INTERNAL_HOST`, `DB_CONN`,
-`MEDICAL_ID`, `PROJECT` (unreleased product/project names), `SOURCE`
-(proprietary code), `SECRET` (anything else).
-
-Because the label is freeform, the proxy also catches things a fixed PII list
-would miss — internal hostnames, unreleased codenames, trade secrets,
-confidential figures — as long as the local model recognises them as sensitive.
-
----
-
-## Redaction system prompt
-
-Stored in `data/redaction-prompt.txt` inside the skill folder. The proxy reads
-it on every request; edit it to widen or narrow what counts as sensitive — no
-code change, no restart needed.
-
-The model returns a JSON array of `{"text": <exact span>, "label": <TYPE>}`.
-The proxy assigns the placeholder numbers itself, so the model's own numbering
-does not matter, and it skips any span shorter than 3 characters (a 1–2 char
-match would smear across unrelated text).
-
----
-
-## API key handling
-
-The proxy forwards all request headers from Claude Code to the cloud
-unchanged — `x-api-key`, `anthropic-version`, custom headers. No auth changes
-are needed.
-
-If `LEMONADE_API_KEY` is set in your environment, the proxy adds it when
-calling Lemonade.
-
----
-
-## Placeholder format and the session map
-
-Format: `[TYPE_N]` where TYPE is the entity category in caps and N is a
-**1-based** counter unique per type. Placeholders are assigned by the proxy (not
-the model) and are **stable for the whole proxy session**: the same real value
-always maps to the same placeholder across every request (and the `/redact`
-endpoint), and a new value gets the next index for its type.
-
-Because the map is shared, PII discovered once (in the current or an earlier
-turn, or via `/redact`) is masked in every later request even if the model does
-not re-flag it — so repeated values cannot slip through on a later turn. The
-proxy also refuses to redact its **own** placeholder tokens (e.g. a `[SSN_1]`
-that reappears in a tool result), which prevents runaway nesting like
-`[SSN_1]` → `[SSN_2]` → `[SSN_3]`.
-
-Discovery runs the local model over `system`, all message content, and tool
-blocks, in line-aligned chunks. Chunks already scanned in a previous turn are
-cached by hash and skipped, so the whole transcript is not re-scanned every
-request.
-
-On non-streaming responses the proxy rehydrates all `content` blocks before
-returning to Claude Code. On SSE streaming responses it **buffers text across
-`text_delta` events** and only rehydrates at safe boundaries, so a placeholder
-split across streaming chunks (`[SSN` then `_1]`) is still restored correctly.
-It also injects a short system note instructing the cloud model to preserve
-`[TYPE_N]` tokens verbatim.
-
----
+Switch with `--model NAME` (or `LOCALAI_REDACTION_MODEL` is honored as a
+default by older setups). Pull first if needed: `lemonade pull <model>`.
+For a thinking model, also raise `--max-tokens` (e.g. `16384`) so reasoning
+can't truncate the JSON.
 
 ## Limitations
 
-- Secrets encoded in base64, ROT13, or custom obfuscation are not detected
-- Implicit references ("the key I mentioned earlier") with no literal value present
-- Non-text content blocks (images, binary data) are passed through unredacted
-- Very long single lines exceeding the model's context window (~32K tokens for 1.7B)
-- The in-memory map is cleared when the proxy restarts, but self-heals: your raw
-  text stays in Claude Code's transcript and is re-discovered (and re-mapped to
-  the same placeholder) on the next request
-- Placeholder rehydration is a literal string swap, so if the cloud model
-  rewrites a token (e.g. `[SSN_1]` → `SSN #1`) that value stays masked in the
-  reply
-
-For strict compliance (HIPAA, PCI-DSS), layer a deterministic PII scanner
-on top.
+- **Prompt text is NOT protected** - only file contents. The user must refer
+  to files by path, never paste contents into the prompt.
+- The "never read or list the originals" rule is behavioral (SKILL.md), not
+  mechanical: a directory listing of the input folder would put unmasked
+  filenames into the conversation. The harden.py deny rule makes reads
+  mechanically impossible from the next session onward; approve Bash
+  commands touching the input path only if they are the `redact.py` or
+  `harden.py` invocations.
+- Visual redaction of images is not attempted: images are OCR'd (text only)
+  or skipped; originals are never copied either way.
+- Ordinary dates, ages, and state/country names are kept by default (needed
+  for trend analysis); a determined re-identifier can correlate them. Edit
+  `data/deidentify-prompt.txt` to tighten.
+- Secrets in base64/obfuscated encodings are not detected.
+- The LLM pass can miss unusual identifiers; the regex post-check only
+  guarantees the *structured* kinds never slip through. Name-token aliasing
+  closes prose mentions of people the LLM found at least once, but a person
+  it never flags anywhere still slips, as do all-lowercase prose mentions of
+  a name ("margaret said…"). The `diff -r` verify step exists precisely so
+  the user can eyeball the rest.
+- Token aliasing is deliberately over-eager: a surname that is also a common
+  capitalized word (a patient named June, a Dr. Park) will be masked in
+  every context, including dates and places. That is the safe failure
+  direction, but it can degrade analysis of those spans.
+- For strict compliance (HIPAA safe harbor, PCI-DSS), layer a dedicated
+  deterministic scanner on top.
