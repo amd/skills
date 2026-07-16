@@ -46,8 +46,12 @@ jobs:
     name: Select behavioral tests
     runs-on: ubuntu-latest
     outputs:
-      skills: ${{ steps.select.outputs.skills }}
-      any: ${{ steps.select.outputs.any }}
+      # Skills that run on the strix_halo runners (everything except the
+      # Instinct skill, which needs dedicated MI300X hardware).
+      strix_skills: ${{ steps.select.outputs.strix_skills }}
+      strix_any: ${{ steps.select.outputs.strix_any }}
+      # Whether serving-llms-on-instinct is in scope for this run.
+      instinct: ${{ steps.select.outputs.instinct }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -75,18 +79,32 @@ jobs:
               | uv run .github/scripts/select_behavioral.py --changed)
           fi
           echo "Selected skills: $skills"
-          echo "skills=$skills" >> "$GITHUB_OUTPUT"
-          if [ "$skills" = "[]" ]; then
-            echo "any=false" >> "$GITHUB_OUTPUT"
+
+          # serving-llms-on-instinct serves models on AMD Instinct GPUs, so it
+          # must run on the MI300X runner rather than the strix_halo ones.
+          # Split it out into its own list/flag; everything else stays on the
+          # existing strix_halo matrix.
+          instinct_name="serving-llms-on-instinct"
+          strix=$(printf '%s' "$skills" | python3 -c \
+            "import sys,json;n='$instinct_name';print(json.dumps([s for s in json.load(sys.stdin) if s!=n]))")
+          has_instinct=$(printf '%s' "$skills" | python3 -c \
+            "import sys,json;n='$instinct_name';print('true' if n in json.load(sys.stdin) else 'false')")
+
+          echo "strix_skills=$strix"
+          echo "instinct=$has_instinct"
+          echo "strix_skills=$strix" >> "$GITHUB_OUTPUT"
+          echo "instinct=$has_instinct" >> "$GITHUB_OUTPUT"
+          if [ "$strix" = "[]" ]; then
+            echo "strix_any=false" >> "$GITHUB_OUTPUT"
           else
-            echo "any=true" >> "$GITHUB_OUTPUT"
+            echo "strix_any=true" >> "$GITHUB_OUTPUT"
           fi
 
   behavioral:
     name: Behavioral (${{ matrix.skill }} on ${{ matrix.os }})
     needs: discover
-    # Run whenever the change affects something testable.
-    if: needs.discover.outputs.any == 'true'
+    # Run whenever the change affects a strix_halo-testable skill.
+    if: needs.discover.outputs.strix_any == 'true'
     # Self-hosted Strix Halo runners. The OS label (Linux / Windows) comes from
     # the matrix below so each skill is exercised on both platforms.
     runs-on: [self-hosted, strix_halo, "${{ matrix.os }}"]
@@ -97,7 +115,7 @@ jobs:
       # One skill / OS failing should not hide the others' results.
       fail-fast: false
       matrix:
-        skill: ${{ fromJson(needs.discover.outputs.skills) }}
+        skill: ${{ fromJson(needs.discover.outputs.strix_skills) }}
         os: [Linux, Windows]
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
@@ -150,26 +168,77 @@ jobs:
           Write-Host "Running $test_file"
           python -m pytest -c pytest.ini -p conftest $test_file
 
+  # serving-llms-on-instinct actually serves a model on an AMD Instinct GPU, so
+  # it can't run on the strix_halo runners above. It gets its own job on the
+  # self-hosted MI300X runner. Linux-only (ROCm + Docker); no Windows leg.
+  behavioral-instinct:
+    name: Behavioral (serving-llms-on-instinct on MI300X)
+    needs: discover
+    if: needs.discover.outputs.instinct == 'true'
+    runs-on: [self-hosted, Linux, X64, mi300x, gpu, rocm]
+    timeout-minutes: 45
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
+      ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
+      ANTHROPIC_CUSTOM_HEADERS: |
+        Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
+        user: a1_ucicd
+      BEHAVIORAL_SKILL: serving-llms-on-instinct
+      # Model pin: opus only. The harness also enforces this under CI.
+      BEHAVIORAL_MODEL: opus
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install the claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install behavioral test dependencies
+        run: pip install -r eval/behavioral/requirements.txt
+
+      - name: Run behavioral test for serving-llms-on-instinct
+        working-directory: eval/behavioral
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_file="../../skills/serving-llms-on-instinct/evals/evals.py"
+          echo "Running $test_file"
+          python -m pytest -c pytest.ini -p conftest "$test_file"
+
   # Single aggregate gate. Mark THIS check required in branch protection.
   #
   #   * nothing testable changed -> pass (neutral).
   #   * testable change          -> pass iff the behavioral job passed.
   behavioral-gate:
     name: behavioral
-    needs: [discover, behavioral]
+    needs: [discover, behavioral, behavioral-instinct]
     if: always()
     runs-on: ubuntu-latest
     env:
       DISCOVER_RESULT: ${{ needs.discover.result }}
       BEHAVIORAL_RESULT: ${{ needs.behavioral.result }}
-      AFFECTED: ${{ needs.discover.outputs.any }}
-      SKILLS: ${{ needs.discover.outputs.skills }}
+      INSTINCT_RESULT: ${{ needs.behavioral-instinct.result }}
+      STRIX_ANY: ${{ needs.discover.outputs.strix_any }}
+      INSTINCT_AFFECTED: ${{ needs.discover.outputs.instinct }}
+      STRIX_SKILLS: ${{ needs.discover.outputs.strix_skills }}
     steps:
       - name: Verify behavioral results
         run: |
-          echo "discover:    $DISCOVER_RESULT"
-          echo "behavioral:  $BEHAVIORAL_RESULT"
-          echo "affected:    $AFFECTED ($SKILLS)"
+          echo "discover:            $DISCOVER_RESULT"
+          echo "behavioral (strix):  $BEHAVIORAL_RESULT"
+          echo "behavioral-instinct: $INSTINCT_RESULT"
+          echo "strix affected:      $STRIX_ANY ($STRIX_SKILLS)"
+          echo "instinct affected:   $INSTINCT_AFFECTED"
 
           # If discovery itself failed, surface that rather than guessing.
           if [ "$DISCOVER_RESULT" != "success" ]; then
@@ -178,15 +247,24 @@ jobs:
           fi
 
           # No skill or behavioral test changed: nothing to gate on.
-          if [ "$AFFECTED" != "true" ]; then
+          if [ "$STRIX_ANY" != "true" ] && [ "$INSTINCT_AFFECTED" != "true" ]; then
             echo "No behavioral tests affected by this change."
             exit 0
           fi
 
-          # Something testable changed: the gate reflects the test result.
-          if [ "$BEHAVIORAL_RESULT" = "success" ]; then
-            echo "All affected behavioral tests passed."
-            exit 0
+          # Each affected leg must have passed. A leg that wasn't triggered is
+          # 'skipped', which we ignore.
+          failed=0
+          if [ "$STRIX_ANY" = "true" ] && [ "$BEHAVIORAL_RESULT" != "success" ]; then
+            echo "Strix behavioral tests did not pass ($BEHAVIORAL_RESULT)." >&2
+            failed=1
           fi
-          echo "One or more behavioral tests failed ($BEHAVIORAL_RESULT)." >&2
-          exit 1
+          if [ "$INSTINCT_AFFECTED" = "true" ] && [ "$INSTINCT_RESULT" != "success" ]; then
+            echo "Instinct behavioral test did not pass ($INSTINCT_RESULT)." >&2
+            failed=1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "All affected behavioral tests passed."
+          exit 0
