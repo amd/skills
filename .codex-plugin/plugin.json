@@ -1,0 +1,46 @@
+{
+  "name": "amd-skills",
+  "version": "0.1.0",
+  "description": "Agent Skills for AMD-optimized workflows.",
+  "author": {
+    "name": "AMD"
+  },
+  "homepage": "https://github.com/amd/skills",
+  "repository": "https://github.com/amd/skills",
+  "license": "MIT",
+  "keywords": [
+    "amd",
+    "rocm",
+    "hip",
+    "ryzen-ai",
+    "vllm",
+    "lemonade",
+    "local-ai"
+  ],
+  "skills": [
+    "./skills/local-ai-use",
+    "./skills/local-ai-app-integration",
+    "./skills/serving-llms-on-instinct",
+    "./skills/tracelens-analysis-orchestrator"
+  ],
+  "interface": {
+    "displayName": "AMD Skills",
+    "shortDescription": "Agent Skills for AMD-optimized workflows.",
+    "longDescription": "AMD's verified Agent Skills in one plugin: route image/audio through local AI on Ryzen AI, serve LLMs on AMD Instinct GPUs with vLLM, and analyze GPU kernel and PyTorch trace performance.",
+    "developerName": "AMD",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/amd/skills",
+    "brandColor": "#ED1C24",
+    "logo": "./assets/amd.png",
+    "composerIcon": "./assets/amd.png",
+    "defaultPrompt": [
+      "Use AMD Skills to deploy this LLM for inference on my AMD Instinct GPU",
+      "Learn how to generate images locally and generate the image of a cat",
+      "Convert my cloud LLM app into an app that uses local inference"
+    ]
+  }
+}

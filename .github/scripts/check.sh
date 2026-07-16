@@ -20,6 +20,7 @@ case "${1:-}" in
   "")
     uv run .github/scripts/validate_skills.py
     uv run .github/scripts/generate_cursor_marketplace.py --check
+    uv run .github/scripts/generate_codex_plugin.py --check
     ;;
   -h|--help)
     usage

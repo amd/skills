@@ -1,9 +1,14 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+
 """Behavioral tests for the `local-ai-use` skill.
 
 Run locally (needs the `claude` CLI authenticated and a reachable Lemonade
 Server -- otherwise the suite skips):
 
-    pytest eval/behavioral/tests/test_local_ai_use.py -s
+    cd eval/behavioral
+    python -m pytest -c pytest.ini -p conftest ../../skills/local-ai-use/evals/evals.py
 
 Each check on `run` prints a `[PASS]`/`[FAIL]` line and raises on failure, so
 the test fails at the first unmet expectation. `logs_contains` /
@@ -15,7 +20,7 @@ from harness import claude
 
 
 def test_generate_image_of_a_cat():
-    agent_configs = [(claude, "sonnet")]
+    agent_configs = [(claude, "opus")]
     for agent, model in agent_configs:
         with agent(model, skill="local-ai-use") as agent:
             run = agent.prompt(

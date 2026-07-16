@@ -5,9 +5,11 @@
 # ///
 """Generate the Cursor marketplace manifest from the canonical sources.
 
-Both ecosystems use the same per-skill marketplace model: each skill under
-`skills/` is published as its own installable plugin. To avoid drift, the
-Cursor catalog is generated rather than hand-maintained.
+Both ecosystems use the same marketplace model: a single curated plugin
+(`amd-skills`) whose `source` is the repo root bundles the published skills
+listed in its `skills` array (the skill folders ship in place under `skills/`,
+so there is no separate plugin tree). The Cursor manifest mirrors the Claude
+marketplace one-for-one; to avoid drift it is generated, not hand-maintained.
 
 Sources of truth:
 - `plugin-metadata.json` (repo root): shared identity and discovery metadata
@@ -42,6 +44,40 @@ PLUGIN_METADATA = ROOT / "plugin-metadata.json"
 CLAUDE_MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
 CURSOR_MARKETPLACE = ROOT / ".cursor-plugin" / "marketplace.json"
 
+# Plugin-entry fields Cursor's marketplace parser recognizes
+# (https://cursor.com/docs/reference/plugins#plugin-entry-fields). The Claude
+# bundle entry may carry Claude-only keys (e.g. `strict`) that Cursor does not
+# document, so entries are whitelist-filtered to these before enrichment.
+CURSOR_PLUGIN_ENTRY_FIELDS = {
+    "name",
+    "source",
+    "description",
+    "version",
+    "author",
+    "homepage",
+    "repository",
+    "license",
+    "keywords",
+    "logo",
+    "category",
+    "tags",
+    "skills",
+    "rules",
+    "agents",
+    "commands",
+    "hooks",
+    "mcpServers",
+}
+
+# Cursor-facing catalog taxonomy, mirroring the Codex generator. Kept here (not
+# in plugin-metadata.json) because it describes how the bundle presents in a
+# catalog rather than vendor-neutral identity.
+CATEGORY = "Developer Tools"
+# Brand image for the marketplace listing. Cursor resolves a relative path to a
+# raw.githubusercontent.com URL for the repo/commit, so point at the committed
+# asset (no leading "./", per the reference's example).
+LOGO = "assets/amd.png"
+
 
 def load_json(path: Path) -> dict:
     if not path.exists():
@@ -63,9 +99,13 @@ def check_identity_consistency(metadata: dict, claude: dict) -> list[str]:
             f".claude-plugin/marketplace.json `name` ({claude.get('name')!r}) "
             f"must match plugin-metadata.json `name` ({name!r})."
         )
-    if claude.get("description") != description:
+    # The marketplace schema only allows `name`, `owner`, `metadata`, and
+    # `plugins` at the root -- the human-readable blurb lives in
+    # `metadata.description`, not a top-level `description`.
+    claude_description = (claude.get("metadata") or {}).get("description")
+    if claude_description != description:
         errors.append(
-            ".claude-plugin/marketplace.json `description` must match "
+            ".claude-plugin/marketplace.json metadata.description must match "
             "plugin-metadata.json `description`."
         )
     claude_version = (claude.get("metadata") or {}).get("version")
@@ -78,6 +118,33 @@ def check_identity_consistency(metadata: dict, claude: dict) -> list[str]:
     return errors
 
 
+def build_plugin_entry(metadata: dict, claude_entry: dict) -> dict:
+    """Turn a Claude bundle entry into a Cursor-compliant plugin entry.
+
+    Drops Claude-only keys Cursor does not document (e.g. `strict`) and layers
+    the repo's identity/discovery metadata (author, repository, logo, ...) on
+    top so the marketplace listing carries it. Because the entry's `source` is
+    the repo root, Cursor never merges a separate `.cursor-plugin/plugin.json`,
+    so this inline metadata is the only place Cursor sees it.
+    """
+    entry = {k: v for k, v in claude_entry.items() if k in CURSOR_PLUGIN_ENTRY_FIELDS}
+
+    author = metadata.get("author") or {}
+    enrichment = {
+        "author": author if isinstance(author, dict) and author else None,
+        "homepage": metadata.get("homepage"),
+        "repository": metadata.get("repository"),
+        "license": metadata.get("license"),
+        "keywords": metadata.get("keywords") or None,
+        "logo": LOGO,
+        "category": CATEGORY,
+    }
+    for key, value in enrichment.items():
+        if value is not None and key not in entry:
+            entry[key] = value
+    return entry
+
+
 def build_cursor_marketplace(metadata: dict, claude: dict) -> dict:
     author = metadata.get("author") or {}
     owner_name = author.get("name") if isinstance(author, dict) else None
@@ -85,12 +152,14 @@ def build_cursor_marketplace(metadata: dict, claude: dict) -> dict:
     return {
         "name": metadata["name"],
         "owner": {"name": owner_name} if owner_name else {},
-        "description": metadata["description"],
         "metadata": {
             "description": metadata["description"],
             "version": metadata["version"],
         },
-        "plugins": claude.get("plugins", []),
+        "plugins": [
+            build_plugin_entry(metadata, entry)
+            for entry in claude.get("plugins", [])
+        ],
     }
 
 

@@ -2,28 +2,22 @@ name: behavioral
 
 # Behavioral tests run a real agent against a skill and grade what it did (see
 # eval/behavioral/). They cost real API tokens and, for some skills, install
-# and exercise local models, so the actual test job is opt-in. The design:
+# and exercise local models. The design:
 #
 #   * selective -- only the skills whose folder or test changed are run (the
 #     whole suite runs when the shared harness changes). See
 #     .github/scripts/select_behavioral.py.
-#   * label-gated execution -- the test job (which holds ANTHROPIC_API_KEY)
-#     only runs on manual dispatch or when a maintainer adds the
-#     `run_behavioral` label, keeping the secret away from untrusted / fork
-#     code that runs with tool permissions bypassed.
 #   * required when relevant -- when a PR changes a skill or test that maps to a
-#     behavioral test, the `behavioral` gate FAILS until the label is added and
-#     the tests pass. A PR that touches nothing testable passes neutrally.
+#     behavioral test, the `behavioral` gate FAILS until the tests pass. A PR
+#     that touches nothing testable passes neutrally.
 #   * dispatchable -- run any subset by hand from the Actions tab.
 #
 # Shape mirrors validate.yml: discover -> matrix -> single aggregate gate, so
-# branch protection can require just the `behavioral` check. `discover` is
-# secret-free, so it runs on every matching PR to decide whether the label is
-# required; only `behavioral` is gated on the label.
+# branch protection can require just the `behavioral` check.
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
     paths:
       - "skills/**"
       - "eval/behavioral/**"
@@ -44,14 +38,10 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  BEHAVIORAL_LABEL: run_behavioral
-
 jobs:
   # Decide which skills the change affects. This is secret-free (just git diff +
-  # a Python mapping), so it runs on every matching PR regardless of the label;
-  # the label only gates the test job below. Its `any` output drives whether the
-  # label is required for this PR.
+  # a Python mapping). Its `any` output drives whether the behavioral job runs
+  # and whether the gate has anything to enforce for this PR.
   discover:
     name: Select behavioral tests
     runs-on: ubuntu-latest
@@ -93,24 +83,32 @@ jobs:
           fi
 
   behavioral:
-    name: Behavioral (${{ matrix.skill }})
+    name: Behavioral (${{ matrix.skill }} on ${{ matrix.os }})
     needs: discover
-    # Run only when something testable changed AND the run is authorized:
-    # manual dispatch, or a maintainer added the `run_behavioral` label. This is
-    # the gate that protects the ANTHROPIC_API_KEY secret.
-    if: >-
-      needs.discover.outputs.any == 'true' &&
-      (github.event_name == 'workflow_dispatch' ||
-       contains(github.event.pull_request.labels.*.name, 'run_behavioral'))
-    runs-on: ubuntu-latest
+    # Run whenever the change affects something testable.
+    if: needs.discover.outputs.any == 'true'
+    # Self-hosted Strix Halo runners. The OS label (Linux / Windows) comes from
+    # the matrix below so each skill is exercised on both platforms.
+    runs-on: [self-hosted, strix_halo, "${{ matrix.os }}"]
     # Behavioral runs install local models and can take a while; cap it so a
     # hung agent or stalled model pull fails the job instead of burning minutes.
     timeout-minutes: 45
     strategy:
-      # One skill failing should not hide the others' results.
+      # One skill / OS failing should not hide the others' results.
       fail-fast: false
       matrix:
         skill: ${{ fromJson(needs.discover.outputs.skills) }}
+        os: [Linux, Windows]
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
+      ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
+      ANTHROPIC_CUSTOM_HEADERS: |
+        Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
+        user: a1_ucicd
+      # Lets the harness default to this skill if a test relies on the env.
+      BEHAVIORAL_SKILL: ${{ matrix.skill }}
+      # Model pin: opus only. The harness also enforces this under CI.
+      BEHAVIORAL_MODEL: opus
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -131,27 +129,31 @@ jobs:
       - name: Install behavioral test dependencies
         run: pip install -r eval/behavioral/requirements.txt
 
-      - name: Run behavioral test for ${{ matrix.skill }}
+      - name: Run behavioral test for ${{ matrix.skill }} (Linux)
+        if: matrix.os == 'Linux'
         working-directory: eval/behavioral
-        env:
-          # The CLI authenticates from this key. This job only runs on labeled
-          # PRs and manual dispatch (see this job's `if:` above).
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Lets the harness default to this skill if a test relies on the env.
-          BEHAVIORAL_SKILL: ${{ matrix.skill }}
-          # Cost cap: sonnet only. The harness also enforces this under CI.
-          BEHAVIORAL_MODEL: sonnet
+        shell: bash
         run: |
           set -euo pipefail
-          test_file="tests/test_$(echo '${{ matrix.skill }}' | tr '-' '_').py"
+          test_file="../../skills/${{ matrix.skill }}/evals/evals.py"
           echo "Running $test_file"
-          pytest "$test_file"
+          python -m pytest -c pytest.ini -p conftest "$test_file"
+
+      - name: Run behavioral test for ${{ matrix.skill }} (Windows)
+        if: matrix.os == 'Windows'
+        working-directory: eval/behavioral
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $skill = "${{ matrix.skill }}"
+          $test_file = "../../skills/$skill/evals/evals.py"
+          Write-Host "Running $test_file"
+          python -m pytest -c pytest.ini -p conftest $test_file
 
   # Single aggregate gate. Mark THIS check required in branch protection.
   #
-  #   * nothing testable changed       -> pass (neutral).
-  #   * testable change, label missing -> FAIL, asking for the label.
-  #   * testable change, authorized    -> pass iff the behavioral job passed.
+  #   * nothing testable changed -> pass (neutral).
+  #   * testable change          -> pass iff the behavioral job passed.
   behavioral-gate:
     name: behavioral
     needs: [discover, behavioral]
@@ -162,15 +164,12 @@ jobs:
       BEHAVIORAL_RESULT: ${{ needs.behavioral.result }}
       AFFECTED: ${{ needs.discover.outputs.any }}
       SKILLS: ${{ needs.discover.outputs.skills }}
-      # 'true' only on a PR that carries the label; '' / 'false' otherwise.
-      LABEL_PRESENT: ${{ contains(github.event.pull_request.labels.*.name, 'run_behavioral') }}
     steps:
       - name: Verify behavioral results
         run: |
           echo "discover:    $DISCOVER_RESULT"
           echo "behavioral:  $BEHAVIORAL_RESULT"
           echo "affected:    $AFFECTED ($SKILLS)"
-          echo "label:       $LABEL_PRESENT"
 
           # If discovery itself failed, surface that rather than guessing.
           if [ "$DISCOVER_RESULT" != "success" ]; then
@@ -184,18 +183,10 @@ jobs:
             exit 0
           fi
 
-          # Something testable changed. Manual dispatch and labeled PRs are
-          # authorized to run the tests, so the gate reflects the test result.
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$LABEL_PRESENT" = "true" ]; then
-            if [ "$BEHAVIORAL_RESULT" = "success" ]; then
-              echo "All affected behavioral tests passed."
-              exit 0
-            fi
-            echo "One or more behavioral tests failed ($BEHAVIORAL_RESULT)." >&2
-            exit 1
+          # Something testable changed: the gate reflects the test result.
+          if [ "$BEHAVIORAL_RESULT" = "success" ]; then
+            echo "All affected behavioral tests passed."
+            exit 0
           fi
-
-          # Testable change on a PR with no label: require it.
-          echo "::error::This PR changes a skill or behavioral test ($SKILLS) but the '${BEHAVIORAL_LABEL}' label is not set." >&2
-          echo "Add the '${BEHAVIORAL_LABEL}' label to run the required behavioral tests for these changes." >&2
+          echo "One or more behavioral tests failed ($BEHAVIORAL_RESULT)." >&2
           exit 1

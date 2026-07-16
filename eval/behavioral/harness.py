@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+
 """Behavioral-test harness for repo skills (local, pytest-based, non-CI).
 
 A behavioral test runs a skill-driven prompt through the agent **once**, then
@@ -6,7 +10,7 @@ asserts what the agent *should* and *should not* have done. Tests read like:
     from harness import claude
 
     def test_image_generation():
-        with claude("sonnet", skill="local-ai-use") as agent:
+        with claude("opus", skill="local-ai-use") as agent:
             run = agent.prompt("Use local AI, then generate a cat to out.png.")
 
             # Deterministic checks (cheap, fail fast).
@@ -41,13 +45,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from claude_eval import SKILLS_DIR  # noqa: E402
 
 DEFAULT_SKILL = os.environ.get("BEHAVIORAL_SKILL", "local-ai-use")
-DEFAULT_MODEL = os.environ.get("BEHAVIORAL_MODEL", "sonnet")
+DEFAULT_MODEL = os.environ.get("BEHAVIORAL_MODEL", "opus")
 DEFAULT_EFFORT = os.environ.get("BEHAVIORAL_EFFORT", "high")
 
-# Automated runs are capped at sonnet: a behavioral run makes real cloud calls
-# (agent run + LLM judge), so a workflow picking an expensive model can quietly
-# run up a large bill. No override -- the cap is non-negotiable in CI.
-AUTOMATED_MODEL = "sonnet"
+# Automated runs are pinned to opus: a behavioral run makes real cloud calls
+# (agent run + LLM judge), so pinning the model keeps CI results consistent.
+# No override -- the pin is non-negotiable in CI.
+AUTOMATED_MODEL = "opus"
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -60,12 +64,12 @@ def _is_automated_env() -> bool:
 
 
 def _enforce_model_policy(model: str | None) -> str | None:
-    """Coerce non-sonnet models to sonnet in CI; pass through otherwise."""
-    if model is None or not _is_automated_env() or "sonnet" in model.lower():
+    """Coerce non-opus models to opus in CI; pass through otherwise."""
+    if model is None or not _is_automated_env() or "opus" in model.lower():
         return model
     print(
         f"[behavioral] automated run: coercing model '{model}' -> "
-        f"'{AUTOMATED_MODEL}' to cap token usage.",
+        f"'{AUTOMATED_MODEL}' to pin the CI model.",
         flush=True,
     )
     return AUTOMATED_MODEL
@@ -97,14 +101,14 @@ def check_api_reachable(model: str | None = DEFAULT_MODEL, timeout: int = 60) ->
         return False, "'claude' CLI not found on PATH"
 
     model = _enforce_model_policy(model)
-    cmd = [claude_bin, "-p", "Reply with the single word: ok", "--output-format", "json"]
+    cmd = [claude_bin, "-p", "--output-format", "json"]
     if model:
         cmd += ["--model", model]
 
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8",
-            stdin=subprocess.DEVNULL, timeout=timeout, env=_claude_env(),
+            input="Reply with the single word: ok", timeout=timeout, env=_claude_env(),
         )
     except subprocess.TimeoutExpired:
         return False, f"API preflight timed out after {timeout}s (is the network reachable?)"
@@ -135,7 +139,7 @@ def _run_agent(prompt_text: str, workspace: Path, model: str | None, effort: str
         raise RuntimeError("'claude' CLI not found on PATH")
 
     cmd = [
-        claude_bin, "-p", prompt_text,
+        claude_bin, "-p",
         "--output-format", "stream-json", "--verbose",
         "--dangerously-skip-permissions",
         "--add-dir", str(workspace),
@@ -147,7 +151,7 @@ def _run_agent(prompt_text: str, workspace: Path, model: str | None, effort: str
 
     proc = subprocess.run(
         cmd, cwd=str(workspace), capture_output=True, text=True,
-        encoding="utf-8", stdin=subprocess.DEVNULL, env=_claude_env(),
+        encoding="utf-8", input=prompt_text, env=_claude_env(),
     )
 
     events: list[dict] = []
@@ -229,7 +233,7 @@ def _grade_with_llm(statement: str, run: "Run", judge_model: str | None) -> tupl
         '{"pass": true|false, "reason": "<one short sentence>"}'
     )
     cmd = [
-        claude_bin, "-p", prompt_text,
+        claude_bin, "-p",
         "--output-format", "json",
         "--dangerously-skip-permissions",
         "--add-dir", str(run.workspace),
@@ -240,7 +244,7 @@ def _grade_with_llm(statement: str, run: "Run", judge_model: str | None) -> tupl
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8",
-            stdin=subprocess.DEVNULL, timeout=180, env=_claude_env(),
+            input=prompt_text, timeout=180, env=_claude_env(),
         )
     except subprocess.TimeoutExpired:
         return False, "llm_judge timed out after 180s"
@@ -330,7 +334,7 @@ class Agent:
 
     Use as a context manager so the temp workspace is always cleaned up::
 
-        with claude("sonnet", skill="local-ai-use") as agent:
+        with claude("opus", skill="local-ai-use") as agent:
             run = agent.prompt("...")
     """
 

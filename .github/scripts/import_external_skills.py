@@ -10,6 +10,14 @@ For each source, the script:
 1. Shallow-clones the repo at the pinned `ref` into a temp directory,
    using sparse-checkout so only the configured `path` is fetched.
 2. Copies each named skill folder into `skills/<skill>/`.
+2b. Optionally vendors the skill under a different local catalog name (the
+   `as:` field on a skill entry). Federated skills follow a
+   `<projectrepo>-<skill>` naming convention in this catalog (e.g. the
+   `analysis-orchestrator` skill from TraceLens is vendored as
+   `tracelens-analysis-orchestrator`), so the local folder, marketplace
+   entry, and the SKILL.md `name` frontmatter are all set to the `as:`
+   value. The upstream folder name is still used to locate the skill in
+   its source repo.
 3. Writes `.federated.json` inside each copy with source metadata so we
    can tell vendored skills apart from skills authored in this repo.
 4. Rewrites relative markdown links that point outside the copied skill
@@ -21,15 +29,22 @@ For each source, the script:
    from the source metadata when the upstream copy doesn't already ship
    one, so the imported skill satisfies the card validation gate (see
    docs/skill-cards.md).
-6. Updates `.claude-plugin/marketplace.json` with an entry per imported
-   skill (using the SKILL.md `description` as the marketplace blurb,
-   unless the source declares an override).
+6. Adds each imported skill to the bundle's `skills` array in
+   `.claude-plugin/marketplace.json` (as a `./skills/<name>` path) so it
+   ships in the single AMD plugin.
 7. Removes any previously imported skill (one with a `.federated.json`)
-   that is no longer listed in `.github/scripts/sources.yml`.
+   that is no longer listed in `.github/scripts/sources.yml`, and drops it
+   from the bundle's `skills` array.
 
 Usage:
     uv run .github/scripts/import_external_skills.py            # write changes
     uv run .github/scripts/import_external_skills.py --dry-run  # report only
+    uv run .github/scripts/import_external_skills.py --only magpie-kernel-evaluator
+
+The `--only` flag (repeatable) restricts the run to the named *local*
+skill folder(s) (the `as:` name when one is set): other skills in the
+catalog are skipped and pruning is limited to the named skills, so
+unrelated federated skills are never removed.
 
 The companion GitHub Actions workflow `import-external-skills` calls this
 script on manual dispatch and opens a pull request with the result.
@@ -57,12 +72,18 @@ CATALOG_FILE = Path(__file__).resolve().parent / "sources.yml"
 SKILLS_DIR = REPO_ROOT / "skills"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 MARKER_FILENAME = ".federated.json"
+# The bundle references each published skill as `./skills/<name>` in the
+# marketplace plugin entry's `skills` array.
+SKILLS_PATH_PREFIX = "./skills/"
 CARD_FILENAME = "skill-card.md"
 
 FRONTMATTER_RE = re.compile(
     r"\A---\s*\n(?P<frontmatter>.*?)\n---\s*\n?(?P<body>.*)\Z",
     re.DOTALL,
 )
+# The `name:` line inside a SKILL.md frontmatter block. Used to rewrite the
+# frontmatter `name` when a skill is vendored under a different local name.
+NAME_FIELD_RE = re.compile(r"(?m)^(?P<key>name[ \t]*:[ \t]*)(?P<value>.*)$")
 # Inline markdown links and images: `[text](target)` / `![alt](target)`,
 # with an optional `"title"` after the target. The `target` group captures
 # everything up to whitespace or the closing paren.
@@ -80,7 +101,13 @@ MARKETPLACE_DESCRIPTION_MAX = 320
 @dataclass
 class SkillSpec:
     folder: str
+    local_name: str | None = None
     marketplace_description_override: str | None = None
+
+    @property
+    def dest_name(self) -> str:
+        """Local catalog name: the `as:` override, or the upstream folder."""
+        return self.local_name or self.folder
 
 
 @dataclass
@@ -140,6 +167,7 @@ def parse_sources(catalog: Path) -> list[Source]:
                 skills.append(
                     SkillSpec(
                         folder=sk["name"],
+                        local_name=sk.get("as"),
                         marketplace_description_override=sk.get(
                             "marketplace_description"
                         ),
@@ -394,53 +422,78 @@ def write_card(skill_dir: Path, source: Source, description: str) -> None:
     )
 
 
-def update_marketplace(results: Iterable[ImportResult], dry_run: bool) -> bool:
-    """Sync `.claude-plugin/marketplace.json` with the imported skills.
+def rewrite_skill_name(skill_dir: Path, new_name: str, log: list[str]) -> None:
+    """Set the SKILL.md frontmatter `name` to `new_name`.
 
-    Returns True when the file was modified (or would be modified in a dry
-    run).
+    Upstream ships its own `name` (e.g. `analysis-orchestrator`), but this
+    repo's validator requires the frontmatter `name` to match the skill's
+    directory name. When a skill is vendored under a different local name
+    (the `as:` field), rewrite the frontmatter so the imported copy stays
+    valid without hand-editing after every refresh.
+    """
+    skill_md = skill_dir / "SKILL.md"
+    text = skill_md.read_text(encoding="utf-8")
+    match = FRONTMATTER_RE.match(text)
+    if not match:
+        return
+    fm_start, fm_end = match.span("frontmatter")
+    frontmatter = match.group("frontmatter")
+
+    new_frontmatter, count = NAME_FIELD_RE.subn(
+        lambda m: f"{m.group('key')}{new_name}", frontmatter, count=1
+    )
+    if count == 0:
+        # No `name:` line to rewrite; prepend one so the copy stays valid.
+        new_frontmatter = f"name: {new_name}\n{frontmatter}"
+    if new_frontmatter == frontmatter:
+        return
+    skill_md.write_text(text[:fm_start] + new_frontmatter + text[fm_end:], encoding="utf-8")
+    log.append(f"    [SKILL.md] name -> {new_name}")
+
+
+def update_publish_list(
+    imported: Iterable[str],
+    removed: Iterable[str],
+    dry_run: bool,
+) -> bool:
+    """Sync the bundle's `skills` array in `.claude-plugin/marketplace.json`.
+
+    AMD ships a single curated plugin whose `skills` array lists the published
+    skills as `./skills/<name>` paths. Newly imported federated skills are added
+    so they ship in the bundle, and skills that were pruned from
+    `.github/scripts/sources.yml` are removed. The existing curation order is
+    preserved; freshly added skills are appended in sorted order for a
+    deterministic diff.
+
+    Returns True when the file was modified (or would be in a dry run).
     """
     data = json.loads(CLAUDE_MARKETPLACE.read_text(encoding="utf-8"))
-    plugins = data.setdefault("plugins", [])
-    by_name = {p.get("name"): p for p in plugins if isinstance(p, dict)}
+    plugins = data.get("plugins")
+    if not isinstance(plugins, list) or not plugins or not isinstance(plugins[0], dict):
+        raise ValueError(
+            f"{CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)} must define a bundle "
+            "plugin entry to sync federated skills into."
+        )
+    entry = plugins[0]
+    skills = entry.get("skills")
+    if not isinstance(skills, list):
+        skills = []
 
-    changed = False
-    for result in results:
-        name = result.folder
-        entry = by_name.get(name)
-        expected = {
-            "name": name,
-            "source": f"./skills/{name}",
-            "description": result.marketplace_description,
-        }
-        if entry is None:
-            plugins.append(expected)
-            by_name[name] = expected
-            changed = True
-            continue
-        # Drop the legacy `skills` key: each skill directory ships its
-        # SKILL.md at the plugin root, so a single-skill plugin auto-loads
-        # without an explicit skills path.
-        if "skills" in entry:
-            del entry["skills"]
-            changed = True
-        for key, value in expected.items():
-            if entry.get(key) != value:
-                entry[key] = value
-                changed = True
+    removed_paths = {f"{SKILLS_PATH_PREFIX}{name}" for name in removed}
+    kept = [s for s in skills if s not in removed_paths]
+    present = {
+        s[len(SKILLS_PATH_PREFIX) :].strip("/")
+        for s in kept
+        if isinstance(s, str) and s.startswith(SKILLS_PATH_PREFIX)
+    }
+    additions = sorted(
+        f"{SKILLS_PATH_PREFIX}{name}" for name in imported if name not in present
+    )
+    new_skills = kept + additions
 
-    # Drop entries that point at skills that no longer exist on disk so
-    # the importer also cleans up the marketplace when an entry is
-    # removed from `.github/scripts/sources.yml`.
-    existing_dirs = {p.name for p in SKILLS_DIR.iterdir() if p.is_dir()}
-    pruned = [p for p in plugins if not isinstance(p, dict) or p.get("name") in existing_dirs]
-    if len(pruned) != len(plugins):
-        plugins[:] = pruned
-        changed = True
-
-    plugins.sort(key=lambda p: p.get("name", ""))
-
+    changed = new_skills != skills
     if changed and not dry_run:
+        entry["skills"] = new_skills
         CLAUDE_MARKETPLACE.write_text(
             json.dumps(data, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
@@ -491,14 +544,22 @@ def import_source(
                 or truncate_description(description)
             )
 
-            dest_skill = SKILLS_DIR / spec.folder
+            dest_name = spec.dest_name
+            dest_skill = SKILLS_DIR / dest_name
+            # The marker records the skill's *upstream* location, which keeps
+            # using the source folder name even when we vendor it locally as
+            # `dest_name`.
             relative_path = f"{source.path}/{spec.folder}"
             action = "would import" if dry_run else "importing"
-            log.append(f"[{source.name}] {action} {spec.folder} -> skills/{spec.folder}")
+            renamed = f" (as {dest_name})" if dest_name != spec.folder else ""
+            log.append(
+                f"[{source.name}] {action} {spec.folder} -> skills/{dest_name}{renamed}"
+            )
             if not dry_run:
                 copy_skill(src_skill, dest_skill)
                 write_marker(dest_skill, source, commit, relative_path)
                 write_card(dest_skill, source, marketplace_description)
+                rewrite_skill_name(dest_skill, dest_name, log)
                 rewrite_external_references(
                     dest_skill,
                     relative_path,
@@ -511,7 +572,7 @@ def import_source(
             results.append(
                 ImportResult(
                     source=source,
-                    folder=spec.folder,
+                    folder=dest_name,
                     commit=commit,
                     skill_description=description.strip(),
                     marketplace_description=marketplace_description,
@@ -525,8 +586,8 @@ def prune_orphans(
     existing: dict[str, dict],
     dry_run: bool,
     log: list[str],
-) -> int:
-    removed = 0
+) -> list[str]:
+    removed: list[str] = []
     for name, marker in existing.items():
         if name in declared:
             continue
@@ -536,7 +597,7 @@ def prune_orphans(
         )
         if not dry_run:
             shutil.rmtree(SKILLS_DIR / name)
-        removed += 1
+        removed.append(name)
     return removed
 
 
@@ -553,9 +614,33 @@ def main(argv: list[str] | None = None) -> int:
         default=CATALOG_FILE,
         help=f"Path to the catalog file (default: {CATALOG_FILE}).",
     )
+    parser.add_argument(
+        "--only",
+        action="append",
+        metavar="SKILL",
+        help=(
+            "Import only the named skill folder (repeatable). When set, "
+            "skills not named here are left untouched and pruning is "
+            "restricted to the named skills, so other federated skills are "
+            "never removed."
+        ),
+    )
     args = parser.parse_args(argv)
 
     sources = parse_sources(args.catalog)
+
+    only = set(args.only or [])
+    if only:
+        known = {spec.dest_name for source in sources for spec in source.skills}
+        unknown = only - known
+        if unknown:
+            raise ValueError(
+                "--only names skill(s) not present in the catalog: "
+                + ", ".join(sorted(unknown))
+            )
+        for source in sources:
+            source.skills = [s for s in source.skills if s.dest_name in only]
+        sources = [source for source in sources if source.skills]
     log: list[str] = []
     declared: set[str] = set()
     all_results: list[ImportResult] = []
@@ -565,27 +650,36 @@ def main(argv: list[str] | None = None) -> int:
 
     for source in sources:
         for spec in source.skills:
-            if spec.folder in declared:
+            if spec.dest_name in declared:
                 raise ValueError(
-                    f"Skill name collision: {spec.folder!r} is listed by "
+                    f"Skill name collision: {spec.dest_name!r} is listed by "
                     "more than one source in .github/scripts/sources.yml."
                 )
-            declared.add(spec.folder)
+            declared.add(spec.dest_name)
         all_results.extend(import_source(source, args.dry_run, log))
 
-    pruned = prune_orphans(declared, existing_federated, args.dry_run, log)
-    marketplace_changed = update_marketplace(all_results, args.dry_run)
+    # With --only we deliberately ignore skills the user didn't name, so
+    # restrict orphan pruning to just those skills. Otherwise every other
+    # federated skill would look like an orphan and be deleted.
+    prunable = (
+        {name: marker for name, marker in existing_federated.items() if name in only}
+        if only
+        else existing_federated
+    )
+    pruned = prune_orphans(declared, prunable, args.dry_run, log)
+    imported_names = {result.folder for result in all_results}
+    publish_changed = update_publish_list(imported_names, pruned, args.dry_run)
 
     for line in log:
         print(line)
 
     print("")
     print(f"Imported: {len(all_results)} skill(s)")
-    print(f"Removed orphans: {pruned}")
+    print(f"Removed orphans: {len(pruned)}")
     print(
-        "Marketplace: "
-        f"{'changed' if marketplace_changed else 'unchanged'}"
-        f"{' (dry run)' if args.dry_run and marketplace_changed else ''}"
+        "Publish list: "
+        f"{'changed' if publish_changed else 'unchanged'}"
+        f"{' (dry run)' if args.dry_run and publish_changed else ''}"
     )
     return 0
 

@@ -7,10 +7,21 @@ For this walkthrough we use [`danielholanda/dictate`](https://github.com/danielh
 a Windows dictation app that currently sends every recording to cloud
 speech-to-text providers (Groq, Deepgram, Cartesia, Gemini, Mistral, etc.).
 
-## Prerequiresites
-This sample app used here requires the Rust toolchain (install from https://rustup.rs/).
+**What you'll end up with:** one new launcher module, one config change to
+the existing HTTP client, and `lemond` vendored under `vendor/lemonade/`.
+Transcription moves from cloud to your local device. Expect 1–2 hours.
 
-Because this walkthrough runs transcription on the NPU, you need a Ryzen AI PC with an XDNA2 NPU (Strix, Strix Halo, Kraken, or Gorgon Point) running Windows.
+## Prerequisites
+
+This sample app requires the Rust toolchain (install from https://rustup.rs/).
+
+**Hardware:** Any Windows x64 PC works. The skill selects a backend once at integration time based on your development machine. If your machine has an NPU and the chosen recipe supports it, the NPU backend is used — otherwise it transparently falls back to Vulkan as the universal fallback so the app works on any end-user machine. The skill logs which backend was selected and why, so you always know what ran.
+
+| Priority | Your hardware | What you get |
+|---|---|---|
+| 1 (fastest) | Ryzen AI with XDNA2 NPU (Strix, Strix Halo, Kraken, Gorgon Point) | NPU-accelerated transcription |
+| 2 | AMD iGPU / dGPU | GPU-accelerated transcription |
+| 3 (fallback) | Any other Windows x64 PC | CPU transcription |
 
 ## Step 1 - Get the target app
 
@@ -27,29 +38,42 @@ cd dictate
 
 ## Step 3 - Enabling claude to see `local-ai-app-integration`
 
-In the future this will be enabled directly through claude's marketplace. For now, we have to manually add it.
+* Install the skill with the [`skills` CLI](https://github.com/vercel-labs/skills):
 
-* Clone `https://github.com/amd/skills`
-* Move the `local-ai-app-integration` skill from the repo to `.claude/skills/`
+```bash
+npx skills add amd/skills --skill local-ai-app-integration --agent claude-code
+```
+
 * Run `claude "Which skills can you see?" --model opus`. You should see a list of skills that includes `local-ai-app-integration`.
 
 ## Step 4 - Running the skill
 
-Run `claude --model opus` inside the `dictate` repo run the prompt:
+Run `claude --model opus` inside the `dictate` repo with this prompt:
 
 ```
 This app sends my dictation audio to cloud speech-to-text providers.
 Add a local AI mode that runs transcription on my machine instead by default.
-I want it to run using the NPU. Keep the cloud providers as an option and minimize code changes.
+Use the best available local backend — NPU if I have one, otherwise iGPU or CPU.
+Keep the cloud providers as an option and minimize code changes.
 ```
 
 Claude should:
 
 1. Survey where the app calls its cloud transcription APIs.
-2. Pick a local speech-to-text model + backend (e.g. `whisper-v3-turbo-FLM` using the `FLM` NPU backend).
+2. Probe hardware (`GET /api/v1/system-info`) and pick the fastest available
+   backend for `Whisper-Large-v3-Turbo`, NPU-first:
+   - XDNA2 NPU present → whispercpp NPU backend
+   - else AMD iGPU/dGPU → whispercpp iGPU/dGPU backend
+   - else → whispercpp CPU backend
 3. Vendor the Embeddable Lemonade (`lemond`) binary into the app tree.
-4. Add a launcher that spawns `lemond` on a free port.
-5. Re-point the app's existing client at the local endpoint and wait for `/v1/health`.
+4. Add a launcher that spawns `lemond` on a free port with retry logic, logging
+   each lifecycle stage (spawn → health → backend install → model pull → result).
+5. Re-point the app's existing client at the local endpoint and wait for
+   `/api/v1/health`. Because local mode talks to your own machine, it needs **no
+   cloud API key** — Claude should bypass the app's key-entry gate in local mode.
+6. Install the backend, then **pull the model** (`POST /api/v1/pull`) so its
+   weights are on disk before the first recording. Skipping this makes the very
+   first transcription come back blank with no error.
 
 Please note this may take several minutes as this app has a fairly large codebase.
 
@@ -61,7 +85,35 @@ Dictate is a Tauri (Rust + Node) app. From the repo root:
 npm install
 npm run tauri dev
 ```
-Once the window opens, press the microphone button to speak, and confirm that transcription is now running through your local device instead of a cloud provider. The transcribed text should appear where your cursor was last located.
+
+**What the first launch looks like.** Watch the terminal (not the browser
+console). On a cold first run you should see the staged log lines as setup
+progresses — the model download in particular can take a while:
+
+```
+[lemond] Starting on port 56748
+[lemond] Healthy on port 56748
+[lemond] whispercpp:npu already installed
+[lemond] Pulling model Whisper-Large-v3-Turbo...
+[lemond] Model Whisper-Large-v3-Turbo ready
+[local] Using transcription model: Whisper-Large-v3-Turbo backend: npu
+[local] Transcription result: " Hi, can you hear me?"
+```
+
+The **first transcription can be slow** because it covers the whole setup chain:
+server spawn + backend setup + model download + model load. Subsequent
+recordings are fast. Once the window opens, press the microphone button to
+speak, and confirm transcription runs through your local device instead of a
+cloud provider — the text appears where your cursor was last located.
+
+> **Blank result?** If a recording produces no text and the terminal shows no
+> error, the model was not pulled — `[local] Transcription result: ""`. The
+> model-pull step (item 6 of "Claude should" above) fixes this; it is the most
+> common first-run snag.
+
+> **Repeated phrases** like `" How can you hear me now?\n How can you hear me
+> now?\n"` on quiet audio are a known Whisper behavior on silence/low-energy
+> input, not an integration bug.
 
 ## Step 6 - (Optional) Going beyond
 

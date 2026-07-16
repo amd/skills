@@ -10,10 +10,12 @@ The goal of this skill is to teach your AI agent to use image generation, text g
 
 ## Step 2 - Enabling claude to see `local-ai-use`
 
-In the future this will be enabled directly through claude's marketplace. For now, we have to manually add it.
+* Install the skill with the [`skills` CLI](https://github.com/vercel-labs/skills):
 
-* Clone `https://github.com/amd/skills`
-* Move the `local-ai-use` skill from the repo to `.claude/skills/`
+```bash
+npx skills add amd/skills --skill local-ai-use --agent claude-code
+```
+
 * Run `claude "Which skills can you see?" --model sonnet`. You should see a list of skills that includes `local-ai-use`.
 
 ## Step 3 - Running the skill

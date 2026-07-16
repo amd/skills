@@ -16,9 +16,14 @@ Enforces the rules documented in CONTRIBUTING.md:
   - skill-card.md exists at the skill root and has non-empty
     `## Description`, `## Owner`, and `## License` sections
 
-Also validates that `.claude-plugin/marketplace.json` is in sync with the
-skills on disk: every skill must have a marketplace entry, and every
-marketplace entry must point at an existing skill.
+Also validates the single-bundle plugin model: `.claude-plugin/marketplace.json`
+lists exactly one plugin whose `source` is the repo root (`./`) with
+`strict: false`, and whose `skills` array names the published skill folders as
+`./skills/<name>` paths. Each listed path must resolve to a real skill under
+`skills/`. Skills that are not listed are allowed -- they are simply unpublished
+(the "canonical catalog, curated publish" model), so a skill can live under
+`skills/` without shipping. No files are duplicated: the bundle ships the
+skill folders in place, so there is no generated `plugins/` tree to keep in sync.
 
 Run from the repo root:
 
@@ -50,6 +55,10 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
+
+# Every published skill is referenced from the bundle's `skills` array as a
+# path of this form, relative to the plugin `source` (the repo root).
+SKILLS_PATH_PREFIX = "./skills/"
 
 # Limits from CONTRIBUTING.md and the standardized Agent Skills format.
 MAX_NAME_LEN = 64
@@ -216,16 +225,20 @@ def discover_skills(root: Path) -> list[Path]:
 
 
 def validate_claude_marketplace(skill_dirs: list[Path]) -> list[str]:
-    """Return error strings if marketplace entries don't match skills/ on disk.
+    """Return error strings if the bundle plugin doesn't match skills/ on disk.
 
-    The marketplace's human-readable `description` is intentionally allowed
-    to differ from the SKILL.md description (per CONTRIBUTING.md), so this only
-    enforces that names and source paths line up.
+    AMD ships a single curated plugin whose `source` is the repo root (`./`)
+    with `strict: false` (so no `plugin.json` is needed). Its `skills` array
+    lists the published skills as `./skills/<name>` paths; each must resolve to
+    a real skill under `skills/`. Skills that are not listed are allowed -- they
+    are simply unpublished. The plugin's human-readable `description` is
+    intentionally allowed to differ from the SKILL.md descriptions (per
+    CONTRIBUTING.md), so this only enforces that names and paths line up.
     """
     if not CLAUDE_MARKETPLACE.exists():
         return [
-            f"Missing {CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)}; expected one "
-            "entry per skill."
+            f"Missing {CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)}; expected the "
+            "AMD bundle plugin entry."
         ]
 
     try:
@@ -239,47 +252,76 @@ def validate_claude_marketplace(skill_dirs: list[Path]) -> list[str]:
             f"{CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)}: top-level `plugins` "
             "array is missing."
         ]
+    if len(plugins) != 1:
+        return [
+            f"{CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)}: expected exactly one "
+            f"plugin (the AMD bundle), found {len(plugins)}."
+        ]
+
+    entry = plugins[0]
+    if not isinstance(entry, dict):
+        return ["plugins[0] must be an object."]
 
     errors: list[str] = []
-    skill_names = {p.name for p in skill_dirs}
-    listed_names: set[str] = set()
+    name = entry.get("name")
+    source = entry.get("source")
+    description = entry.get("description")
 
-    for idx, entry in enumerate(plugins):
-        if not isinstance(entry, dict):
-            errors.append(f"plugins[{idx}] must be an object.")
-            continue
-        name = entry.get("name")
-        source = entry.get("source")
-        description = entry.get("description")
+    if not isinstance(name, str) or not name:
+        errors.append("plugins[0] is missing a non-empty `name`.")
+        return errors
 
-        if not isinstance(name, str) or not name:
-            errors.append(f"plugins[{idx}] is missing a non-empty `name`.")
-            continue
-        listed_names.add(name)
-
-        if name not in skill_names:
-            errors.append(
-                f"plugins[{idx}] (`{name}`) has no matching directory under skills/."
-            )
-            continue
-
-        expected_source = f"./skills/{name}"
-        if source != expected_source:
-            errors.append(
-                f"plugins[{idx}] (`{name}`): `source` must be `{expected_source}`, "
-                f"got `{source}`."
-            )
-        if not isinstance(description, str) or not description.strip():
-            errors.append(
-                f"plugins[{idx}] (`{name}`) is missing a non-empty `description`."
-            )
-
-    for missing in sorted(skill_names - listed_names):
+    if source != "./":
         errors.append(
-            f"skills/{missing} has no entry in "
-            f"{CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)}."
+            f"plugins[0] (`{name}`): `source` must be `./` (the repo root is the "
+            f"bundle), got `{source}`."
         )
+    # With a repo-root source the plugin ships no `plugin.json`, so the entry
+    # must declare `strict: false` or Claude Code will look for one and fail.
+    if entry.get("strict") is not False:
+        errors.append(
+            f"plugins[0] (`{name}`): must set `strict` to `false` (no plugin.json "
+            "ships with a repo-root source)."
+        )
+    if not isinstance(description, str) or not description.strip():
+        errors.append(f"plugins[0] (`{name}`) is missing a non-empty `description`.")
 
+    errors.extend(_validate_bundle_skills(entry, {p.name for p in skill_dirs}))
+    return errors
+
+
+def _validate_bundle_skills(entry: dict, skill_names: set[str]) -> list[str]:
+    """Check the bundle's `skills` paths resolve to real skills under skills/."""
+    skills = entry.get("skills")
+    if not isinstance(skills, list) or not skills:
+        return [
+            "plugins[0] `skills` must be a non-empty list of "
+            f"`{SKILLS_PATH_PREFIX}<name>` paths naming the published skills."
+        ]
+
+    errors: list[str] = []
+    seen: set[str] = set()
+    for path in skills:
+        if not isinstance(path, str) or not path.startswith(SKILLS_PATH_PREFIX):
+            errors.append(
+                f"`skills` entry {path!r} must be a `{SKILLS_PATH_PREFIX}<name>` path."
+            )
+            continue
+        skill = path[len(SKILLS_PATH_PREFIX) :].strip("/")
+        if not skill or "/" in skill:
+            errors.append(f"`skills` entry {path!r} must point at a single skill folder.")
+            continue
+        if skill in seen:
+            errors.append(f"`skills` lists `{path}` more than once.")
+            continue
+        seen.add(skill)
+        if skill not in skill_names:
+            errors.append(
+                f"`skills` names `{path}`, which has no directory under skills/."
+            )
+
+    # Skills present under skills/ but absent from `skills` are intentionally
+    # unpublished, so there is no error for that difference here.
     return errors
 
 
