@@ -83,7 +83,7 @@ Cross-stack skills, from client to cloud.
 | `rocm-doctor` | Diagnose ROCm / PyTorch / llama.cpp failures on AMD GPUs against a fixed list of known misconfigurations. | _planned_ |
 | `hyperloom-kernel-optimizer` | Autonomously optimizes LLM inference on AMD GPUs. | _planned_ |
 | `vllm-semantic-router` | Setup a vLLM router that semantically maps your request to the best available platform. | _planned_ |
-| `hrr-replay-analysis` | Record, replay, and analyze GPU workload behavior on ROCm across AMD Instinct and Radeon using HIP Record and Replay archives. | _planned_ |
+| `hrr-replay-analysis` | Record, replay, and analyze GPU workload behavior on ROCm across AMD Instinct, Radeon, and Ryzen hardware using HIP Record and Replay archives. | _planned_ |
 
 ### Server-Native
 
