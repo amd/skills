@@ -272,18 +272,7 @@ The launcher is a thin process supervisor. Its only jobs:
 > silently breaking any in-flight transcription. Add `vendor/` (or the
 > equivalent) to the watcher's ignore list before testing.
 
-The launcher logic in pseudocode (full Python and Node.js implementations in [reference.md](reference.md#reference-launchers)):
-
-```
-port  = bind("127.0.0.1:0"), read port, close socket
-key   = random_bytes(32)
-proc  = spawn(lemond_bin, [lemond_dir, "--port", port], env={LEMONADE_API_KEY: key})
-poll  GET /api/v1/health with Bearer key, retry for 90s, 250ms interval
-return proc, key, port
-
-# On failure: kill proc, pick new port, retry up to 3 times
-# On app exit: proc.kill() (Windows) / proc.terminate() (Unix), then wait()
-```
+**Use the reference implementation from [reference.md § Reference launchers](reference.md#reference-launchers) directly** — copy it verbatim and adapt only the `LEMOND_DIR` path. Do not write a launcher from scratch. The reference Python launcher uses `secrets` (for the API key), `socket` (for the free-port probe), and `subprocess` (to spawn lemond); the Node.js launcher uses the equivalent stdlib modules. Both handle port-race retries and health polling correctly.
 
 ## Step 5: Re-point the existing client at `lemond`
 
