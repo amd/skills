@@ -30,6 +30,10 @@ def test_launcher_module_written():
             "Do not download or install anything — just write the file."
         )
 
+        launcher = agent.workspace / "lemond_launcher.py"
+        print(f"\n[debug] lemond_launcher.py contents:\n{launcher.read_text() if launcher.is_file() else '(file not found)'}", flush=True)
+        print(f"[debug] agent final message:\n{run.result_text}", flush=True)
+
         run.workspace_contains("lemond_launcher.py")
         run.logs_contains("secrets")      # random API key generation
         run.logs_contains("socket")       # dynamic port via socket bind
@@ -44,6 +48,9 @@ def test_http_client_timeout_is_120s():
             "Update main.py to re-point the OpenAI client at a local lemond "
             "instance. Do not download or install anything — just edit the file."
         )
+
+        print(f"\n[debug] main.py contents:\n{(agent.workspace / 'main.py').read_text()}", flush=True)
+        print(f"[debug] agent final message:\n{run.result_text}", flush=True)
 
         run.workspace_contains("main.py")
         run.logs_contains("120")          # 120s timeout present in written code

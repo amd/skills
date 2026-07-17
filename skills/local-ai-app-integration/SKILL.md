@@ -287,7 +287,7 @@ When the app has `client = OpenAI()`, replace it with exactly this — three arg
 # client = OpenAI()
 
 # After (lemond) — all three arguments are required:
-import httpx
+import httpx  # httpx is already installed: it is a dependency of the openai package
 client = OpenAI(
     base_url="http://127.0.0.1:{port}/api/v1",
     api_key=key,
@@ -295,7 +295,7 @@ client = OpenAI(
 )
 ```
 
-`http_client=httpx.Client(timeout=120)` is **not optional**. The default HTTP timeout is 30 seconds, which is less than lemond's first-run model load time. Omitting it causes the request to silently time out with no error — the single most common integration failure.
+`http_client=httpx.Client(timeout=120)` is **not optional**. `httpx` requires no installation — it ships with the `openai` package. The default HTTP timeout is 30 seconds, which is shorter than lemond's first-run model load time. Omitting it causes the request to silently time out with no error — the single most common integration failure.
 
 For other clients:
 
