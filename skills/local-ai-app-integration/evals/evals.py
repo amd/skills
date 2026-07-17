@@ -28,7 +28,8 @@ def test_launcher_module_written():
         run = agent.prompt(
             "Help me add local AI to this Python app using embeddable lemonade "
             "so it replaces the OpenAI API with a local backend. "
-            "Do not download or install anything — just write the launcher file."
+            "Do not download or install anything — just write the launcher file "
+            "as lemond_launcher.py."
         )
 
         run.logs_contains("local-ai-app-integration")  # skill triggered by description
