@@ -5,14 +5,12 @@
 # ///
 """Select which behavioral tests to run, by skill name.
 
-Behavioral tests live one-per-skill (see CONTRIBUTING.md) at:
+Behavioral tests live with each skill (see CONTRIBUTING.md) at:
 
-    eval/behavioral/tests/test_<skill_with_underscores>.py
+    skills/<skill>/evals/evals.py
 
-and exercise the matching skill under skills/<skill>/. Skill names are
-lowercase-with-hyphens; the test filename swaps the hyphens for underscores
-(``local-ai-use`` -> ``test_local_ai_use.py``) because that is what Python
-import / pytest collection require.
+Skill names are lowercase-with-hyphens. Keeping each test beside the skill
+makes the behavioral coverage part of the skill's own source tree.
 
 This script maps a set of changed files (read from stdin, one path per line)
 to the skills whose behavioral test should run, and is also used to enumerate
@@ -38,11 +36,9 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-TESTS_DIR = REPO_ROOT / "eval" / "behavioral" / "tests"
 SKILLS_DIR = REPO_ROOT / "skills"
 
-TEST_PREFIX = "test_"
-TEST_SUFFIX = ".py"
+EVAL_PATH = Path("evals") / "evals.py"
 
 # Touching any of these means the shared harness (not one skill) changed, so we
 # re-run every behavioral test rather than trying to guess the blast radius.
@@ -58,34 +54,23 @@ INFRA_FILES = {
 }
 
 
-def skill_to_test(skill: str) -> str:
-    """`local-ai-use` -> `test_local_ai_use.py`."""
-    return f"{TEST_PREFIX}{skill.replace('-', '_')}{TEST_SUFFIX}"
-
-
-def test_to_skill(filename: str) -> str:
-    """`test_local_ai_use.py` -> `local-ai-use` (inverse of skill_to_test)."""
-    stem = filename[len(TEST_PREFIX) : -len(TEST_SUFFIX)]
-    return stem.replace("_", "-")
-
-
 def is_testable(skill: str) -> bool:
     """A skill is testable when both its test file and skill folder exist."""
-    has_test = (TESTS_DIR / skill_to_test(skill)).is_file()
-    has_skill = (SKILLS_DIR / skill / "SKILL.md").is_file()
+    skill_dir = SKILLS_DIR / skill
+    has_test = (skill_dir / EVAL_PATH).is_file()
+    has_skill = (skill_dir / "SKILL.md").is_file()
     return has_test and has_skill
 
 
 def all_testable_skills() -> list[str]:
     """Every skill that currently has a behavioral test and a skill folder."""
-    if not TESTS_DIR.is_dir():
+    if not SKILLS_DIR.is_dir():
         return []
-    skills = set()
-    for path in TESTS_DIR.glob(f"{TEST_PREFIX}*{TEST_SUFFIX}"):
-        skill = test_to_skill(path.name)
-        if is_testable(skill):
-            skills.add(skill)
-    return sorted(skills)
+    return sorted(
+        path.name
+        for path in SKILLS_DIR.iterdir()
+        if path.is_dir() and is_testable(path.name)
+    )
 
 
 def select_from_changes(changed: list[str]) -> list[str]:
@@ -103,13 +88,6 @@ def select_from_changes(changed: list[str]) -> list[str]:
             parts = path.split("/")
             if len(parts) >= 2 and is_testable(parts[1]):
                 selected.add(parts[1])
-        # A change to a behavioral test file itself.
-        if path.startswith("eval/behavioral/tests/") and path.endswith(TEST_SUFFIX):
-            name = Path(path).name
-            if name.startswith(TEST_PREFIX):
-                skill = test_to_skill(name)
-                if is_testable(skill):
-                    selected.add(skill)
     return sorted(selected)
 
 

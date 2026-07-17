@@ -6,7 +6,9 @@
 
 Run locally (needs the `claude` CLI authenticated):
 
-    pytest eval/behavioral/tests/test_local_ai_app_integration.py -s
+    cd eval/behavioral
+    python -m pytest -c pytest.ini -p conftest \
+        ../../skills/local-ai-app-integration/evals/evals.py
 
 Prompts are scoped to code-generation only ("Do not download or install
 anything") to avoid the agent attempting the GitHub download, which hangs
@@ -20,7 +22,7 @@ _STUB = "from openai import OpenAI\nclient = OpenAI()\n"
 
 
 def test_launcher_module_written():
-    with claude("sonnet", skill="local-ai-app-integration") as agent:
+    with claude("opus", skill="local-ai-app-integration") as agent:
         (agent.workspace / "main.py").write_text(_STUB)
 
         run = agent.prompt(
@@ -35,7 +37,7 @@ def test_launcher_module_written():
 
 
 def test_http_client_timeout_is_120s():
-    with claude("sonnet", skill="local-ai-app-integration") as agent:
+    with claude("opus", skill="local-ai-app-integration") as agent:
         (agent.workspace / "main.py").write_text(_STUB)
 
         run = agent.prompt(
@@ -48,7 +50,7 @@ def test_http_client_timeout_is_120s():
 
 
 def test_health_check_uses_http_not_stdout():
-    with claude("sonnet", skill="local-ai-app-integration") as agent:
+    with claude("opus", skill="local-ai-app-integration") as agent:
         (agent.workspace / "main.py").write_text(_STUB)
 
         run = agent.prompt(
@@ -61,7 +63,7 @@ def test_health_check_uses_http_not_stdout():
 
 
 def test_no_preload_call_in_written_code():
-    with claude("sonnet", skill="local-ai-app-integration") as agent:
+    with claude("opus", skill="local-ai-app-integration") as agent:
         (agent.workspace / "main.py").write_text(_STUB)
 
         run = agent.prompt(
@@ -74,7 +76,7 @@ def test_no_preload_call_in_written_code():
 
 
 def test_api_key_gate_bypassed_in_local_mode():
-    with claude("sonnet", skill="local-ai-app-integration") as agent:
+    with claude("opus", skill="local-ai-app-integration") as agent:
         (agent.workspace / "main.py").write_text(
             "import os\n"
             "from openai import OpenAI\n\n"

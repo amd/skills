@@ -47,7 +47,7 @@ Browse everything available before installing:
 npx skills add amd/skills --list
 ```
 
-Prefer to do it by hand? See [Manual installation](#manual-installation).
+Please note that `npx` requires [Node.js](https://nodejs.org). Prefer to do it by hand? See [Manual installation](#manual-installation).
 
 ## Using a skill
 
