@@ -19,9 +19,7 @@ talks to it on `http://localhost:PORT/api/v1`. The user gets local, private,
 hardware-optimized inference (CPU, AMD iGPU/dGPU, XDNA2 NPU) with no separate
 install.
 
-**What you'll end up with:** one new launcher module (~30 lines), one config
-change to the existing HTTP client (base URL + API key), one vendored binary
-under `vendor/lemonade/`.
+**What you'll end up with:** one new launcher module (~30 lines), three mandatory changes to the existing HTTP client (`base_url`, `api_key`, and a 120-second HTTP timeout), one vendored binary under `vendor/lemonade/`.
 
 ## When this skill is the right tool
 
@@ -47,7 +45,7 @@ This skill follows one fixed sequence. Do not deviate without a stated reason.
 [ ] 2. Pick a model + backend profile
 [ ] 3. Place Embeddable Lemonade in the app's tree (full package, not just the binary)
 [ ] 4. Add a `lemond` launcher (subprocess + API key + port + per-stage logging)
-[ ] 5. Re-point the existing client at lemond (set HTTP timeout to 120s)
+[ ] 5. Re-point the existing client at lemond (base_url, api_key, 120s timeout — all three required)
 [ ] 6. Wait for /api/v1/health, install backend, then PULL the model before first use
 [ ] 7. Wire shutdown and error recovery
 ```
@@ -254,12 +252,10 @@ Write the launcher as a new module named **`lemond_launcher.py`** (or
 `lemond_launcher.<ext>` for the app's language). It is a thin process
 supervisor. Its only jobs:
 
-1. Generate a fresh random API key per app launch.
-2. Pick a free localhost port.
-3. Spawn `lemond <dir> --port <port>` with `LEMONADE_API_KEY` set.
-4. Poll `GET http://127.0.0.1:<port>/api/v1/health` (with the Bearer key)
-   until it returns 200 — this HTTP probe, never stdout parsing, is how
-   readiness is detected.
+1. Generate a fresh random API key: `key = secrets.token_urlsafe(32)`
+2. Pick a free localhost port: bind a `socket` to port 0, read back the assigned port, close it.
+3. Spawn lemond as a `subprocess`: `subprocess.Popen([LEMOND_BIN, LEMOND_DIR, "--port", str(port)], env={**os.environ, "LEMONADE_API_KEY": key})`
+4. Poll `GET /api/v1/health` with `Authorization: Bearer {key}` in a loop until HTTP 200 — this is the only correct readiness check.
 5. Expose the chosen `port` and `key` to the rest of the app.
 
 > **Log one line per lifecycle stage.** Build the logging in from the start —
@@ -287,18 +283,7 @@ supervisor. Its only jobs:
 > silently breaking any in-flight transcription. Add `vendor/` (or the
 > equivalent) to the watcher's ignore list before testing.
 
-The launcher logic in pseudocode (full Python and Node.js implementations in [reference.md](reference.md#reference-launchers)):
-
-```
-port  = bind("127.0.0.1:0"), read port, close socket
-key   = random_bytes(32)
-proc  = spawn(lemond_bin, [lemond_dir, "--port", port], env={LEMONADE_API_KEY: key})
-poll  GET /api/v1/health with Bearer key, retry for 90s, 250ms interval
-return proc, key, port
-
-# On failure: kill proc, pick new port, retry up to 3 times
-# On app exit: proc.kill() (Windows) / proc.terminate() (Unix), then wait()
-```
+**Use the reference implementation from [reference.md § Reference launchers](reference.md#reference-launchers) directly** — copy it verbatim and adapt only the `LEMOND_DIR` path. Do not write a launcher from scratch. The reference Python launcher uses `secrets` (for the API key), `socket` (for the free-port probe), and `subprocess` (to spawn lemond); the Node.js launcher uses the equivalent stdlib modules. Both handle port-race retries and health polling correctly.
 
 Readiness is always determined by polling the exact endpoint
 `GET http://127.0.0.1:<port>/api/v1/health` and checking for HTTP 200 — never
@@ -307,17 +292,41 @@ hit that `/api/v1/health` path.
 
 ## Step 5: Re-point the existing client at `lemond`
 
-Change three things in the app's existing client config, and nothing beyond
-these: the base URL, the API key, and the HTTP client timeout (raise it to at
-least 120 seconds — see the note below for why). Leave every other client
-setting alone.
+Make **three** changes to the app's existing client construction — all three
+are required, not optional:
 
-| Existing client | New `base_url` | New auth |
-|---|---|---|
-| `openai-python` / `openai-node` | `http://127.0.0.1:{port}/api/v1` | `api_key=key` |
-| `@anthropic-ai/sdk` | `http://127.0.0.1:{port}/api/v1` | `apiKey: key` (Lemonade serves the Anthropic API too) |
-| Raw `fetch` / `requests` | same as above | `Authorization: Bearer {key}` header |
-| Ollama-compatible code | `http://127.0.0.1:{port}/api/v0` | none required, but pass the key anyway |
+1. Set `base_url` to `http://127.0.0.1:{port}/api/v1`
+2. Set `api_key` to the launcher key
+3. **Set the HTTP timeout to 120 seconds** — this is mandatory, not optional
+
+The 120-second timeout is not a tuning suggestion. The default on most HTTP
+clients is 30s, which is shorter than lemond's first-run model load time on
+real hardware. Without it the request silently times out and the UI shows
+nothing, which is indistinguishable from a broken integration.
+
+**Python (openai) — the exact change to make:**
+
+```python
+import httpx
+from openai import OpenAI
+
+proc, key, port = start_lemond()
+client = OpenAI(
+    base_url=f"http://127.0.0.1:{port}/api/v1",
+    api_key=key,
+    http_client=httpx.Client(timeout=120),  # required: 120s for first-run model load
+)
+```
+
+For other clients:
+
+| Existing client | New `base_url` | New auth | Timeout |
+|---|---|---|---|
+| `openai-python` | `http://127.0.0.1:{port}/api/v1` | `api_key=key` | `httpx.Client(timeout=120)` |
+| `openai-node` | `http://127.0.0.1:{port}/api/v1` | `apiKey: key` | `timeout: 120000` |
+| `@anthropic-ai/sdk` | `http://127.0.0.1:{port}/api/v1` | `apiKey: key` | `timeout: 120000` |
+| Raw `fetch` / `requests` | same | `Authorization: Bearer {key}` | set per-request |
+| Ollama-compatible code | `http://127.0.0.1:{port}/api/v0` | pass key anyway | 120s |
 
 The model identifier on requests stays a Lemonade model name (e.g.
 `Qwen3-4B-GGUF`), not the cloud name.
@@ -337,30 +346,6 @@ The `lemond` key from Step 4 is generated internally by the launcher and used
 only for the local loopback connection, so the user never sees or enters one;
 any UI placeholder (e.g. `"local"`) is fine. Flipping into local mode should
 never strand the user on a key-entry wall.
-
-**Set the HTTP client timeout to at least 120 seconds.** The default timeout
-on most HTTP clients (30s) is shorter than the time lemond takes to load a
-model on first use. A silent timeout looks identical to a broken integration
-— the request fires, nothing comes back, and the UI shows nothing. 120s
-covers first-run model load on any supported hardware.
-
-**Python (openai) example:**
-
-```python
-from openai import OpenAI
-import httpx
-
-proc, key, port = start_lemond()
-client = OpenAI(
-    base_url=f"http://127.0.0.1:{port}/api/v1",
-    api_key=key,
-    http_client=httpx.Client(timeout=120.0),  # covers first-run model load
-)
-resp = client.chat.completions.create(
-    model="Qwen3-4B-GGUF",
-    messages=[{"role": "user", "content": "Hello"}],
-)
-```
 
 ## Step 6: Health, backend, then pull the model — *before* first inference
 
@@ -444,7 +429,7 @@ These are the only failure modes worth handling. Do not over-engineer.
 couple of seconds. Always wait on the process; never orphan it.
 
 **Do not** parse `lemond` stdout to detect readiness; use the HTTP
-`/v1/health` probe. Stdout format is not a stable contract.
+`/api/v1/health` probe. Stdout format is not a stable contract.
 
 ---
 
@@ -465,7 +450,7 @@ The integration is done when **all** of these are true:
       response with the base URL and key swapped, with no other code changed.
 - [ ] First-run latency is surfaced: the interface shows a loading state from the
       moment the first inference request is sent until the response arrives.
-- [ ] The HTTP client timeout is set to at least 120 seconds.
+- [ ] The HTTP client timeout is set to 120 seconds.
 - [ ] In local mode the app requires **no** cloud API key: no onboarding wall,
       validator, or startup check blocks the user, and no code path throws
       "API key not configured" when the active mode is local.

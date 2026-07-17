@@ -129,6 +129,7 @@ def _stage_workspace(skill: str) -> Path:
     dest = workspace / ".claude" / "skills" / skill
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(skill_src, dest)
+
     return workspace
 
 

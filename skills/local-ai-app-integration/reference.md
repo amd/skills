@@ -27,7 +27,7 @@ hardware-optimized one at first run after a system probe.
 | Backend | Hardware | OS | Bundle strategy |
 |---|---|---|---|
 | `vulkan` | x86_64 CPU, AMD iGPU/dGPU, most others | Windows, Linux | **Bundle at packaging time.** Universal fallback. |
-| `rocm` | gfx1151 (Strix Halo), gfx120X (RDNA4), gfx110X (RDNA3) | Windows, Linux | **Install at first run** if `/v1/system-info` shows `state: installable`. Cannot be packaging-time bundled. |
+| `rocm` | gfx1151 (Strix Halo), gfx120X (RDNA4), gfx110X (RDNA3) | Windows, Linux | **Install at first run** if `/api/v1/system-info` shows `state: installable`. Cannot be packaging-time bundled. |
 | `cpu` | x86_64 CPU | Windows, Linux | Install only if you need a non-Vulkan CPU path. |
 | `metal` | Apple Silicon | macOS (beta) | macOS-only path. |
 
@@ -80,7 +80,7 @@ ship a default and document how to override.
 | Text-to-speech | `kokoro-v1` | 0.3 GB | `kokoro` |
 | Image generation | `SDXL-Turbo` | 6.9 GB | `sd-cpp` |
 
-For a catalog with more models, fetch `GET /v1/models` after starting `lemond`.
+For a catalog with more models, fetch `GET /api/v1/models` after starting `lemond`.
 This is the **only** trusted source of available models. Never read or trust
 `vendor/lemonade/resources/server_models.json` (or any other static file) as a
 model catalog; it can be stale or incomplete. A model only appears in
@@ -134,7 +134,7 @@ the app's modality.
 Decision rules in priority order, for the default `llamacpp` recipe (text gen):
 
 1. If `recipes.llamacpp.backends.rocm.state == "installable"` →
-   `POST /v1/install {"recipe":"llamacpp","backend":"rocm"}`.
+   `POST /api/v1/install {"recipe":"llamacpp","backend":"rocm"}`.
 2. Else if `state == "installed"` for `vulkan` → use it as-is.
 3. Else fall back to `cpu`.
 
@@ -267,7 +267,7 @@ Two backend limitations on Linux as of this writing:
 - `flm` (FastFlowLM, NPU) cannot be bundled at packaging time on Linux.
   Install at runtime only.
 - `llamacpp:rocm` cannot be bundled at packaging time on **any** OS. Always
-  install at runtime via `/v1/install`.
+  install at runtime via `/api/v1/install`.
 
 When building from source for an unusual Linux distro, see the upstream
 `docs/embeddable/building.md` in the lemonade-sdk/lemonade repo.
