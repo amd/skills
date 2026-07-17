@@ -241,10 +241,11 @@ vendor/lemonade/
 
 The launcher is a thin process supervisor. Its only jobs:
 
-1. Generate a fresh random API key per app launch.
-2. Pick a free localhost port.
-3. Spawn `lemond <dir> --port <port>` with `LEMONADE_API_KEY` set.
-4. Expose the chosen `port` and `key` to the rest of the app.
+1. Generate a fresh random API key: `key = secrets.token_urlsafe(32)`
+2. Pick a free localhost port: bind a `socket` to port 0, read back the assigned port, close it.
+3. Spawn lemond as a `subprocess`: `subprocess.Popen([LEMOND_BIN, LEMOND_DIR, "--port", str(port)], env={**os.environ, "LEMONADE_API_KEY": key})`
+4. Poll `GET /api/v1/health` with `Authorization: Bearer {key}` in a loop until HTTP 200 — this is the only correct readiness check.
+5. Expose the chosen `port` and `key` to the rest of the app.
 
 > **Log one line per lifecycle stage.** Build the logging in from the start —
 > not as an afterthought when something breaks. Each silent transition needs a
@@ -275,24 +276,25 @@ The launcher is a thin process supervisor. Its only jobs:
 
 ## Step 5: Re-point the existing client at `lemond`
 
-Make **three** changes to the app's existing client construction — all three
-are required, not optional:
+Every re-point of the OpenAI client at lemond requires exactly these three arguments — no exceptions:
 
-1. Set `base_url` to `http://127.0.0.1:{port}/api/v1`
-2. Set `api_key` to the launcher key
-3. **Set `http_client=httpx.Client(timeout=120)`** — **required alongside 1 and 2**; writing 1 and 2 without 3 is incomplete and will silently time out on first-run model load
-
-**Minimal edit when re-pointing an existing file (all three arguments required):**
 ```python
 import httpx
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://127.0.0.1:PORT/api/v1",  # replace PORT with the lemond port
-    api_key="LOCAL_KEY",                        # replace with the launcher key
-    http_client=httpx.Client(timeout=120),      # required — do not omit
+    base_url="http://127.0.0.1:{port}/api/v1",
+    api_key=key,
+    http_client=httpx.Client(timeout=120),  # required: default 30s times out before first-run model load
 )
 ```
+
+Make **three** changes to the app's existing client construction — all three
+are required, not optional:
+
+1. Set `base_url="http://127.0.0.1:{port}/api/v1"`
+2. Set `api_key=key`
+3. Set `http_client=httpx.Client(timeout=120)` — **required, not optional**; the default 30s timeout is shorter than lemond's first-run model load, causing silent failures
 
 The 120-second timeout is not a tuning suggestion. The default on most HTTP
 clients is 30s, which is shorter than lemond's first-run model load time on
