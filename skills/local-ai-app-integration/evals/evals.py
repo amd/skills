@@ -26,11 +26,12 @@ def test_launcher_module_written():
         (agent.workspace / "main.py").write_text(_STUB)
 
         run = agent.prompt(
-            "Write a lemond launcher module for this Python app. "
-            "Do not download or install anything — just write the file."
+            "Help me add local AI to this Python app using embeddable lemonade "
+            "so it replaces the OpenAI API with a local backend. "
+            "Do not download or install anything — just write the launcher file."
         )
 
-        run.logs_contains("local-ai-app-integration")  # skill was invoked
+        run.logs_contains("local-ai-app-integration")  # skill triggered by description
         run.workspace_contains("lemond_launcher.py")
         run.logs_contains("secrets")      # random API key generation
         run.logs_contains("socket")       # dynamic port via socket bind
@@ -43,7 +44,8 @@ def test_http_client_timeout_is_120s():
 
         run = agent.prompt(
             "Update main.py to re-point the OpenAI client at a local lemond "
-            "instance. Do not download or install anything — just edit the file."
+            "instance. Do not download or install anything — just edit the file. "
+            "Use the local-ai-app-integration skill."
         )
 
         run.logs_contains("local-ai-app-integration")  # skill was invoked
@@ -57,7 +59,8 @@ def test_health_check_uses_http_not_stdout():
 
         run = agent.prompt(
             "Write a health-check helper for lemond in this Python app. "
-            "Do not download or install anything — just write the code."
+            "Do not download or install anything — just write the code. "
+            "Use the local-ai-app-integration skill."
         )
 
         run.logs_contains("local-ai-app-integration")  # skill was invoked
@@ -71,7 +74,8 @@ def test_no_preload_call_in_written_code():
 
         run = agent.prompt(
             "Write a lemond launcher for this Python app that waits for the "
-            "server to be ready. Do not download or install anything."
+            "server to be ready. Do not download or install anything. "
+            "Use the local-ai-app-integration skill."
         )
 
         run.logs_contains("local-ai-app-integration")  # skill was invoked
@@ -92,7 +96,8 @@ def test_api_key_gate_bypassed_in_local_mode():
 
         run = agent.prompt(
             "Edit main.py so it works in local mode without an OPENAI_API_KEY. "
-            "Do not download or install anything — just edit the file."
+            "Do not download or install anything — just edit the file. "
+            "Use the local-ai-app-integration skill."
         )
 
         run.logs_contains("local-ai-app-integration")  # skill was invoked

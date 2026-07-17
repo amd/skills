@@ -130,12 +130,6 @@ def _stage_workspace(skill: str) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(skill_src, dest)
 
-    # Ensures the skill body is loaded rather than the agent answering from
-    # training knowledge without invoking the skill.
-    (workspace / "CLAUDE.md").write_text(
-        f"For every task in this workspace, use the `{skill}` skill.\n",
-        encoding="utf-8",
-    )
     return workspace
 
 
