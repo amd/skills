@@ -129,15 +129,6 @@ def _stage_workspace(skill: str) -> Path:
     dest = workspace / ".claude" / "skills" / skill
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(skill_src, dest)
-
-    # Write a CLAUDE.md that instructs the agent to use the skill for every
-    # task in this workspace. The CLI reads CLAUDE.md automatically at startup,
-    # so this guarantees skill invocation without requiring each test prompt to
-    # mention it explicitly.
-    (workspace / "CLAUDE.md").write_text(
-        f"For every task in this workspace, use the `{skill}` skill.\n",
-        encoding="utf-8",
-    )
     return workspace
 
 
