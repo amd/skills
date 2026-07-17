@@ -2,8 +2,12 @@
 name: local-ai-app-integration
 description: >-
   Integrates local AI capabilities into applications using Embeddable Lemonade.
-  Use when the user wants to add local AI, offline AI, private AI, on-device AI,
-  a local LLM, local chat, embeddings, image generation, speech-to-text, or
+  ALWAYS use this skill when the task involves lemond or lemonade in any way —
+  writing a lemond launcher, writing a lemond launcher module, re-pointing an
+  OpenAI client at lemond, writing a health-check for lemond, editing an app to
+  work with lemond, or any task that mentions lemond or lemonade. Also use when
+  the user wants to add local AI, offline AI, private AI, on-device AI, a local
+  LLM, local chat, embeddings, image generation, speech-to-text, or
   text-to-speech to an app; replace or supplement OpenAI, Anthropic, Ollama, or
   other cloud AI APIs with a local backend; bundle AI inference into an app
   installer; or mentions Lemonade, `lemond`, embeddable lemonade, Ryzen AI,
