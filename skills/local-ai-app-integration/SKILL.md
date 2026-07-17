@@ -2,12 +2,8 @@
 name: local-ai-app-integration
 description: >-
   Integrates local AI capabilities into applications using Embeddable Lemonade.
-  ALWAYS use this skill when the task involves lemond or lemonade in any way —
-  writing a lemond launcher, writing a lemond launcher module, re-pointing an
-  OpenAI client at lemond, writing a health-check for lemond, editing an app to
-  work with lemond, or any task that mentions lemond or lemonade. Also use when
-  the user wants to add local AI, offline AI, private AI, on-device AI, a local
-  LLM, local chat, embeddings, image generation, speech-to-text, or
+  Use when the user wants to add local AI, offline AI, private AI, on-device AI,
+  a local LLM, local chat, embeddings, image generation, speech-to-text, or
   text-to-speech to an app; replace or supplement OpenAI, Anthropic, Ollama, or
   other cloud AI APIs with a local backend; bundle AI inference into an app
   installer; or mentions Lemonade, `lemond`, embeddable lemonade, Ryzen AI,
@@ -23,8 +19,7 @@ talks to it on `http://localhost:PORT/api/v1`. The user gets local, private,
 hardware-optimized inference (CPU, AMD iGPU/dGPU, XDNA2 NPU) with no separate
 install.
 
-**What you'll end up with:** one new launcher module (~30 lines), **three mandatory changes** to the existing HTTP client (`base_url`, `api_key`, and `http_client=httpx.Client(timeout=120)` — all three required together), one vendored binary
-under `vendor/lemonade/`.
+**What you'll end up with:** one new launcher module (~30 lines), three mandatory changes to the existing HTTP client (`base_url`, `api_key`, and a 120-second HTTP timeout), one vendored binary under `vendor/lemonade/`.
 
 ## When this skill is the right tool
 
@@ -50,7 +45,7 @@ This skill follows one fixed sequence. Do not deviate without a stated reason.
 [ ] 2. Pick a model + backend profile
 [ ] 3. Place Embeddable Lemonade in the app's tree (full package, not just the binary)
 [ ] 4. Add a `lemond` launcher (subprocess + API key + port + per-stage logging)
-[ ] 5. Re-point the existing client at lemond — set `base_url`, `api_key`, AND `http_client=httpx.Client(timeout=120)` — all three are required
+[ ] 5. Re-point the existing client at lemond (base_url, api_key, 120s timeout — all three required)
 [ ] 6. Wait for /api/v1/health, install backend, then PULL the model before first use
 [ ] 7. Wire shutdown and error recovery
 ```
@@ -283,9 +278,9 @@ The launcher is a thin process supervisor. Its only jobs:
 Make **three** changes to the app's existing client construction — all three
 are required, not optional:
 
-1. Set `base_url="http://127.0.0.1:{port}/api/v1"`
-2. Set `api_key=key`
-3. Set `http_client=httpx.Client(timeout=120)` — **required, not optional**; the default 30s timeout is shorter than lemond's first-run model load, causing silent failures
+1. Set `base_url` to `http://127.0.0.1:{port}/api/v1`
+2. Set `api_key` to the launcher key
+3. **Set the HTTP timeout to 120 seconds** — this is mandatory, not optional
 
 The 120-second timeout is not a tuning suggestion. The default on most HTTP
 clients is 30s, which is shorter than lemond's first-run model load time on
@@ -438,7 +433,7 @@ The integration is done when **all** of these are true:
       response with the base URL and key swapped, with no other code changed.
 - [ ] First-run latency is surfaced: the interface shows a loading state from the
       moment the first inference request is sent until the response arrives.
-- [ ] The OpenAI client is constructed with all three required arguments: `base_url`, `api_key`, and `http_client=httpx.Client(timeout=120)`. A constructor with only `base_url` and `api_key` is incomplete and will silently time out on first-run model load.
+- [ ] The HTTP client timeout is set to 120 seconds.
 - [ ] In local mode the app requires **no** cloud API key: no onboarding wall,
       validator, or startup check blocks the user, and no code path throws
       "API key not configured" when the active mode is local.
