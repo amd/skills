@@ -208,25 +208,26 @@ what the agent did — see the harness in [`eval/behavioral/`](eval/behavioral/)
 
 Conventions:
 
-- **One file per skill, centralized.** Put the test at
-  `eval/behavioral/tests/test_<skill>.py`, swapping the skill name's hyphens for
-  underscores (`local-ai-use` → `test_local_ai_use.py`). Tests live here, not
-  inside `skills/<name>/`, because the harness copies the skill folder into the
-  agent's sandbox at runtime — test files in there would pollute the workspace.
+- **One file per skill, beside the skill.** Put the test at
+  `skills/<skill-name>/evals/evals.py`. The harness excludes `.claude` from
+  workspace assertions, while the skill and its evals are staged together in
+  the agent's sandbox.
 - **Write checks against behavior.** Combine deterministic assertions
   (`logs_contains`, `workspace_contains`) with LLM-judged expectations
-  (`should`, `should_not`). See `test_local_ai_use.py` for the pattern.
+  (`should`, `should_not`). See `skills/local-ai-use/evals/evals.py` for the
+  pattern.
 
 Run one locally (needs the `claude` CLI authenticated and any per-skill
 prerequisites, e.g. a reachable Lemonade Server for `local-ai-use`):
 
 ```bash
 pip install -r eval/behavioral/requirements.txt
-cd eval/behavioral && pytest tests/test_local_ai_use.py
+cd eval/behavioral
+python -m pytest -c pytest.ini -p conftest ../../skills/local-ai-use/evals/evals.py
 ```
 
-In CI, the `behavioral` workflow runs these tests, but **only** when a
-maintainer adds the `run_behavioral` label to a PR for safety.
+In CI, the `behavioral` workflow runs the affected skill's tests when a PR
+changes a skill with an `evals/evals.py` file.
 
 ## Pre-publish checklist
 
