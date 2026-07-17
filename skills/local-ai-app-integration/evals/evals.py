@@ -28,15 +28,14 @@ def test_launcher_module_written():
         run = agent.prompt(
             "Help me add local AI to this Python app using embeddable lemonade "
             "so it replaces the OpenAI API with a local backend. "
-            "Do not download or install anything — just write the launcher file "
-            "as lemond_launcher.py."
+            "Do not download or install anything — just write the launcher file."
         )
 
         run.logs_contains("local-ai-app-integration")  # skill triggered by description
-        run.workspace_contains("lemond_launcher.py")
-        run.logs_contains("secrets")      # random API key generation
-        run.logs_contains("socket")       # dynamic port via socket bind
-        run.logs_contains("subprocess")   # lemond spawned as subprocess
+        run.should("Write a lemond launcher module as a new Python file")
+        run.should("Generate a random API key per launch")
+        run.should("Pick a free port dynamically")
+        run.should("Spawn lemond as a subprocess")
 
 
 def test_http_client_timeout_is_120s():
