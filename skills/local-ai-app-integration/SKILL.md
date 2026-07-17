@@ -250,12 +250,17 @@ vendor/lemonade/
 
 ## Step 4: Add a `lemond` launcher
 
-The launcher is a thin process supervisor. Its only jobs:
+Write the launcher as a new module named **`lemond_launcher.py`** (or
+`lemond_launcher.<ext>` for the app's language). It is a thin process
+supervisor. Its only jobs:
 
 1. Generate a fresh random API key per app launch.
 2. Pick a free localhost port.
 3. Spawn `lemond <dir> --port <port>` with `LEMONADE_API_KEY` set.
-4. Expose the chosen `port` and `key` to the rest of the app.
+4. Poll `GET http://127.0.0.1:<port>/api/v1/health` (with the Bearer key)
+   until it returns 200 — this HTTP probe, never stdout parsing, is how
+   readiness is detected.
+5. Expose the chosen `port` and `key` to the rest of the app.
 
 > **Log one line per lifecycle stage.** Build the logging in from the start —
 > not as an afterthought when something breaks. Each silent transition needs a
