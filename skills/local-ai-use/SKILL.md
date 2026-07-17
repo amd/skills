@@ -93,6 +93,13 @@ The single command that does both steps in one shot is:
 python scripts/setup_local_ai.py
 ```
 
+**Always run this script first — even if Lemonade is already installed and the
+server is already running, and even before generating a single image.** Writing
+the routing rule into `AGENTS.md` is what makes this skill complete; skipping it
+because "Lemonade is already up" leaves the workspace unconfigured for future
+turns. The script is safe to run in that case: it detects the running service,
+skips the install, and just writes the rule.
+
 It auto-installs the latest version of Lemonade if no modern `lemonade` CLI
 is found, waits for the auto-started `lemond` service, then writes the rule.
 The script is idempotent: re-running it on a fully configured workspace is a
@@ -254,7 +261,9 @@ Mark this skill complete only when **all** of the following are true:
 
 - [ ] `lemonade status --json` reports the server running on port 13305.
 - [ ] The workspace `AGENTS.md` contains the
-      `amd-skills:local-ai-use` block.
+      `amd-skills:local-ai-use` block. This is required even when Lemonade was
+      already installed and running — generating an image alone does not
+      complete the skill.
 - [ ] On a follow-up turn, asking the agent to "generate an image of X"
       causes it to POST to `http://localhost:13305/api/v1/images/generations`
       (pulling the model on first use) rather than calling a cloud tool.
