@@ -280,22 +280,31 @@ The launcher is a thin process supervisor. Its only jobs:
 
 ## Step 5: Re-point the existing client at `lemond`
 
-When the app has `client = OpenAI()`, replace it with exactly this — three arguments, no exceptions:
+Make **three** changes to the app's existing client construction — all three
+are required, not optional:
+
+1. Set `base_url="http://127.0.0.1:{port}/api/v1"`
+2. Set `api_key=key`
+3. Set `http_client=httpx.Client(timeout=120)` — **required, not optional**; the default 30s timeout is shorter than lemond's first-run model load, causing silent failures
+
+The 120-second timeout is not a tuning suggestion. The default on most HTTP
+clients is 30s, which is shorter than lemond's first-run model load time on
+real hardware. Without it the request silently times out and the UI shows
+nothing, which is indistinguishable from a broken integration.
+
+**Python (openai) — the exact change to make:**
 
 ```python
-# Before (cloud):
-# client = OpenAI()
+import httpx
+from openai import OpenAI
 
-# After (lemond) — all three arguments are required:
-import httpx  # httpx is already installed: it is a dependency of the openai package
+proc, key, port = start_lemond()
 client = OpenAI(
-    base_url="http://127.0.0.1:{port}/api/v1",
+    base_url=f"http://127.0.0.1:{port}/api/v1",
     api_key=key,
-    http_client=httpx.Client(timeout=120),
+    http_client=httpx.Client(timeout=120),  # required: 120s for first-run model load
 )
 ```
-
-`http_client=httpx.Client(timeout=120)` is **not optional**. `httpx` requires no installation — it ships with the `openai` package. The default HTTP timeout is 30 seconds, which is shorter than lemond's first-run model load time. Omitting it causes the request to silently time out with no error — the single most common integration failure.
 
 For other clients:
 
@@ -329,24 +338,7 @@ never strand the user on a key-entry wall.
 ## Step 6: Health, backend, then pull the model — *before* first inference
 
 `GET /api/v1/health` returning 200 means the **server** is up. It does **not**
-mean inference will work. The correct readiness probe (do not use stdout parsing):
-
-```python
-import urllib.request, time
-
-def wait_for_health(port: int, key: str, timeout_s: int = 30) -> None:
-    url = f"http://127.0.0.1:{port}/api/v1/health"
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(req, timeout=1) as r:
-                if r.status == 200:
-                    return
-        except Exception:
-            time.sleep(0.25)
-    raise RuntimeError(f"lemond did not become healthy within {timeout_s}s")
-``` Before the first real request succeeds, three more
+mean inference will work. Before the first real request succeeds, three more
 things must be true: the backend for your modality is installed, the model's
 weights are **downloaded to disk**, and (on the first call) the model is loaded
 into memory. Treating health=200 as "ready" is the single biggest cause of a
