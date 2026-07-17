@@ -15,10 +15,12 @@ Prerequisites (local run):
     pip install -r eval/behavioral/requirements.txt
     git, python3, and network access to clone AMD-AGI/TraceLens and install deps
 
-    pytest eval/behavioral/tests/test_tracelens_analysis_orchestrator.py -s
+    cd eval/behavioral
+    python -m pytest -c pytest.ini -p conftest \
+        ../../skills/tracelens-analysis-orchestrator/evals/evals.py
 
 This test is slow (TraceLens install + full orchestrator workflow). Outside CI,
-``TRACELENS_BEHAVIORAL_MODEL`` defaults to ``opus``; CI coerces to ``sonnet``.
+``TRACELENS_BEHAVIORAL_MODEL`` defaults to ``opus``; CI coerces to ``opus``.
 """
 
 from __future__ import annotations
@@ -73,7 +75,7 @@ class RepeatabilityCase:
 
 def _analysis_model() -> str:
     if _is_automated_env():
-        return "sonnet"
+        return "opus"
     return os.environ.get(
         "TRACELENS_BEHAVIORAL_MODEL",
         os.environ.get("BEHAVIORAL_MODEL", "opus"),

@@ -47,7 +47,7 @@ Browse everything available before installing:
 npx skills add amd/skills --list
 ```
 
-Prefer to do it by hand? See [Manual installation](#manual-installation).
+Please note that `npx` requires [Node.js](https://nodejs.org). Prefer to do it by hand? See [Manual installation](#manual-installation).
 
 ## Using a skill
 
@@ -83,6 +83,7 @@ Cross-stack skills, from client to cloud.
 | [`rocm-doctor`](skills/rocm-doctor/SKILL.md) | Diagnose ROCm / HIP / PyTorch / llama.cpp failures on AMD GPUs (Linux and Windows) against a closed list of known misconfigurations, then fix with consent or route upstream. Thin driver over the `rocm` CLI (`examine` / `diagnose` / `fix`). | in-repo |
 | `hyperloom-kernel-optimizer` | Autonomously optimizes LLM inference on AMD GPUs. | _planned_ |
 | `vllm-semantic-router` | Setup a vLLM router that semantically maps your request to the best available platform. | _planned_ |
+| `hrr-replay-analysis` | Record, replay, and analyze GPU workload behavior on ROCm across AMD Instinct, Radeon, and Ryzen hardware using HIP Record and Replay archives. | _planned_ |
 
 ### Server-Native
 
