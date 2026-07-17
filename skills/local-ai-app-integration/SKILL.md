@@ -300,10 +300,17 @@ return proc, key, port
 # On app exit: proc.kill() (Windows) / proc.terminate() (Unix), then wait()
 ```
 
+Readiness is always determined by polling the exact endpoint
+`GET http://127.0.0.1:<port>/api/v1/health` and checking for HTTP 200 — never
+by reading `lemond`'s stdout or stderr. Any health-check helper you write must
+hit that `/api/v1/health` path.
+
 ## Step 5: Re-point the existing client at `lemond`
 
-Change exactly two values in the app's existing client config: the base URL
-and the API key. Nothing else.
+Change three things in the app's existing client config, and nothing beyond
+these: the base URL, the API key, and the HTTP client timeout (raise it to at
+least 120 seconds — see the note below for why). Leave every other client
+setting alone.
 
 | Existing client | New `base_url` | New auth |
 |---|---|---|
