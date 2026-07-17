@@ -27,12 +27,9 @@ def test_launcher_module_written():
 
         run = agent.prompt(
             "Write a lemond launcher module for this Python app. "
-            "Do not download or install anything — just write the file."
+            "Do not download or install anything — just write the file. "
+            "Use the local-ai-app-integration skill."
         )
-
-        launcher = agent.workspace / "lemond_launcher.py"
-        print(f"\n[debug] lemond_launcher.py contents:\n{launcher.read_text() if launcher.is_file() else '(file not found)'}", flush=True)
-        print(f"[debug] agent final message:\n{run.result_text}", flush=True)
 
         run.workspace_contains("lemond_launcher.py")
         run.logs_contains("secrets")      # random API key generation
@@ -46,11 +43,9 @@ def test_http_client_timeout_is_120s():
 
         run = agent.prompt(
             "Update main.py to re-point the OpenAI client at a local lemond "
-            "instance. Do not download or install anything — just edit the file."
+            "instance. Do not download or install anything — just edit the file. "
+            "Use the local-ai-app-integration skill."
         )
-
-        print(f"\n[debug] main.py contents:\n{(agent.workspace / 'main.py').read_text()}", flush=True)
-        print(f"[debug] agent final message:\n{run.result_text}", flush=True)
 
         run.workspace_contains("main.py")
         run.logs_contains("120")          # 120s timeout present in written code
@@ -62,7 +57,8 @@ def test_health_check_uses_http_not_stdout():
 
         run = agent.prompt(
             "Write a health-check helper for lemond in this Python app. "
-            "Do not download or install anything — just write the code."
+            "Do not download or install anything — just write the code. "
+            "Use the local-ai-app-integration skill."
         )
 
         run.logs_contains("/api/v1/health")
@@ -75,7 +71,8 @@ def test_no_preload_call_in_written_code():
 
         run = agent.prompt(
             "Write a lemond launcher for this Python app that waits for the "
-            "server to be ready. Do not download or install anything."
+            "server to be ready. Do not download or install anything. "
+            "Use the local-ai-app-integration skill."
         )
 
         run.logs_contains("/api/v1/health")
@@ -95,7 +92,8 @@ def test_api_key_gate_bypassed_in_local_mode():
 
         run = agent.prompt(
             "Edit main.py so it works in local mode without an OPENAI_API_KEY. "
-            "Do not download or install anything — just edit the file."
+            "Do not download or install anything — just edit the file. "
+            "Use the local-ai-app-integration skill."
         )
 
         run.workspace_contains("main.py")
