@@ -32,10 +32,22 @@ def test_launcher_module_written():
         )
 
         run.logs_contains("local-ai-app-integration")  # skill triggered by description
-        run.should("Write a lemond launcher module as a new Python file")
-        run.should("Generate a random API key per launch")
-        run.should("Pick a free port dynamically")
-        run.should("Spawn lemond as a subprocess")
+
+
+def test_launcher_implementation():
+    with claude("opus", skill="local-ai-app-integration") as agent:
+        (agent.workspace / "main.py").write_text(_STUB)
+
+        run = agent.prompt(
+            "Write a lemond launcher module for this Python app. "
+            "Do not download or install anything — just write the file. "
+            "Use the local-ai-app-integration skill."
+        )
+
+        run.logs_contains("local-ai-app-integration")  # skill was invoked
+        run.logs_contains("secrets")      # random API key generation
+        run.logs_contains("socket")       # dynamic port via socket bind
+        run.logs_contains("subprocess")   # lemond spawned as subprocess
 
 
 def test_http_client_timeout_is_120s():
