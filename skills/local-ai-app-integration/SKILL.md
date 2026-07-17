@@ -228,10 +228,12 @@ vendor/lemonade/
 
 **Backend install timing — two distinct paths:**
 
-> **Packaging time** (developer machine, before bundling):
+> **Packaging time** (developer machine, before bundling). Use the lemonade
+> CLI that shipped inside `vendor/lemonade/` so it matches the bundled
+> `lemond` version (prefix with `./` or the full path):
 > ```
-> lemonade backends install llamacpp:vulkan
-> lemonade backends install flm:npu    # Windows NPU path only
+> vendor/lemonade/lemonade backends install llamacpp:vulkan
+> vendor/lemonade/lemonade backends install flm:npu    # Windows NPU path only
 > ```
 > This bakes the backend binaries into `vendor/lemonade/bin/` before the app
 > ships. `lemond` does not need to be running. Use a modern `lemonade` CLI
