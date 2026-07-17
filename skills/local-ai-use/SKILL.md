@@ -23,14 +23,26 @@ on-device.
 
 The skill does three things:
 
-1. **Makes sure local Lemonade is installed and running.** If the `lemonade`
-   CLI is missing, the setup script installs the **full version** of Lemonade
-   (server + desktop app) on the user's behalf; if the server is installed but
-   not running, it launches it.
+1. **Makes sure local Lemonade is installed and running.** If no modern
+   `lemonade` CLI is found, the setup script installs the latest version of
+   Lemonade on the user's behalf. Modern Lemonade has no `serve` command — the
+   Lemonade service (the `lemond` daemon) auto-starts on install and is managed
+   by the OS — so the setup script waits for the service and, if it stays down,
+   prints the exact OS-specific command to start it (e.g. `sudo systemctl start
+   lemond` on Linux).
 2. **Verifies that local Lemonade is reachable.**
 3. **Drops a `Local AI Use` block into the workspace `AGENTS.md`** so the agent
    reads the routing rule on every later turn, in Cursor, Claude Code, Codex,
    Gemini CLI, and any other agent that respects `AGENTS.md`.
+
+> **Requires modern Lemonade (v10.1.0 or newer).** Modern Lemonade unified
+> everything under one `lemonade` CLI (`lemonade status`, `lemonade pull`, ...)
+> driving an always-on `lemond` service. This skill targets that and installs
+> Lemonade only from the official installers (see below) — never via
+> `pip install lemonade-sdk`, which is a separate, older release line. If an
+> older/incompatible `lemonade` is already on the PATH (from any channel — an
+> old `.msi`/`.deb` or a pip install), it will shadow the modern CLI; uninstall
+> it first (see the removal commands in Step 1a) before running this skill.
 
 Models are **not** downloaded during setup. Each default model is pulled
 lazily, on first use, by the routing rule (e.g. the first image request pulls
@@ -42,7 +54,7 @@ user may never need.
 Use this skill when **all** of the following are true:
 
 - The user wants local Lemonade. If it is not yet installed, the setup script
-  installs the **full version** (server + desktop app) for them automatically.
+  installs the latest version for them automatically.
 - The user accepts the default Lemonade endpoint `http://localhost:13305`.
 - The user wants the change to be **persistent** across future turns and
   agent restarts (the rule is written to disk).
@@ -54,11 +66,12 @@ instead.
 ## Prerequisites
 
 - **OS:** Windows 11 x64, Ubuntu/Debian x64, or macOS (beta).
-- **Lemonade Server:** the setup script installs it if missing. It downloads
-  and silently installs the **full version** (Windows `lemonade.msi`, the
-  Ubuntu/Debian `ppa:lemonade-team/stable` PPA plus `lemonade-desktop`, or the
-  macOS `.pkg`), then launches the server. On Linux/macOS this needs `sudo`.
-  Pass `--no-install` if the user wants to install it themselves instead.
+- **Lemonade:** the setup script installs it if missing. It downloads and
+  silently installs the latest version (Windows `lemonade.msi`, the
+  Ubuntu/Debian `ppa:lemonade-team/stable` PPA, or the macOS `.pkg`). The
+  `lemond` service auto-starts after install; the script waits for it rather
+  than launching it. On Linux/macOS the install needs `sudo`. Pass
+  `--no-install` if the user wants to install it themselves instead.
 - **Disk:** ~8 GB free for the three default models (SD-Turbo + Whisper-Tiny
   + kokoro-v1), plus ~0.1 GB for the installer itself.
 - **Network:** required for the install download and the first `lemonade pull`
@@ -80,11 +93,11 @@ The single command that does both steps in one shot is:
 python scripts/setup_local_ai.py
 ```
 
-It auto-installs the full version of Lemonade if the `lemonade` CLI is
-missing, launches the server if it is not running, then writes the rule. The
-script is idempotent: re-running it on a fully configured workspace is a no-op
-apart from a healthcheck. Read the sections below for what to do when each
-step fails.
+It auto-installs the latest version of Lemonade if no modern `lemonade` CLI
+is found, waits for the auto-started `lemond` service, then writes the rule.
+The script is idempotent: re-running it on a fully configured workspace is a
+no-op apart from a healthcheck. Read the sections below for what to do when
+each step fails.
 
 ---
 
@@ -93,32 +106,48 @@ step fails.
 `scripts/setup_local_ai.py` handles this end to end, but here is what it does
 so you can do it by hand or debug it:
 
-**1a. Is the CLI installed?** Check whether `lemonade` is on `PATH`
-(`lemonade --version`). If it is not, install the **full version** on the
-user's behalf:
+**1a. Is a modern `lemonade` CLI installed?** Run `lemonade status`. The check
+is by *capability*, not by name: modern Lemonade prints `Server is running...`
+or `Server is not running`. If instead you get an "invalid choice" / usage
+error, the `lemonade` on `PATH` is an old, incompatible build that predates the
+unified CLI (v10.1.0) — do **not** use it. It could have come from any install
+channel, so remove it based on how it was installed, then re-run this skill (or
+install Lemonade manually):
 
-| OS | Install the full version |
+| Installed via | Uninstall with |
+|---|---|
+| Windows `.msi` | Settings > Apps > Installed apps > Lemonade > Uninstall (or `winget uninstall lemonade`) |
+| Ubuntu/Debian apt/PPA | `sudo apt remove lemonade-server` |
+| pip | `pip uninstall lemonade-sdk` |
+| macOS `.pkg` | Delete the installed `Lemonade.app` / remove the package receipt |
+
+Never try to drive or auto-remove it for the user.
+
+If no `lemonade` is found at all, install the latest version on the user's
+behalf:
+
+| OS | Install |
 |---|---|
 | Windows | Download `lemonade.msi` from the [latest release](https://github.com/lemonade-sdk/lemonade/releases/latest/download/lemonade.msi) and run `msiexec /i lemonade.msi /qn` (silent, per-user, no elevation). |
-| Ubuntu/Debian | `sudo add-apt-repository -y ppa:lemonade-team/stable && sudo apt-get update && sudo apt-get install -y lemonade-server lemonade-desktop` |
+| Ubuntu/Debian | `sudo add-apt-repository -y ppa:lemonade-team/stable && sudo apt-get update && sudo apt-get install -y lemonade-server` (the apt package is `lemonade-server`; the CLI you then run is `lemonade`) |
 | macOS (beta) | Download the `Lemonade-<ver>-Darwin.pkg` from the latest release and run `sudo installer -pkg Lemonade-<ver>-Darwin.pkg -target /`. |
 
-The full installer bundles the server **and** the desktop app; the
-server-only minimal MSI and the legacy `lemonade-server` CLI are deprecated
-upstream. After a Windows install the CLI lands in
-`%LOCALAPPDATA%\lemonade_server` and is added to the *user* PATH (new shells
-only); the setup script probes that directory so it works in the same run.
+After a Windows install the CLI lands in `%LOCALAPPDATA%\lemonade_server` and
+is added to the *user* PATH (new shells only); the setup script probes that
+directory so it works in the same run.
 
-**1b. Is the server running?** Check `lemonade status --json`.
+**1b. Is the service running?** Check `lemonade status --json`. The `lemond`
+service auto-starts on install — there is **no** `lemonade serve` in modern
+Lemonade.
 
 | `lemonade status` says | Action |
 |---|---|
 | `Server is running on port 13305` | Continue to Step 2. |
-| `Server is not running` | Launch it with `lemonade serve` (the script does this in the background and polls `/api/v1/health` until it answers). |
+| `Server is not running` | Wait a few seconds for the auto-started service (the script polls `/api/v1/health`). If it stays down, start it via the OS service manager: `sudo systemctl start lemond` (Linux system install) or `systemctl --user start lemond` (per-user install); `launchctl load /Library/LaunchDaemons/com.lemonade.server.plist` (macOS); the Lemonade tray app or `Start-Service lemond` (Windows). |
 
 Only if the automatic install genuinely fails (no `apt-get`, no `sudo`,
 download blocked) should you stop and point the user at
-<https://lemonade-server.ai/install_options.html>.
+<https://lemonade-server.ai/docs/guide/install/>.
 
 The rest of this skill assumes the endpoint is `http://localhost:13305/api/v1`
 and no API key is required (the system-wide server defaults to no auth on
@@ -210,8 +239,9 @@ machine.
 
 | Symptom | Cause | Recovery |
 |---|---|---|
-| `lemonade: command not found` | CLI not installed | Re-run `python scripts/setup_local_ai.py` (auto-installs the full version). If it just installed on Windows, open a new shell so the user PATH refreshes, or the script will find it under `%LOCALAPPDATA%\lemonade_server`. |
-| `Server is not running` | Service stopped after install | Run `lemonade serve` (the setup script launches it for you). |
+| `lemonade: command not found` | CLI not installed | Re-run `python scripts/setup_local_ai.py` (auto-installs the latest version). If it just installed on Windows, open a new shell so the user PATH refreshes, or the script will find it under `%LOCALAPPDATA%\lemonade_server`. |
+| `status` gives an "invalid choice" / usage error | An old, incompatible `lemonade` (pre-v10.1.0, from any install channel) is shadowing the modern CLI | Uninstall it the way it was installed (see the Step 1a table: `winget uninstall lemonade` / `sudo apt remove lemonade-server` / `pip uninstall lemonade-sdk`), then re-run the setup script or install Lemonade from the docs link. |
+| `Server is not running` | `lemond` service stopped | Start it via the OS service manager — `sudo systemctl start lemond` / `systemctl --user start lemond` (Linux), `launchctl load /Library/LaunchDaemons/com.lemonade.server.plist` (macOS), or the tray app / `Start-Service lemond` (Windows). There is no `lemonade serve`. |
 | `POST /v1/images/generations` returns 404 model not found | Image model not downloaded | `lemonade pull SD-Turbo` and retry. |
 | Image generation is slow on CPU (~4–5 min) | sd-cpp on CPU backend | Install the GPU backend on supported AMD hardware: `lemonade backends install sd-cpp:rocm`. |
 | `POST /v1/audio/transcriptions` returns 400 unsupported format | Input is not 16 kHz mono WAV | Re-encode with `ffmpeg -i in.* -ar 16000 -ac 1 out.wav`. |
