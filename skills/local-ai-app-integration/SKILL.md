@@ -19,8 +19,7 @@ talks to it on `http://localhost:PORT/api/v1`. The user gets local, private,
 hardware-optimized inference (CPU, AMD iGPU/dGPU, XDNA2 NPU) with no separate
 install.
 
-**What you'll end up with:** one new launcher module (~30 lines), one config
-change to the existing HTTP client (base URL + API key), one vendored binary
+**What you'll end up with:** one new launcher module (~30 lines), **three mandatory changes** to the existing HTTP client (`base_url`, `api_key`, and `http_client=httpx.Client(timeout=120)` — all three required together), one vendored binary
 under `vendor/lemonade/`.
 
 ## When this skill is the right tool
@@ -47,7 +46,7 @@ This skill follows one fixed sequence. Do not deviate without a stated reason.
 [ ] 2. Pick a model + backend profile
 [ ] 3. Place Embeddable Lemonade in the app's tree (full package, not just the binary)
 [ ] 4. Add a `lemond` launcher (subprocess + API key + port + per-stage logging)
-[ ] 5. Re-point the existing client at lemond (set HTTP timeout to 120s)
+[ ] 5. Re-point the existing client at lemond — set `base_url`, `api_key`, AND `http_client=httpx.Client(timeout=120)` — all three are required
 [ ] 6. Wait for /api/v1/health, install backend, then PULL the model before first use
 [ ] 7. Wire shutdown and error recovery
 ```
@@ -281,15 +280,36 @@ are required, not optional:
 
 1. Set `base_url` to `http://127.0.0.1:{port}/api/v1`
 2. Set `api_key` to the launcher key
-3. **Set the HTTP timeout to 120 seconds** — this is mandatory, not optional
+3. **Set `http_client=httpx.Client(timeout=120)`** — **required alongside 1 and 2**; writing 1 and 2 without 3 is incomplete and will silently time out on first-run model load
+
+**Minimal edit when re-pointing an existing file (all three arguments required):**
+```python
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:PORT/api/v1",  # replace PORT with the lemond port
+    api_key="LOCAL_KEY",                        # replace with the launcher key
+    http_client=httpx.Client(timeout=120),      # required — do not omit
+)
+```
 
 The 120-second timeout is not a tuning suggestion. The default on most HTTP
 clients is 30s, which is shorter than lemond's first-run model load time on
 real hardware. Without it the request silently times out and the UI shows
 nothing, which is indistinguishable from a broken integration.
 
-**Python (openai) — the exact change to make:**
+**Python (openai) — the exact change to make (all three arguments required; omitting `http_client` is a bug):**
 
+**Wrong — `base_url` and `api_key` alone, missing the timeout (will silently time out on first-run model load):**
+```python
+client = OpenAI(
+    base_url=f"http://127.0.0.1:{port}/api/v1",
+    api_key=key,
+)  # ← missing http_client=httpx.Client(timeout=120) — this is a bug
+```
+
+**Correct — all three required arguments together:**
 ```python
 import httpx
 from openai import OpenAI
@@ -334,7 +354,24 @@ never strand the user on a key-entry wall.
 ## Step 6: Health, backend, then pull the model — *before* first inference
 
 `GET /api/v1/health` returning 200 means the **server** is up. It does **not**
-mean inference will work. Before the first real request succeeds, three more
+mean inference will work. The correct readiness probe (do not use stdout parsing):
+
+```python
+import urllib.request, time
+
+def wait_for_health(port: int, key: str, timeout_s: int = 30) -> None:
+    url = f"http://127.0.0.1:{port}/api/v1/health"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(req, timeout=1) as r:
+                if r.status == 200:
+                    return
+        except Exception:
+            time.sleep(0.25)
+    raise RuntimeError(f"lemond did not become healthy within {timeout_s}s")
+``` Before the first real request succeeds, three more
 things must be true: the backend for your modality is installed, the model's
 weights are **downloaded to disk**, and (on the first call) the model is loaded
 into memory. Treating health=200 as "ready" is the single biggest cause of a
@@ -413,7 +450,7 @@ These are the only failure modes worth handling. Do not over-engineer.
 couple of seconds. Always wait on the process; never orphan it.
 
 **Do not** parse `lemond` stdout to detect readiness; use the HTTP
-`/v1/health` probe. Stdout format is not a stable contract.
+`/api/v1/health` probe. Stdout format is not a stable contract.
 
 ---
 
@@ -434,7 +471,7 @@ The integration is done when **all** of these are true:
       response with the base URL and key swapped, with no other code changed.
 - [ ] First-run latency is surfaced: the interface shows a loading state from the
       moment the first inference request is sent until the response arrives.
-- [ ] The HTTP client timeout is set to 120 seconds.
+- [ ] The OpenAI client is constructed with all three required arguments: `base_url`, `api_key`, and `http_client=httpx.Client(timeout=120)`. A constructor with only `base_url` and `api_key` is incomplete and will silently time out on first-run model load.
 - [ ] In local mode the app requires **no** cloud API key: no onboarding wall,
       validator, or startup check blocks the user, and no code path throws
       "API key not configured" when the active mode is local.
