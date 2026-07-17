@@ -116,7 +116,7 @@ install Lemonade manually):
 
 | Installed via | Uninstall with |
 |---|---|
-| Windows `.msi` | Settings > Apps > Installed apps > Lemonade > Uninstall (or `winget uninstall lemonade`) |
+| Windows `.msi` | `winget uninstall -e --id AMD.LemonadeServer`, or Settings > Apps > Installed apps > Lemonade Server > Uninstall |
 | Ubuntu/Debian apt/PPA | `sudo apt remove lemonade-server` |
 | pip | `pip uninstall lemonade-sdk` |
 | macOS `.pkg` | Delete the installed `Lemonade.app` / remove the package receipt |
@@ -240,7 +240,7 @@ machine.
 | Symptom | Cause | Recovery |
 |---|---|---|
 | `lemonade: command not found` | CLI not installed | Re-run `python scripts/setup_local_ai.py` (auto-installs the latest version). If it just installed on Windows, open a new shell so the user PATH refreshes, or the script will find it under `%LOCALAPPDATA%\lemonade_server`. |
-| `status` gives an "invalid choice" / usage error | An old, incompatible `lemonade` (pre-v10.1.0, from any install channel) is shadowing the modern CLI | Uninstall it the way it was installed (see the Step 1a table: `winget uninstall lemonade` / `sudo apt remove lemonade-server` / `pip uninstall lemonade-sdk`), then re-run the setup script or install Lemonade from the docs link. |
+| `status` gives an "invalid choice" / usage error | An old, incompatible `lemonade` (pre-v10.1.0, from any install channel) is shadowing the modern CLI | Uninstall it the way it was installed (see the Step 1a table: `winget uninstall -e --id AMD.LemonadeServer` / `sudo apt remove lemonade-server` / `pip uninstall lemonade-sdk`), then re-run the setup script or install Lemonade from the docs link. |
 | `Server is not running` | `lemond` service stopped | Start it via the OS service manager — `sudo systemctl start lemond` / `systemctl --user start lemond` (Linux), `launchctl load /Library/LaunchDaemons/com.lemonade.server.plist` (macOS), or the tray app / `Start-Service lemond` (Windows). There is no `lemonade serve`. |
 | `POST /v1/images/generations` returns 404 model not found | Image model not downloaded | `lemonade pull SD-Turbo` and retry. |
 | Image generation is slow on CPU (~4–5 min) | sd-cpp on CPU backend | Install the GPU backend on supported AMD hardware: `lemonade backends install sd-cpp:rocm`. |

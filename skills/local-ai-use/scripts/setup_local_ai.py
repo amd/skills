@@ -356,9 +356,10 @@ def uninstall_hint() -> str:
         )
     if system == "Windows":
         return (
-            "remove it however it was installed: uninstall Lemonade from "
-            "Settings > Apps > Installed apps (or `winget uninstall lemonade`) "
-            "for an .msi install, or `pip uninstall lemonade-sdk` (pip)"
+            "remove it however it was installed: for an .msi install, run "
+            "`winget uninstall -e --id AMD.LemonadeServer` or uninstall Lemonade "
+            "Server from Settings > Apps > Installed apps; or, if it came from "
+            "pip, `pip uninstall lemonade-sdk`"
         )
     return "remove the old Lemonade using your platform's package manager or `pip uninstall lemonade-sdk`"
 
