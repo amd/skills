@@ -80,7 +80,7 @@ Cross-stack skills, from client to cloud.
 
 | Skill | What it does | Source |
 | --- | --- | --- |
-| `rocm-doctor` | Diagnose ROCm / PyTorch / llama.cpp failures on AMD GPUs against a fixed list of known misconfigurations. | _planned_ |
+| [`rocm-doctor`](skills/rocm-doctor/SKILL.md) | Diagnose ROCm / HIP / PyTorch / llama.cpp failures on AMD GPUs (Linux and Windows) against a closed list of known misconfigurations, then fix with consent or route upstream. Thin driver over the `rocm` CLI (`examine` / `diagnose` / `fix`). | in-repo |
 | `hyperloom-kernel-optimizer` | Autonomously optimizes LLM inference on AMD GPUs. | _planned_ |
 | `vllm-semantic-router` | Setup a vLLM router that semantically maps your request to the best available platform. | _planned_ |
 | `hrr-replay-analysis` | Record, replay, and analyze GPU workload behavior on ROCm across AMD Instinct, Radeon, and Ryzen hardware using HIP Record and Replay archives. | _planned_ |
@@ -102,11 +102,11 @@ A skill is a self-contained folder that bundles everything an agent needs to per
 
 ```
 skills/
-  rocm-doctor/
+  <skill-name>/
     SKILL.md
     skill-card.md
-    scripts/
-    references/
+    scripts/       # optional
+    references/    # optional
 ```
 
 When an agent decides a skill is relevant (or you invoke it explicitly), it loads that `SKILL.md` and follows the instructions inside. Descriptions stay in context cheaply; the full body of a skill only loads when the task actually matches.

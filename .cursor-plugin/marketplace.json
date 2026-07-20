@@ -15,6 +15,7 @@
       "skills": [
         "./skills/local-ai-use",
         "./skills/local-ai-app-integration",
+        "./skills/rocm-doctor",
         "./skills/serving-llms-on-instinct",
         "./skills/tracelens-analysis-orchestrator"
       ],
