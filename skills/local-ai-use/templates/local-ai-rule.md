@@ -74,7 +74,24 @@ curl -sX POST {{LEMONADE_BASE_URL}}/audio/transcriptions \
 1. Try the local endpoint exactly once.
 2. If the server is unreachable, run `lemonade status` and surface the
    result to the user before doing anything else.
-3. If the model is missing, run `lemonade pull <model>` and retry once.
+3. If the model is missing, run `lemonade pull <model>` to pull it,
+   but preflight the download first, because a bad target path fails slowly and silently:
+   1. Check where the server will write and whether there is room:
+      `GET {{LEMONADE_BASE_URL}}/system-info`. The response reports `models_dir`
+      (the download location) and a `model_storage` block with `free_bytes` /
+      `total_bytes`. If free space is short of the model size, tell the user the
+      exact path and free/required space and stop — do not start the pull.
+   2. Otherwise run `lemonade pull <model>` once and watch for completion.
+   3. A healthy pull prints rising `Progress: NN%` and ends with a success
+      line. A **broken** pull is easy to mistake for a slow one, because the
+      write/permission/quota failure may surface only in the server log while
+      the console keeps printing `Progress: NN%`. If the pull stalls or does not
+      finish in a reasonable time, treat it as failed: find the server log
+      (typically named `lemonade-server.log` in the OS temp directory; if unsure
+      of the path, check the Lemonade docs) and read its most
+      recent lines for the underlying error — for example a download/write error
+      (such as `CURL code 23`) or an out-of-space message. Surface that line
+      to the user rather than waiting through silent retries.
 4. Only after that, ask the user before falling back to a cloud provider.
    Never silently fall back; the whole point of this rule is predictable
    cost.
