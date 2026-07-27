@@ -179,8 +179,14 @@ curl -L "$URL" | tar -xz --strip-components=1 -C vendor/lemonade
 
 > **`lemond` vs `lemonade` CLI:** `lemond` is the embedded server binary that
 > ships with the app. The `lemonade` CLI is a separate packaging tool used
-> only during development/build time to install backends. Install it once on
-> the developer machine with `pip install lemonade-sdk`.
+> only during development/build time to install backends. The same embeddable
+> archive unpacked above already contains a matching `lemonade[.exe]` next to
+> `lemond[.exe]`, so its version aligns with the bundled `lemond`. Do **not**
+> `pip install lemonade-sdk` to get it: the PyPI package is a separate, older
+> release line whose ports, model names, and install API do not match the
+> `lemond` bundled here, and mixing the two is a known source of silent
+> version mismatches. Keep the `lemonade` CLI, `lemond`, and the backends all
+> from the one release downloaded in this step so their versions stay aligned.
 
 The expected layout **after setup** (first run + backend install). A freshly
 unzipped package contains only `lemond[.exe]`, `lemonade[.exe]`, `LICENSE`, and
@@ -220,13 +226,17 @@ vendor/lemonade/
 
 **Backend install timing — two distinct paths:**
 
-> **Packaging time** (developer machine, before bundling):
+> **Packaging time** (developer machine, before bundling). Use the lemonade
+> CLI that shipped inside `vendor/lemonade/` so it matches the bundled
+> `lemond` version (prefix with `./` or the full path):
 > ```
-> lemonade backends install llamacpp:vulkan
-> lemonade backends install flm:npu    # Windows NPU path only
+> vendor/lemonade/lemonade backends install llamacpp:vulkan
+> vendor/lemonade/lemonade backends install flm:npu    # Windows NPU path only
 > ```
 > This bakes the backend binaries into `vendor/lemonade/bin/` before the app
-> ships. `lemond` does not need to be running.
+> ships. `lemond` does not need to be running. Use a modern `lemonade` CLI
+> whose version matches the bundled `lemond` (the copy in the archive you
+> unpacked works); do not `pip install lemonade-sdk` for it.
 >
 > **First-run / runtime** (user's machine, after `lemond` is running):
 > ```http
@@ -238,7 +248,9 @@ vendor/lemonade/
 
 ## Step 4: Add a `lemond` launcher
 
-The launcher is a thin process supervisor. Its only jobs:
+Write the launcher as a new module named **`lemond_launcher.py`** (or
+`lemond_launcher.<ext>` for the app's language). It is a thin process
+supervisor. Its only jobs:
 
 1. Generate a fresh random API key: `key = secrets.token_urlsafe(32)`
 2. Pick a free localhost port: bind a `socket` to port 0, read back the assigned port, close it.
@@ -272,6 +284,11 @@ The launcher is a thin process supervisor. Its only jobs:
 > equivalent) to the watcher's ignore list before testing.
 
 **Use the reference implementation from [reference.md § Reference launchers](reference.md#reference-launchers) directly** — copy it verbatim and adapt only the `LEMOND_DIR` path. Do not write a launcher from scratch. The reference Python launcher uses `secrets` (for the API key), `socket` (for the free-port probe), and `subprocess` (to spawn lemond); the Node.js launcher uses the equivalent stdlib modules. Both handle port-race retries and health polling correctly.
+
+Readiness is always determined by polling the exact endpoint
+`GET http://127.0.0.1:<port>/api/v1/health` and checking for HTTP 200 — never
+by reading `lemond`'s stdout or stderr. Any health-check helper you write must
+hit that `/api/v1/health` path.
 
 ## Step 5: Re-point the existing client at `lemond`
 
