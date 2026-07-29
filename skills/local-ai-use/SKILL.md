@@ -278,3 +278,8 @@ one modality.
 For the full model picker, alternate-quality options, the complete endpoint
 reference, the API-key flow, and the OmniRouter tool definitions you can
 hand to an agent's tool-calling loop, see [reference.md](reference.md).
+
+For measured results on consumer AMD dGPUs — which backend to pick when ROCm
+fails to install on Windows, a setting that silently costs 58x, model pairings
+that fit an 8 GB card, and the fast path for high-resolution images — see
+[hardware-notes.md](hardware-notes.md).
