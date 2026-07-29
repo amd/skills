@@ -182,28 +182,39 @@ def _cpu_info_windows() -> tuple[str, str]:
 
 
 def _gfx_target_from_rocminfo() -> tuple[str, str]:
-    """Return (gfx_target, gpu_name) from rocminfo if available."""
+    """Return (gfx_target, gpu_name) from rocminfo if available.
+
+    rocminfo prints one block per agent, and WITHIN a block the ``Name:`` and
+    ``Marketing Name:`` lines appear *before* the ``Device Type:`` line. So we
+    can't wait until we've seen ``Device Type: GPU`` to start capturing -- by
+    then those lines are already behind us. Instead we buffer the current
+    block's candidate gfx target + marketing name and commit them the moment we
+    confirm the block is a GPU. A new ``Agent N`` header resets the buffer.
+    """
     if shutil.which("rocminfo") is None:
         return "", ""
     rc, out, _ = _run(["rocminfo"], timeout=10)
     if rc != 0:
         return "", ""
-    gfx = ""
-    name = ""
-    in_gpu_agent = False
+    cand_gfx = ""
+    cand_name = ""
     for line in out.splitlines():
         s = line.strip()
-        if s.startswith("Device Type:"):
-            in_gpu_agent = "GPU" in s
-        if in_gpu_agent and s.startswith("Marketing Name:") and not name:
-            name = s.split(":", 1)[1].strip()
-        if in_gpu_agent and s.startswith("Name:") and s.endswith("gfx") is False:
+        if s.startswith("Agent ") and s[len("Agent "):].strip().isdigit():
+            cand_gfx = ""
+            cand_name = ""
+        elif s.startswith("Name:"):
             val = s.split(":", 1)[1].strip()
-            if val.startswith("gfx") and not gfx:
-                gfx = val
-        if gfx and name:
-            break
-    return gfx, name
+            # The agent's own Name is the bare gfx target (e.g. "gfx1151").
+            # ISA sub-blocks report "amdgcn-amd-amdhsa--gfx1151" -- skip those
+            # via the startswith("gfx") guard.
+            if val.startswith("gfx") and not cand_gfx:
+                cand_gfx = val
+        elif s.startswith("Marketing Name:") and not cand_name:
+            cand_name = s.split(":", 1)[1].strip()
+        elif s.startswith("Device Type:") and "GPU" in s and cand_gfx:
+            return cand_gfx, cand_name
+    return "", ""
 
 
 def _gfx_target_from_sysfs() -> tuple[str, str]:
