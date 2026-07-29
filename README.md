@@ -1,5 +1,30 @@
 # AMD Skills
 
+> **This is an independent community fork of [amd/skills](https://github.com/amd/skills).**
+>
+> It is **not** maintained by AMD and is **not** staged for merge-back. Upstream's
+> `CONTRIBUTING.md` limits contributions to "AMD engineers and selected partners",
+> so measured findings from ordinary consumer hardware are published here instead.
+>
+> **What this fork adds:**
+>
+> | Addition | What it is |
+> |---|---|
+> | [`skills/picking-amd-gpu-backend`](skills/picking-amd-gpu-backend) | New skill: picks a GPU backend that actually installs, then verifies the work landed on the discrete GPU |
+> | [`skills/local-ai-use/hardware-notes.md`](skills/local-ai-use/hardware-notes.md) | Measured results on a consumer AMD dGPU, including the negative ones |
+>
+> Both come from an end-to-end run on a Radeon RX 7600M XT (gfx1102, 8 GB,
+> Thunderbolt eGPU) under Windows 11. Raw data, scripts, and the experiments that
+> produced wrong answers before they produced right ones live in
+> [amd-local-ai-bench](https://github.com/gucciwong/amd-local-ai-bench).
+>
+> **Caveat:** every number comes from one GPU on one machine, and the Linux
+> guidance in these additions follows upstream documentation without being tested.
+>
+> Everything below this line is upstream's README, unchanged.
+
+---
+
 <div align="center">
 
 ![AMD](https://img.shields.io/badge/AMD-Skills-ED1C24?logo=amd&logoColor=white)
