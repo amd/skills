@@ -19,6 +19,7 @@
   ],
   "skills": [
     "./skills/local-ai-use",
+    "./skills/picking-amd-gpu-backend",
     "./skills/local-ai-app-integration",
     "./skills/serving-llms-on-instinct",
     "./skills/tracelens-analysis-orchestrator"
