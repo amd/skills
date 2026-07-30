@@ -42,12 +42,19 @@ No GPU detected, or GPU unsupported?
   -> use cpu, and tell the user the expected slowdown (~20x for images).
 ```
 
-> **Bare-metal Linux is unverified; WSL2 is verified working.** Every
+> **Bare-metal Linux is unverified; WSL2 is verified working — for LLM
+> inference. Image generation is verified too, and is slower there.** Every
 > measurement in the Windows branch is measured on real hardware. WSL2 ROCm
 > was also measured directly — a real HIP kernel compiled and ran correctly,
-> and llama.cpp built with the HIP backend matched Vulkan's throughput on the
-> same 8B model (36.4 vs 33-34 tok/s) on a Radeon RX 7600M XT (gfx1102).
-> Full repro steps, and every wrong turn taken to get there, are at
+> llama.cpp built with the HIP backend matched Vulkan's throughput on the
+> same 8B model (36.4 vs 33-34 tok/s), but stable-diffusion.cpp built with
+> the HIP backend (`SD_HIPBLAS`) generated a real, visually-checked image
+> **~3-4x slower** than the Vulkan warm-server baseline (10.1s vs 2.47s,
+> SD-Turbo 512²) — all on the same Radeon RX 7600M XT (gfx1102). Don't
+> assume ROCm/WSL2 is a blanket win just because LLM throughput matched;
+> check the specific workload. Full repro steps, and every wrong turn taken
+> to get there (including two Windows-host-to-WSL2 scripting footguns that
+> have nothing to do with the GPU), are at
 > <https://github.com/gucciwong/amd-local-ai-bench/blob/main/docs/rocm-on-wsl2.md>.
 >
 > Bare-metal Linux (no WSL) follows upstream documentation only — no one has
