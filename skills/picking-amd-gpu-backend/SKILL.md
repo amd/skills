@@ -30,22 +30,43 @@ Is this AMD Instinct (MI300X/MI325X/MI350X)?
   -> yes: stop, use the serving-llms-on-instinct skill instead.
 
 Is the OS Windows?
-  -> yes: use vulkan. ROCm backend installs currently fail (see below).
-  -> no (Linux): try rocm; fall back to vulkan if install or runtime fails.
-                 [UNVERIFIED -- see note]
+  -> yes, and the target is native Windows: use vulkan. The Lemonade/TheRock
+     ROCm backend install currently fails there (see below).
+  -> yes, and the target is WSL2: rocm is a real option, not just a fallback
+     — see the WSL2 note below. Still confirm the specific GPU model, since
+     package-name guessing is the main way this goes wrong.
+  -> no (bare-metal Linux): try rocm; fall back to vulkan if install or
+     runtime fails. [UNVERIFIED ON BARE METAL -- see note]
 
 No GPU detected, or GPU unsupported?
   -> use cpu, and tell the user the expected slowdown (~20x for images).
 ```
 
-> **The Linux branch is unverified.** Every measurement behind this skill was
-> taken on Windows. The Linux guidance follows upstream documentation, which
-> reports ROCm as the better-supported path there, but no one has run it on a
-> Linux box for this skill. Say so when recommending it, and prefer vulkan as
-> the fallback the moment anything fails rather than debugging a ROCm install.
+> **Bare-metal Linux is unverified; WSL2 is verified working.** Every
+> measurement in the Windows branch is measured on real hardware. WSL2 ROCm
+> was also measured directly — a real HIP kernel compiled and ran correctly,
+> and llama.cpp built with the HIP backend matched Vulkan's throughput on the
+> same 8B model (36.4 vs 33-34 tok/s) on a Radeon RX 7600M XT (gfx1102).
+> Full repro steps, and every wrong turn taken to get there, are at
+> <https://github.com/gucciwong/amd-local-ai-bench/blob/main/docs/rocm-on-wsl2.md>.
 >
-> Everything in the Windows branch, and every number elsewhere in this skill,
-> is measured.
+> Bare-metal Linux (no WSL) follows upstream documentation only — no one has
+> run this skill's guidance on real bare-metal Linux. Say so when recommending
+> it there, and prefer vulkan as the fallback the moment anything fails rather
+> than debugging a ROCm install.
+>
+> **If a ROCm install on WSL2 looks like it's failing, don't conclude the GPU
+> is unsupported before checking these two things** — both cost real time in
+> the referenced session:
+> - `amdgpu-install --usecase=wsl` errors with "not supported or invalid"
+>   because that usecase name does not exist in current amdgpu-install
+>   builds, not because WSL itself is unsupported. The actual bridge is a
+>   separate package, `amdrocm-wsl`, installed alongside the versioned ROCm
+>   package.
+> - Per-architecture package names carry a ROCm version suffix
+>   (`amdrocm7.14-gfx1102`, not `amdrocm-gfx1102`). Run
+>   `apt-cache search amdrocm | grep <gfx-target>` before concluding a
+>   package "doesn't exist" for a given GPU.
 
 ## Step 1: identify the hardware before installing anything
 
