@@ -32,10 +32,20 @@ Is this AMD Instinct (MI300X/MI325X/MI350X)?
 Is the OS Windows?
   -> yes: use vulkan. ROCm backend installs currently fail (see below).
   -> no (Linux): try rocm; fall back to vulkan if install or runtime fails.
+                 [UNVERIFIED -- see note]
 
 No GPU detected, or GPU unsupported?
   -> use cpu, and tell the user the expected slowdown (~20x for images).
 ```
+
+> **The Linux branch is unverified.** Every measurement behind this skill was
+> taken on Windows. The Linux guidance follows upstream documentation, which
+> reports ROCm as the better-supported path there, but no one has run it on a
+> Linux box for this skill. Say so when recommending it, and prefer vulkan as
+> the fallback the moment anything fails rather than debugging a ROCm install.
+>
+> Everything in the Windows branch, and every number elsewhere in this skill,
+> is measured.
 
 ## Step 1: identify the hardware before installing anything
 
