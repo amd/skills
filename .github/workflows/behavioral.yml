@@ -15,15 +15,42 @@ name: behavioral
 # Shape mirrors validate.yml: discover -> matrix -> single aggregate gate, so
 # branch protection can require just the `behavioral` check.
 
+# FORK NOTE (gucciwong/AMD_skills)
+# -------------------------------------------------------------------------
+# The pull_request trigger is disabled in this fork. The matrix job below runs
+# on `[self-hosted, strix_halo, <os>]` — AMD's own runners, which this fork does
+# not have. Left on pull_request, every PR would queue a job that waits forever
+# for a runner that never appears, and the required `behavioral` gate would
+# never resolve.
+#
+# Behavioral tests are therefore run locally here. Two things to know, both
+# measured rather than assumed:
+#
+#   * Run one test function at a time. Running a whole evals.py in one pytest
+#     invocation produced 3 failures on each of two consecutive runs, with a
+#     *different* set of checks failing each time — including checks that had
+#     just passed in isolation. The variance is in the LLM judging layer
+#     (~18 judge calls in five minutes), not in the agent's answers.
+#   * On a non-UTF-8 Windows console (CJK locales default to GBK/Shift-JIS) the
+#     harness crashes with UnicodeEncodeError while *printing* a passing result.
+#     Prefix with PYTHONIOENCODING=utf-8.
+#
+#     PYTHONIOENCODING=utf-8 python -m pytest -c pytest.ini -p conftest \
+#       ../../skills/<skill>/evals/evals.py -k <test_name>
+#
+# To re-enable on a machine that does have matching runners, restore the
+# pull_request block below.
+# -------------------------------------------------------------------------
+
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths:
-      - "skills/**"
-      - "eval/behavioral/**"
-      - "eval/claude_eval.py"
-      - ".github/workflows/behavioral.yml"
-      - ".github/scripts/select_behavioral.py"
+  # pull_request:
+  #   types: [opened, synchronize, reopened]
+  #   paths:
+  #     - "skills/**"
+  #     - "eval/behavioral/**"
+  #     - "eval/claude_eval.py"
+  #     - ".github/workflows/behavioral.yml"
+  #     - ".github/scripts/select_behavioral.py"
   workflow_dispatch:
     inputs:
       skills:
