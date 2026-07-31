@@ -27,6 +27,20 @@ probe, the closed failure-mode catalog, and the fixes; the skill just drives it
 and relays the results. The catalog is a **closed list** — if the symptom
 doesn't match a known mode, route the user upstream instead of guessing.
 
+## Prerequisites
+
+- **The `rocm` CLI.** This skill is only a driver over it; Phase 0 below installs
+  it with the user's consent if `rocm --version` fails. Nothing else here is
+  assumed — the CLI does the probing.
+- **Platform:** native Linux (in-tree `amdgpu` module + `/dev/kfd`) or Windows
+  (HIP SDK). WSL2, NVIDIA/Intel/Apple GPUs, and clean-machine installs are out of
+  scope (see [Out of scope](#out-of-scope)).
+- **No fixed ROCm version, GPU arch (`gfx…`), or container image is assumed** —
+  `rocm examine`/`diagnose` detect the installed ROCm, the GPU's `gfx` target, and
+  container context, and match fixes to what they find. Never hand-set
+  `HSA_OVERRIDE_GFX_VERSION` (or similar footgun env vars) yourself; let the CLI
+  decide.
+
 ## Workflow
 
 0. **Ensure the `rocm` CLI is present.** Everything below shells out to it, so
@@ -135,5 +149,5 @@ symptom, do the routing yourself using the list below.)
 - Never run a mutating fix without the user's explicit OK; prefer `--dry-run`
   first. New failure modes are added to the CLI catalog, not improvised here.
 
-See `reference.md` for the full closed catalog and the CLI command/exit-code
-reference.
+See [reference.md](reference.md) for the full closed catalog and the CLI
+command/exit-code reference.
