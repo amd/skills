@@ -207,7 +207,7 @@ Never copy API keys into chat output.
 | CONC | `--conc` | `64` | client concurrency |
 | ISL / OSL | `--isl` / `--osl` | `1024` / `1024` | input / output seq lengths |
 | PRECISION | `--precision` | `bf16` | match checkpoint; `fp8` for FP8 models |
-| MAX_HOURS | `--max-hours` | `8` | `0.5`–`3` for smoke |
+| MAX_HOURS | `--max-hours` | CLI `2.0` | skill recommends `8`; `0.5`–`3` for smoke |
 | TARGET_GAIN | `--target-gain` | `30` | desired % gain |
 
 **Optional:** `--no-kernel`, `--no-explore`, `--no-framework-agent`,
@@ -237,6 +237,32 @@ Launch plan — please confirm:
 
 Do **not** run `install.sh` or launch `optimize` until the user approves this plan.
 
+### Persist the plan (required — shells do not share exports)
+
+Agent shells do not persist exports between calls, so write the confirmed values
+to `$RUN_DIR/workload.env` right after approval. Every Phase 3 block sources it;
+without this, launch silently falls back to `${TP:-1}` / `${CONC:-64}` defaults
+and `--model ""`. Fill each value from the approved plan.
+
+```bash
+export USER_DATA_PATH="${USER_DATA_PATH:?run /hyperloom-setup first}"
+export RUN_DIR="${USER_DATA_PATH}/optimizer_runs"
+mkdir -p "$RUN_DIR"
+cat > "$RUN_DIR/workload.env" <<EOF
+export MODEL_PATH=/wekafs/models/Qwen3-14B-FP8
+export FRAMEWORK=vllm
+export TP=1
+export EP=1
+export CONC=64
+export ISL=1024
+export OSL=1024
+export PRECISION=fp8
+export MAX_HOURS=0.5
+export TARGET_GAIN=20
+export OPT_FLAGS="--no-kernel"   # optional Phase 2 flags, space-separated; empty if none
+EOF
+```
+
 ## Phase 3 — Install (IR-2)
 
 Resolve paths for wheel or source layout:
@@ -245,6 +271,7 @@ Resolve paths for wheel or source layout:
 export REPO_ROOT="$(pwd -P)"
 set -a; . "${REPO_ROOT}/.env"; set +a
 export USER_DATA_PATH="${USER_DATA_PATH:?USER_DATA_PATH missing}"
+. "${USER_DATA_PATH}/optimizer_runs/workload.env"   # confirmed Phase 2 values
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 ulimit -Sn 65536 || true
 
@@ -264,7 +291,8 @@ In Docker mode, run this inside the container.
 not persist exports between shell calls.
 
 ```bash
-export MODEL_PATH=/path/to/model   # from Phase 2
+. "${USER_DATA_PATH}/optimizer_runs/workload.env"   # confirmed Phase 2 values
+: "${MODEL_PATH:?MODEL_PATH empty — re-run the Persist the plan step}"
 test -d "$MODEL_PATH"
 export PYTHON="${PYTHON:-$(command -v python3)}"
 export IR1_VRAM_LIMIT_MIB="${IR1_VRAM_LIMIT_MIB:-500}"
@@ -281,7 +309,8 @@ try:
 except Exception as exc:
     print("torch_check_error=", type(exc).__name__, str(exc)[:300])
 
-patterns = ("hyperloom.inference_optimizer.cli", "Magpie", "sglang.launch_server")
+patterns = ("hyperloom.inference_optimizer.cli", "Magpie",
+            "sglang.launch_server", "vllm.entrypoints")
 for pid in filter(str.isdigit, os.listdir("/proc")):
     try:
         cmd = open(f"/proc/{pid}/cmdline", "rb").read()
@@ -340,37 +369,43 @@ After IR-2 and IR-1 pass, launch with Phase 2 values as CLI flags.
 ```bash
 cd "$REPO_ROOT"
 if [ -f "$REPO_ROOT/.env" ]; then set -a; . "$REPO_ROOT/.env"; set +a; fi
+export RUN_DIR="${USER_DATA_PATH}/optimizer_runs"
+. "${RUN_DIR}/workload.env"   # confirmed Phase 2 values — no silent defaults
+: "${MODEL_PATH:?MODEL_PATH empty — re-run the Persist the plan step}"
 . "${KERNEL_AGENT_ENV:-${USER_DATA_PATH}/runtime/kernel-agent.env.sh}"
 export PYTHON="${PYTHON:-$(command -v python3)}"
 export PATH="$(dirname "$PYTHON"):/usr/local/bin:$PATH"
 
 export RUN_TAG="$(basename "$MODEL_PATH")-$(date +%Y%m%d_%H%M%S)"
-export RUN_DIR="${USER_DATA_PATH}/optimizer_runs"
 export RUN_LOG="$RUN_DIR/run_${RUN_TAG}.log"
 export PID_FILE="$RUN_DIR/run_${RUN_TAG}.pid"
 export LAUNCH_INFO_FILE="$RUN_DIR/launch_${RUN_TAG}.json"
 mkdir -p "$RUN_DIR"
 
+# shellcheck disable=SC2086
 setsid nohup python3 -m hyperloom.inference_optimizer.cli --verbose optimize \
   --model "$MODEL_PATH" \
-  --framework "${FRAMEWORK:-sglang}" \
-  --tp "${TP:-1}" \
-  --ep "${EP:-1}" \
-  --conc "${CONC:-64}" \
-  --isl "${ISL:-1024}" \
-  --osl "${OSL:-1024}" \
-  --precision "${PRECISION:-bf16}" \
-  --max-hours "${MAX_HOURS:-8}" \
-  --target-gain "${TARGET_GAIN:-30}" \
+  --framework "$FRAMEWORK" \
+  --tp "$TP" \
+  --ep "$EP" \
+  --conc "$CONC" \
+  --isl "$ISL" \
+  --osl "$OSL" \
+  --precision "$PRECISION" \
+  --max-hours "$MAX_HOURS" \
+  --target-gain "$TARGET_GAIN" \
   --tick-interval-sec 30 \
   --launch-info-file "$LAUNCH_INFO_FILE" \
+  ${OPT_FLAGS:-} \
   > "$RUN_LOG" 2>&1 < /dev/null &
 echo $! > "$PID_FILE"
 ```
 
-Append optional flags only when Phase 2 resolved them: `--no-kernel`,
-`--no-explore`, `--gpu-type`, `--model-class`, `--server-args`,
-`--compare-against-gpu`, `--quantize`, phase budget flags, etc.
+Every value comes from the confirmed `workload.env`; there are no `${VAR:-default}`
+fallbacks so a missing value fails loudly instead of silently launching a wrong
+config. Put any optional Phase 2 flags (`--no-kernel`, `--no-explore`,
+`--gpu-type`, `--model-class`, `--server-args`, `--compare-against-gpu`,
+`--quantize`, phase budget flags) into `OPT_FLAGS` in `workload.env`.
 
 ### Launch health check (30 s after start)
 
@@ -379,9 +414,23 @@ sleep 30
 pid="$(cat "$PID_FILE")"
 test -d "/proc/$pid" && echo "optimizer_alive=true pid=$pid"
 
-session_dir="$(jq -r '.session_dir // empty' "$LAUNCH_INFO_FILE" 2>/dev/null)"
+# Parse with python3 (no jq dependency). Distinguish "file/key missing" from a
+# read error so the message points at the right place.
+session_dir="$(python3 - "$LAUNCH_INFO_FILE" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        print(json.load(f).get("session_dir", ""))
+except FileNotFoundError:
+    sys.exit(0)          # not written yet → empty, handled below
+except Exception as exc:
+    print(f"launch_info_parse_error: {exc}", file=sys.stderr)
+    sys.exit(2)
+PY
+)" || { echo "ERROR: failed to read $LAUNCH_INFO_FILE; inspect $RUN_LOG" >&2; exit 1; }
+
 if [ -z "$session_dir" ]; then
-  echo "ERROR: no session_dir in $LAUNCH_INFO_FILE; inspect $RUN_LOG" >&2
+  echo "ERROR: no session_dir yet in $LAUNCH_INFO_FILE; inspect $RUN_LOG" >&2
   exit 1
 fi
 test -f "$session_dir/manifest.json" && echo "manifest_present=true session_dir=$session_dir"

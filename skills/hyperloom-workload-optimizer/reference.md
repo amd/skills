@@ -12,6 +12,7 @@ authoritative source for edge cases.
 3. [Critic and robustness backends](#critic-and-robustness-backends)
 4. [Framework selection](#framework-selection)
 5. [Failure signals](#failure-signals)
+6. [Report fields](#report-fields)
 
 ## Iron Rules
 
@@ -44,7 +45,7 @@ Any failure → treat as a fresh launch and re-run `install.sh`.
 `_preflight()` runs `preflight_kb.sh`. Exit `1` auto-enables `--degraded-kb` /
 `--degraded-pr`; launch continues. IR-3 never aborts.
 
-### IR-4 / IR-6 / IR-7 — EXPLORE contracts (Coordinator-internal)
+### IR-4 / IR-6 — EXPLORE contracts (Coordinator-internal)
 
 - **IR-4:** EXPLORE is specialist-informed; GPU specialists lease cards via
   `gpu_research_lane` and must not touch production serving on port 8888.
