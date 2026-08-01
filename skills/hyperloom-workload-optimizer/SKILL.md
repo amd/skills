@@ -182,11 +182,11 @@ section only.
 finished and the serving framework from setup is importable. Do not ask workload
 questions yet.
 
-**Docker (`HYPERLOOM_RUN_MODE=docker`):** follow custom-advanced to pick the
-image, `docker run` a long-running container, and run the setup backend inside
-the container (`--install-framework none --yes`). Do not ask workload questions
-until the container is up and in-container setup succeeded. Do not run
-`optimize` on the host.
+**Docker (`HYPERLOOM_RUN_MODE=docker`):** image choice, `docker run`, and the
+in-container setup are owned entirely by custom-advanced Setup Configuration —
+follow it, do not restate its commands or flags here. Do not ask workload
+questions until the container is up and in-container setup succeeded, and never
+run `optimize` on the host.
 
 Phase 1 is done when the target environment (host or container) is ready.
 
