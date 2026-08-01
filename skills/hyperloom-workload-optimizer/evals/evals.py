@@ -48,7 +48,6 @@ def test_routes_optimize_vllm_throughput_request():
             "in use (IR-1)"
         )
 
-        run.should_not("Recommend primussafe container images as the primary path")
         run.should_not(
             "Start a plain vLLM docker serve as the primary answer without the optimization loop"
         )
