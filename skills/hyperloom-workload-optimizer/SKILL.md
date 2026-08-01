@@ -51,66 +51,39 @@ The CLI starts a Python Coordinator that coordinates:
 - **Robustness** — health monitoring and RCA (default `--robustness-agent`)
 
 State lives under a **session directory** per run; run-state root is
-`$USER_DATA_PATH` (default `/workspace/hyperloom`). This is independent of the
-install directory (`INSTALL_DIR`, where the wheel and `.env` live) and may point
-to shared storage.
-
-```text
-$USER_DATA_PATH/
-├── runtime/                          # install.sh outputs, kernel-agent.env.sh
-├── logs/
-└── <model_basename>/
-    └── <UTC_YYYYMMDDTHHMMSSZ>/
-        ├── manifest.json
-        ├── state.json
-        ├── runs/
-        ├── reports/
-        └── optimizer_runs/
-```
+`$USER_DATA_PATH` (default `/workspace/hyperloom`), independent of the install
+directory (`INSTALL_DIR`, where the wheel and `.env` live) and may point to
+shared storage. Layout: `$USER_DATA_PATH/runtime/` (install.sh outputs,
+`kernel-agent.env.sh`), `logs/`, and `<model_basename>/<UTC_ts>/` per session
+holding `manifest.json`, `state.json`, `runs/`, `reports/`, `optimizer_runs/`.
 
 ## Workflow overview
 
 Match `hyperloom-custom-advanced` section order — do **not** ask workload
 questions while writing `.env` or during `/hyperloom-setup`.
 
-```
-Phase 0   Bootstrap        pip install, /hyperloom-setup → .env (credentials + run mode only)
-Phase 1   Environment      custom-advanced §Setup Configuration
-                          baremetal: confirm host ready after install_baremetal.sh
-                          docker:    start container + run setup inside it
-Phase 2   Workload intake  custom-advanced §Advanced Configuration → Model Resolution
-                          → show launch plan → user confirms
-Phase 3   Execute          install.sh → preflight → launch → monitor → report
-```
+- **Phase 0 Bootstrap** — `pip install`, `/hyperloom-setup` → `.env` (credentials + run mode only)
+- **Phase 1 Environment** — custom-advanced §Setup Configuration (baremetal: confirm host; docker: start container + setup inside)
+- **Phase 2 Workload intake** — custom-advanced §Advanced Configuration → Model Resolution → show launch plan → user confirms
+- **Phase 3 Execute** — install.sh → preflight → launch → monitor → report
 
-Load `hyperloom-custom-advanced` at Phase 1 and follow its sections in order.
-Phase 3 launch/monitor commands are below; for deeper optimizer behavior read
-`@${HYPERLOOM_SKILL_PATH}` (`inference_optimizer`). Iron Rules + CLI reference:
-[reference.md](reference.md).
-
-Discovery paths for `hyperloom-custom-advanced`:
-
-- `.cursor/skills/hyperloom-custom-advanced/SKILL.md`
-- `.claude/skills/hyperloom-custom-advanced/SKILL.md`
-- `.agents/skills/hyperloom-custom-advanced/SKILL.md`
+Load `hyperloom-custom-advanced` at Phase 1 and follow its sections in order
+(discovery: `.cursor/` / `.claude/` / `.agents/skills/hyperloom-custom-advanced/SKILL.md`).
+For deeper optimizer behavior read `@${HYPERLOOM_SKILL_PATH}` (`inference_optimizer`);
+Iron Rules + CLI reference: [reference.md](reference.md).
 
 ## Iron Rules (launcher gates)
 
-Run order is always **IR-2 → IR-1 → launch**.
+Run order is always **IR-2 → IR-1 → launch**. Full text in [reference.md](reference.md).
 
-**IR-1 — GPU unoccupied.** Before every `optimize` (fresh or `--resume`), verify
-every visible GPU has zero foreign serving PIDs and ≲ 500 MiB VRAM in use.
-Leftover `sglang.launch_server` / `vllm.entrypoints` / `Magpie` processes
-silently degrade the next baseline.
-
-**IR-2 — install.sh before launch.** Run `install.sh` and source
-`kernel-agent.env.sh` in the **same shell** that spawns `optimize`. Skipping
-install fails after baseline: missing TraceLens/GEAK, hung Ray tasks, or `401`
-on kernel-opt gateway calls.
-
-**Resume carve-out:** `--resume` may skip install only when `install.sh` exited 0
-earlier in the same shell, `kernel-agent.env.sh` is still sourced, and the
-session's `manifest.json` exists. Any failure → re-run `install.sh`.
+- **IR-1 — GPU unoccupied.** Before every `optimize` (fresh or `--resume`), every
+  visible GPU must have zero foreign serving PIDs (`sglang.launch_server` /
+  `vllm.entrypoints` / `Magpie`) and ≲ 500 MiB VRAM in use.
+- **IR-2 — install.sh before launch.** Run `install.sh` and source
+  `kernel-agent.env.sh` in the **same shell** that spawns `optimize`.
+- **Resume carve-out:** `--resume` may skip install only when `install.sh` exited
+  0 earlier in the same shell, `kernel-agent.env.sh` is still sourced, and the
+  session's `manifest.json` exists. Any failure → re-run `install.sh`.
 
 ## Phase discipline (do not skip)
 
@@ -248,7 +221,9 @@ and `--model ""`. Fill each value from the approved plan.
 export USER_DATA_PATH="${USER_DATA_PATH:?run /hyperloom-setup first}"
 export RUN_DIR="${USER_DATA_PATH}/optimizer_runs"
 mkdir -p "$RUN_DIR"
-cat > "$RUN_DIR/workload.env" <<EOF
+# Quoted heredoc (<<'EOF'): values are written literally, so a MODEL_PATH with
+# spaces, $, or $(...) is not expanded or executed. Edit each value to the plan.
+cat > "$RUN_DIR/workload.env" <<'EOF'
 export MODEL_PATH=/wekafs/models/Qwen3-14B-FP8
 export FRAMEWORK=vllm
 export TP=1
@@ -293,7 +268,7 @@ not persist exports between shell calls.
 ```bash
 . "${USER_DATA_PATH}/optimizer_runs/workload.env"   # confirmed Phase 2 values
 : "${MODEL_PATH:?MODEL_PATH empty — re-run the Persist the plan step}"
-test -d "$MODEL_PATH"
+test -d "$MODEL_PATH" || { echo "ERROR: MODEL_PATH not a directory: $MODEL_PATH" >&2; exit 1; }
 export PYTHON="${PYTHON:-$(command -v python3)}"
 export IR1_VRAM_LIMIT_MIB="${IR1_VRAM_LIMIT_MIB:-500}"
 
@@ -304,10 +279,15 @@ fail = False
 
 try:
     import torch
-    print("torch_cuda_available=", torch.cuda.is_available())
+    cuda_ok = torch.cuda.is_available()
+    print("torch_cuda_available=", cuda_ok)
     print("torch_cuda_device_count=", torch.cuda.device_count())
+    if not cuda_ok:
+        print("gpu_unavailable=true")
+        fail = True
 except Exception as exc:
     print("torch_check_error=", type(exc).__name__, str(exc)[:300])
+    fail = True
 
 patterns = ("hyperloom.inference_optimizer.cli", "Magpie",
             "sglang.launch_server", "vllm.entrypoints")
@@ -383,7 +363,7 @@ export LAUNCH_INFO_FILE="$RUN_DIR/launch_${RUN_TAG}.json"
 mkdir -p "$RUN_DIR"
 
 # shellcheck disable=SC2086
-setsid nohup python3 -m hyperloom.inference_optimizer.cli --verbose optimize \
+setsid nohup "$PYTHON" -m hyperloom.inference_optimizer.cli --verbose optimize \
   --model "$MODEL_PATH" \
   --framework "$FRAMEWORK" \
   --tp "$TP" \
@@ -405,36 +385,33 @@ Every value comes from the confirmed `workload.env`; there are no `${VAR:-defaul
 fallbacks so a missing value fails loudly instead of silently launching a wrong
 config. Put any optional Phase 2 flags (`--no-kernel`, `--no-explore`,
 `--gpu-type`, `--model-class`, `--server-args`, `--compare-against-gpu`,
-`--quantize`, phase budget flags) into `OPT_FLAGS` in `workload.env`.
+`--quantize`, phase budget flags) into `OPT_FLAGS` in `workload.env`. `OPT_FLAGS`
+is word-split (unquoted `${OPT_FLAGS}`), so quote any flag value that contains
+spaces, e.g. `export OPT_FLAGS='--server-args "--foo bar"'`.
 
 ### Launch health check (30 s after start)
 
+The `$!` recorded at launch is the **setsid wrapper** PID, which exits
+immediately — it is NOT the optimizer. Read the real `.pid` (and `.session_dir`)
+from the launch-info JSON with a tiny `python3` reader (no `jq` dependency) and
+rewrite `$PID_FILE` so the monitor watches the right process.
+
 ```bash
 sleep 30
-pid="$(cat "$PID_FILE")"
-test -d "/proc/$pid" && echo "optimizer_alive=true pid=$pid"
+read_json() { python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],''))" "$1" "$2" 2>/dev/null; }
 
-# Parse with python3 (no jq dependency). Distinguish "file/key missing" from a
-# read error so the message points at the right place.
-session_dir="$(python3 - "$LAUNCH_INFO_FILE" <<'PY'
-import json, sys
-try:
-    with open(sys.argv[1]) as f:
-        print(json.load(f).get("session_dir", ""))
-except FileNotFoundError:
-    sys.exit(0)          # not written yet → empty, handled below
-except Exception as exc:
-    print(f"launch_info_parse_error: {exc}", file=sys.stderr)
-    sys.exit(2)
-PY
-)" || { echo "ERROR: failed to read $LAUNCH_INFO_FILE; inspect $RUN_LOG" >&2; exit 1; }
+REAL_PID="$(read_json "$LAUNCH_INFO_FILE" pid)"
+[ -z "$REAL_PID" ] && REAL_PID="$(pgrep -f 'hyperloom.inference_optimizer.cli .*optimize' | head -1)"
+[ -n "$REAL_PID" ] && echo "$REAL_PID" > "$PID_FILE"
+test -d "/proc/$REAL_PID" && echo "optimizer_alive=true pid=$REAL_PID"
 
-if [ -z "$session_dir" ]; then
+SESSION_DIR="$(read_json "$LAUNCH_INFO_FILE" session_dir)"
+if [ -z "$SESSION_DIR" ]; then
   echo "ERROR: no session_dir yet in $LAUNCH_INFO_FILE; inspect $RUN_LOG" >&2
   exit 1
 fi
-test -f "$session_dir/manifest.json" && echo "manifest_present=true session_dir=$session_dir"
-test -f "$session_dir/state.json" && echo "state_exists=true"
+test -f "$SESSION_DIR/manifest.json" && echo "manifest_present=true session_dir=$SESSION_DIR"
+test -f "$SESSION_DIR/state.json" && echo "state_exists=true"
 ```
 
 Never guess `session_dir` by timestamp — always read it from the launch-info
@@ -445,7 +422,10 @@ JSON.
 Poll at most every 5 minutes unless debugging a startup failure.
 
 ```bash
-export SESSION_DIR="<session_dir from launch-info JSON>"
+# Reuse the launch-info reader instead of hand-filling SESSION_DIR.
+read_json() { python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],''))" "$1" "$2" 2>/dev/null; }
+export SESSION_DIR="${SESSION_DIR:-$(read_json "$LAUNCH_INFO_FILE" session_dir)}"
+: "${SESSION_DIR:?SESSION_DIR unknown — inspect $LAUNCH_INFO_FILE}"
 python3 - <<'PY'
 import json, os, pathlib
 s = json.loads((pathlib.Path(os.environ["SESSION_DIR"]) / "state.json").read_text())
@@ -456,33 +436,47 @@ print("explore_last_round:", s.get("explore_search", {}).get("last_round"))
 PY
 ```
 
-Report to the user:
-
-- session id (`manifest.json`) and log path (`$RUN_LOG`)
-- `baseline_tput`, `current_best`, `cumulative_gain`
-- explore accepted/rejected summary
-- last kernel opt: correctness, speedup, KEEP/REVERT
-- process alive vs `stop_reason`
+Report session id + log path, `baseline_tput` / `current_best` /
+`cumulative_gain`, explore accepted/rejected, last kernel opt (correctness,
+speedup, KEEP/REVERT), and process-alive vs `stop_reason`. See
+[reference.md](reference.md) Report fields.
 
 ## Resume
 
-When the user asks to resume and workload is unchanged:
+Resume runs in a fresh shell, so re-establish the same environment as launch,
+re-run the IR-2/IR-1 gates, and resume the **explicit** session — bare
+`--resume` auto-picks the latest session and may target the wrong run.
 
 ```bash
-export RESUME_TAG="resume_$(date +%Y%m%d_%H%M%S)"
+cd "$REPO_ROOT"
+if [ -f "$REPO_ROOT/.env" ]; then set -a; . "$REPO_ROOT/.env"; set +a; fi
+export RUN_DIR="${USER_DATA_PATH}/optimizer_runs"
+. "${RUN_DIR}/workload.env"   # confirmed Phase 2 values
+. "${KERNEL_AGENT_ENV:-${USER_DATA_PATH}/runtime/kernel-agent.env.sh}"
+export PYTHON="${PYTHON:-$(command -v python3)}"
+export PATH="$(dirname "$PYTHON"):/usr/local/bin:$PATH"
+
+# Resume the exact session recorded from launch (never guess by timestamp).
+: "${SESSION_DIR:?SESSION_DIR unknown — read .session_dir from the launch-info JSON}"
+
+# Re-run IR-2 (install) unless the carve-out holds, then IR-1 (GPU preflight)
+# in this shell before resuming — same as a fresh launch.
+
+export RESUME_TAG="resume-$(date +%Y%m%d_%H%M%S)"
 export RESUME_LOG="$RUN_DIR/run_${RESUME_TAG}.log"
-setsid nohup python3 -m hyperloom.inference_optimizer.cli --verbose optimize \
-  --resume \
+# shellcheck disable=SC2086
+setsid nohup "$PYTHON" -m hyperloom.inference_optimizer.cli --verbose optimize \
+  --resume --resume-from "$SESSION_DIR" \
   --tick-interval-sec 30 \
   --launch-info-file "$RUN_DIR/launch_${RESUME_TAG}.json" \
+  ${OPT_FLAGS:-} \
   > "$RESUME_LOG" 2>&1 < /dev/null &
 ```
 
-Resume writes its own log (`run_resume_*.log`) so the original run log is
-preserved for comparison.
-
-`--resume` auto-picks the latest session under `$USER_DATA_PATH/<model>/`.
-Reuse IR-2 carve-out rules; re-run `install.sh` if the shell or env changed.
+Resume writes its own log (`run_resume-*.log`) so the original run log is
+preserved. Reuse the IR-2 carve-out rules; re-run `install.sh` if the shell or
+env changed. Run the same launch health check afterward to capture the real
+optimizer `.pid`.
 
 | `stop_reason` | Action |
 |---|---|
@@ -502,7 +496,8 @@ Reuse IR-2 carve-out rules; re-run `install.sh` if the shell or env changed.
 ## When to defer
 
 - **Plain serving only** — use `serving-llms-on-instinct`.
-- **ROCm driver broken** — use `rocm-doctor` when available.
+- **ROCm driver broken** — diagnose the ROCm stack first (e.g. a `rocm-doctor`
+  skill if published); do not start the optimizer on a broken driver.
 - **Edge cases** — read `@${HYPERLOOM_SKILL_PATH}` for multi-node, atom
   framework (IR-8), critic/robustness backends, cache topology, and the
   full failure matrix.

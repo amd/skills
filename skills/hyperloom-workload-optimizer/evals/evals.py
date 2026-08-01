@@ -47,6 +47,11 @@ def test_routes_optimize_vllm_throughput_request():
             "Mention a GPU preflight check for stale serving processes or VRAM "
             "in use (IR-1)"
         )
+        run.should(
+            "Explain that confirmed workload values are persisted (e.g. to a "
+            "workload.env file) and sourced at launch, since agent shells do not "
+            "keep exports between calls"
+        )
 
         run.should_not(
             "Start a plain vLLM docker serve as the primary answer without the optimization loop"
