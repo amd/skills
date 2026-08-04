@@ -12,7 +12,7 @@ chat template) or `/v1/completions` for base models.
 
 ## Prerequisites
 
-- A supported **AMD EPYC™ server CPU with AVX-512**: **4th Gen** (Genoa / Bergamo / Siena), **5th Gen** (Turin), or **6th Gen** (Venice). `detect.py` reports both `is_supported_epyc` and `avx512`; both must be true. EPYC 4004/4005 processors may expose AVX-512, but they are not documented ZenDNN server targets for this recipe and are treated as unsupported. This is CPU serving; a GPU is not required, but a host may also contain AMD Instinct GPUs.
+- A supported **AMD EPYC™ 9000-series server CPU with AVX-512**: **Genoa** (9004), **Turin** (9005), or **6th Gen Venice** (9006). `detect.py` reports both `is_supported_epyc` and `avx512`; both must be true. Other EPYC parts (Bergamo, Siena, the AM5 EPYC 4004/4005) may expose AVX-512 but are outside this skill's current 9000-series scope and are treated as unsupported. This is CPU serving; a GPU is not required, but a host may also contain AMD Instinct GPUs.
 - A container runtime — **Docker** or **Podman** — *or* a conda env with `vllm` + `zentorch` installed.
 - Enough host RAM for the model (weights + KV cache both live in RAM on CPU).
 - A HuggingFace token in `HF_TOKEN` **only** for gated models (Llama, Gemma). The default model (Qwen3) needs none.

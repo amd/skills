@@ -56,13 +56,13 @@ Returns `cpu_model`, `is_amd_epyc`, `epyc_generation`
 Three hard gates -- stop if any fails:
 - `is_amd_epyc` is `false` -> stop: this skill targets AMD EPYC. (Other x86 may work
   but is unsupported here.)
-- `is_supported_epyc` is `false` -> stop: this recipe targets the server EPYC
-  families documented for ZenDNN: 4th Gen (Genoa / Bergamo / Siena), 5th Gen
-  (Turin), and 6th Gen (Venice). EPYC 4004/4005 may expose AVX-512, but ISA
-  compatibility alone does not make them validated ZenDNN targets for this skill.
+- `is_supported_epyc` is `false` -> stop: this recipe supports only the **AMD EPYC
+  9000 series** for now -- Genoa (9004), Turin (9005), and Venice (9006). Other EPYC
+  (Bergamo, Siena, EPYC 4004/4005, pre-Zen4) may even expose AVX-512, but ISA
+  compatibility alone does not make them supported targets for this skill; stop.
 - `avx512` is `false` -> stop: the zentorch CPU path **requires AVX-512**, i.e. Zen4+
-  on the supported families above. Pre-Zen4 EPYC (Naples / Rome / Milan) is not
-  supported -- say so and stop rather than launching into a load-time failure.
+  on the supported 9000-series parts above. Pre-Zen4 EPYC (Naples / Rome / Milan) is
+  not supported -- say so and stop rather than launching into a load-time failure.
 
 Carry `epyc_generation` / `avx512` through the later phases -- e.g. Venice packs up
 to 256 cores/socket, which the thread-binding in Step 5 sizes from.

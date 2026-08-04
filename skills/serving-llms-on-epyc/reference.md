@@ -14,16 +14,15 @@
 
 ## Hardware support
 
-This recipe targets the server families covered by ZenDNN's EPYC support:
-4th Gen (Genoa, Bergamo, and Siena), 5th Gen (Turin), and 6th Gen (Venice).
-`scripts/detect.py` reports these generations as
-`is_supported_epyc: true`.
+This recipe supports the **AMD EPYC 9000 server series** for now: Genoa (9004),
+Turin (9005), and 6th Gen [Venice (9006)](https://ir.amd.com/news-events/press-releases/detail/1294/aai-2026-amd-delivers-full-stack-compute-for-the-agentic-ai-era)
+(launched at Advancing AI 2026). `scripts/detect.py` reports only these three
+generations as `is_supported_epyc: true`.
 
-AVX-512 is necessary but not sufficient for this support policy. EPYC 4004 and
-4005 processors expose the required ISA, but are not documented server targets
-in the current [ZenDNN release material](https://www.amd.com/en/developer/zendnn.html);
-the detector identifies them but reports `is_supported_epyc: false`. Do not
-infer support from AVX-512 alone.
+AVX-512 is necessary but not sufficient for this support policy. Other EPYC parts
+-- Bergamo and Siena, and the AM5 EPYC 4004/4005 -- expose the required ISA but are
+outside this skill's current 9000-series scope; the detector still names them but
+reports `is_supported_epyc: false`. Do not infer support from AVX-512 alone.
 
 The presence of AMD Instinct GPUs does not change CPU support. Use this skill
 when the requested endpoint should execute on EPYC; use

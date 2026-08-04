@@ -65,6 +65,27 @@ def test_detector_does_not_treat_epyc_4000_as_supported():
     assert generation not in SUPPORTED_EPYC_GENERATIONS
 
 
+def test_only_epyc_9000_series_is_supported():
+    # Supported: EPYC 9000 series only (Genoa/Turin/Venice).
+    for model, gen in [
+        ("AMD EPYC 9454 48-Core Processor", "Genoa"),
+        ("AMD EPYC 9755 128-Core Processor", "Turin"),
+        ("AMD EPYC 9996 256-Core Processor", "Venice"),
+    ]:
+        g, _ = _epyc_generation(model)
+        assert g == gen
+        assert g in SUPPORTED_EPYC_GENERATIONS
+
+    # Detected but out of scope for now: Bergamo (97x4) and Siena (8xx4).
+    for model, gen in [
+        ("AMD EPYC 9754 128-Core Processor", "Bergamo"),
+        ("AMD EPYC 8324P 32-Core Processor", "Siena"),
+    ]:
+        g, _ = _epyc_generation(model)
+        assert g == gen
+        assert g not in SUPPORTED_EPYC_GENERATIONS
+
+
 # --- Venice stack-compatibility gate (pure policy) ---
 
 def test_venice_on_default_vllm_proceeds_without_warning():

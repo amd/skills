@@ -27,7 +27,10 @@ import subprocess
 import sys
 
 
-SUPPORTED_EPYC_GENERATIONS = {"Genoa", "Bergamo", "Siena", "Turin", "Venice"}
+# Only the AMD EPYC 9000 server series is supported for now: Genoa (9004),
+# Turin (9005), and Venice (9006). Other generations (Bergamo, Siena, pre-Zen4,
+# EPYC 4004/4005) are still detected/named below, but reported unsupported.
+SUPPORTED_EPYC_GENERATIONS = {"Genoa", "Turin", "Venice"}
 
 
 def _is_local(host):
