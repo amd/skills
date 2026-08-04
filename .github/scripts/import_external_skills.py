@@ -29,11 +29,12 @@ For each source, the script:
    from the source metadata when the upstream copy doesn't already ship
    one, so the imported skill satisfies the card validation gate (see
    docs/skill-cards.md).
-6. Updates `.claude-plugin/marketplace.json` with an entry per imported
-   skill (using the SKILL.md `description` as the marketplace blurb,
-   unless the source declares an override).
+6. Adds each imported skill to the bundle's `skills` array in
+   `.claude-plugin/marketplace.json` (as a `./skills/<name>` path) so it
+   ships in the single AMD plugin.
 7. Removes any previously imported skill (one with a `.federated.json`)
-   that is no longer listed in `.github/scripts/sources.yml`.
+   that is no longer listed in `.github/scripts/sources.yml`, and drops it
+   from the bundle's `skills` array.
 
 Usage:
     uv run .github/scripts/import_external_skills.py            # write changes
@@ -71,6 +72,9 @@ CATALOG_FILE = Path(__file__).resolve().parent / "sources.yml"
 SKILLS_DIR = REPO_ROOT / "skills"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 MARKER_FILENAME = ".federated.json"
+# The bundle references each published skill as `./skills/<name>` in the
+# marketplace plugin entry's `skills` array.
+SKILLS_PATH_PREFIX = "./skills/"
 CARD_FILENAME = "skill-card.md"
 
 FRONTMATTER_RE = re.compile(
@@ -447,53 +451,49 @@ def rewrite_skill_name(skill_dir: Path, new_name: str, log: list[str]) -> None:
     log.append(f"    [SKILL.md] name -> {new_name}")
 
 
-def update_marketplace(results: Iterable[ImportResult], dry_run: bool) -> bool:
-    """Sync `.claude-plugin/marketplace.json` with the imported skills.
+def update_publish_list(
+    imported: Iterable[str],
+    removed: Iterable[str],
+    dry_run: bool,
+) -> bool:
+    """Sync the bundle's `skills` array in `.claude-plugin/marketplace.json`.
 
-    Returns True when the file was modified (or would be modified in a dry
-    run).
+    AMD ships a single curated plugin whose `skills` array lists the published
+    skills as `./skills/<name>` paths. Newly imported federated skills are added
+    so they ship in the bundle, and skills that were pruned from
+    `.github/scripts/sources.yml` are removed. The existing curation order is
+    preserved; freshly added skills are appended in sorted order for a
+    deterministic diff.
+
+    Returns True when the file was modified (or would be in a dry run).
     """
     data = json.loads(CLAUDE_MARKETPLACE.read_text(encoding="utf-8"))
-    plugins = data.setdefault("plugins", [])
-    by_name = {p.get("name"): p for p in plugins if isinstance(p, dict)}
+    plugins = data.get("plugins")
+    if not isinstance(plugins, list) or not plugins or not isinstance(plugins[0], dict):
+        raise ValueError(
+            f"{CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)} must define a bundle "
+            "plugin entry to sync federated skills into."
+        )
+    entry = plugins[0]
+    skills = entry.get("skills")
+    if not isinstance(skills, list):
+        skills = []
 
-    changed = False
-    for result in results:
-        name = result.folder
-        entry = by_name.get(name)
-        expected = {
-            "name": name,
-            "source": f"./skills/{name}",
-            "description": result.marketplace_description,
-        }
-        if entry is None:
-            plugins.append(expected)
-            by_name[name] = expected
-            changed = True
-            continue
-        # Drop the legacy `skills` key: each skill directory ships its
-        # SKILL.md at the plugin root, so a single-skill plugin auto-loads
-        # without an explicit skills path.
-        if "skills" in entry:
-            del entry["skills"]
-            changed = True
-        for key, value in expected.items():
-            if entry.get(key) != value:
-                entry[key] = value
-                changed = True
+    removed_paths = {f"{SKILLS_PATH_PREFIX}{name}" for name in removed}
+    kept = [s for s in skills if s not in removed_paths]
+    present = {
+        s[len(SKILLS_PATH_PREFIX) :].strip("/")
+        for s in kept
+        if isinstance(s, str) and s.startswith(SKILLS_PATH_PREFIX)
+    }
+    additions = sorted(
+        f"{SKILLS_PATH_PREFIX}{name}" for name in imported if name not in present
+    )
+    new_skills = kept + additions
 
-    # Drop entries that point at skills that no longer exist on disk so
-    # the importer also cleans up the marketplace when an entry is
-    # removed from `.github/scripts/sources.yml`.
-    existing_dirs = {p.name for p in SKILLS_DIR.iterdir() if p.is_dir()}
-    pruned = [p for p in plugins if not isinstance(p, dict) or p.get("name") in existing_dirs]
-    if len(pruned) != len(plugins):
-        plugins[:] = pruned
-        changed = True
-
-    plugins.sort(key=lambda p: p.get("name", ""))
-
+    changed = new_skills != skills
     if changed and not dry_run:
+        entry["skills"] = new_skills
         CLAUDE_MARKETPLACE.write_text(
             json.dumps(data, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
@@ -586,8 +586,8 @@ def prune_orphans(
     existing: dict[str, dict],
     dry_run: bool,
     log: list[str],
-) -> int:
-    removed = 0
+) -> list[str]:
+    removed: list[str] = []
     for name, marker in existing.items():
         if name in declared:
             continue
@@ -597,7 +597,7 @@ def prune_orphans(
         )
         if not dry_run:
             shutil.rmtree(SKILLS_DIR / name)
-        removed += 1
+        removed.append(name)
     return removed
 
 
@@ -667,18 +667,19 @@ def main(argv: list[str] | None = None) -> int:
         else existing_federated
     )
     pruned = prune_orphans(declared, prunable, args.dry_run, log)
-    marketplace_changed = update_marketplace(all_results, args.dry_run)
+    imported_names = {result.folder for result in all_results}
+    publish_changed = update_publish_list(imported_names, pruned, args.dry_run)
 
     for line in log:
         print(line)
 
     print("")
     print(f"Imported: {len(all_results)} skill(s)")
-    print(f"Removed orphans: {pruned}")
+    print(f"Removed orphans: {len(pruned)}")
     print(
-        "Marketplace: "
-        f"{'changed' if marketplace_changed else 'unchanged'}"
-        f"{' (dry run)' if args.dry_run and marketplace_changed else ''}"
+        "Publish list: "
+        f"{'changed' if publish_changed else 'unchanged'}"
+        f"{' (dry run)' if args.dry_run and publish_changed else ''}"
     )
     return 0
 

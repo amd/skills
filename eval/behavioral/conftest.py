@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+
 """pytest wiring for the behavioral harness.
 
 Adds this directory to ``sys.path`` so tests can ``from harness import ...``,

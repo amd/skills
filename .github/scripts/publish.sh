@@ -10,6 +10,8 @@
 # Currently regenerates:
 #   - .cursor-plugin/marketplace.json   (mirror of .claude-plugin/marketplace.json
 #                                        + plugin-metadata.json)
+#   - .codex-plugin/plugin.json         (Codex plugin manifest)
+#   - .agents/plugins/marketplace.json  (Codex repo marketplace catalog)
 #
 # `.claude-plugin/marketplace.json` is hand-maintained because its
 # human-facing plugin descriptions intentionally differ from the SKILL.md
@@ -30,10 +32,12 @@ usage() {
 case "${1:-}" in
   "")
     uv run .github/scripts/generate_cursor_marketplace.py
+    uv run .github/scripts/generate_codex_plugin.py
     echo "Publish artifacts generated successfully."
     ;;
   --check)
     uv run .github/scripts/generate_cursor_marketplace.py --check
+    uv run .github/scripts/generate_codex_plugin.py --check
     ;;
   -h|--help)
     usage

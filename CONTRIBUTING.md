@@ -18,10 +18,10 @@ Best for cross-cutting skills that do not have a natural product home.
 2. Update the `SKILL.md` frontmatter so the `name` and `description` clearly explain *what* the skill does and *when* an agent should reach for it.
 3. Add the supporting scripts, templates, and reference docs your instructions point to. Keep skills focused: one well-scoped task per skill is better than one mega-skill.
 4. Add a `skill-card.md` at the skill root with `## Description`, `## Owner`, and `## License` sections. This is the skill's governance card; see [Skill cards](#skill-cards) and [docs/skill-cards.md](docs/skill-cards.md).
-5. Register the skill in `.claude-plugin/marketplace.json` with a human-readable description (the marketplace description is for humans browsing the catalog; the `SKILL.md` description is what the agent uses for routing).
-6. Regenerate the Cursor manifest so it tracks the new skill:
+5. Publish the skill by adding a `./skills/<name>` entry to the `skills` array of the single `amd-skills` plugin in [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json). All published skills ship together in that one plugin; a skill left out of the array stays unpublished. (The `SKILL.md` description is what the agent uses for routing; the plugin's catalog description is a bundle-level blurb for humans.)
+6. Regenerate the derived manifests so they track the marketplace:
    ```bash
-   ./.github/scripts/publish.sh   # writes .cursor-plugin/marketplace.json
+   ./.github/scripts/publish.sh   # writes .cursor-plugin/ and .codex-plugin/ + .agents/plugins/
    ```
 7. Validate the skill locally before pushing:
    ```bash
@@ -208,25 +208,26 @@ what the agent did — see the harness in [`eval/behavioral/`](eval/behavioral/)
 
 Conventions:
 
-- **One file per skill, centralized.** Put the test at
-  `eval/behavioral/tests/test_<skill>.py`, swapping the skill name's hyphens for
-  underscores (`local-ai-use` → `test_local_ai_use.py`). Tests live here, not
-  inside `skills/<name>/`, because the harness copies the skill folder into the
-  agent's sandbox at runtime — test files in there would pollute the workspace.
+- **One file per skill, beside the skill.** Put the test at
+  `skills/<skill-name>/evals/evals.py`. The harness excludes `.claude` from
+  workspace assertions, while the skill and its evals are staged together in
+  the agent's sandbox.
 - **Write checks against behavior.** Combine deterministic assertions
   (`logs_contains`, `workspace_contains`) with LLM-judged expectations
-  (`should`, `should_not`). See `test_local_ai_use.py` for the pattern.
+  (`should`, `should_not`). See `skills/local-ai-use/evals/evals.py` for the
+  pattern.
 
 Run one locally (needs the `claude` CLI authenticated and any per-skill
 prerequisites, e.g. a reachable Lemonade Server for `local-ai-use`):
 
 ```bash
 pip install -r eval/behavioral/requirements.txt
-cd eval/behavioral && pytest tests/test_local_ai_use.py
+cd eval/behavioral
+python -m pytest -c pytest.ini -p conftest ../../skills/local-ai-use/evals/evals.py
 ```
 
-In CI, the `behavioral` workflow runs these tests, but **only** when a
-maintainer adds the `run_behavioral` label to a PR for safety.
+In CI, the `behavioral` workflow runs the affected skill's tests when a PR
+changes a skill with an `evals/evals.py` file.
 
 ## Pre-publish checklist
 
@@ -263,5 +264,6 @@ The validator checks every skill under `skills/` for:
 
 It also checks the plugin manifests:
 
-- every skill under `skills/` has a matching entry in `.claude-plugin/marketplace.json` (and vice versa), with `source` set to `./skills/<name>` and a non-empty human-readable `description`
+- `.claude-plugin/marketplace.json` lists exactly one plugin (the `amd-skills` bundle) with `source` set to `./`, `strict: false`, and a non-empty human-readable `description`
 - `.cursor-plugin/marketplace.json` is up to date — it mirrors `.claude-plugin/marketplace.json` and pulls shared identity (name, description, version, author) from `plugin-metadata.json` (regenerate with `./.github/scripts/publish.sh`)
+- `.codex-plugin/plugin.json` and `.agents/plugins/marketplace.json` are up to date. The Codex plugin manifest and repo marketplace catalog, generated from the same canonical sources (curated `skills` list from `.claude-plugin/marketplace.json`, identity from `plugin-metadata.json`); You can regenerate with `./.github/scripts/publish.sh`.

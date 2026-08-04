@@ -45,7 +45,7 @@ then open a PR for review.
 
    ```bash
    uv run .github/scripts/import_external_skills.py    # vendor into skills/<name>/
-   uv run .github/scripts/generate_cursor_marketplace.py
+   ./.github/scripts/publish.sh                        # regenerate the Cursor manifest
    ./.github/scripts/check.sh                          # validate
    ```
 
