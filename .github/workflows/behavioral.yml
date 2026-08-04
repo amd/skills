@@ -46,11 +46,8 @@ jobs:
     name: Select behavioral tests
     runs-on: ubuntu-latest
     outputs:
-      # Skills that run on the strix_halo runners (everything except the
-      # Instinct skill, which needs dedicated MI300X hardware).
       strix_skills: ${{ steps.select.outputs.strix_skills }}
       strix_any: ${{ steps.select.outputs.strix_any }}
-      # Whether serving-llms-on-instinct is in scope for this run.
       instinct: ${{ steps.select.outputs.instinct }}
     steps:
       - name: Check out repository
