@@ -1,13 +1,60 @@
 # serving-llms-on-epyc -- Reference
 
 ## Table of Contents
-1. [Runtime selection](#runtime-selection)
-2. [Container run flags (CPU)](#container-run-flags-cpu)
-3. [Precision and modality](#precision-and-modality)
-4. [CPU sizing](#cpu-sizing)
-5. [Known quirks](#known-quirks)
+1. [Hardware support](#hardware-support)
+2. [Runtime and stack compatibility](#runtime-and-stack-compatibility)
+3. [Runtime selection](#runtime-selection)
+4. [Container run flags (CPU)](#container-run-flags-cpu)
+5. [Precision and modality](#precision-and-modality)
+6. [Client endpoints and parameters](#client-endpoints-and-parameters)
+7. [CPU sizing](#cpu-sizing)
+8. [Known quirks](#known-quirks)
 
 ---
+
+## Hardware support
+
+This recipe targets the server families covered by ZenDNN's EPYC support:
+4th Gen (Genoa, Bergamo, and Siena), 5th Gen (Turin), and 6th Gen (Venice).
+`scripts/detect.py` reports these generations as
+`is_supported_epyc: true`.
+
+AVX-512 is necessary but not sufficient for this support policy. EPYC 4004 and
+4005 processors expose the required ISA, but are not documented server targets
+in the current [ZenDNN release material](https://www.amd.com/en/developer/zendnn.html);
+the detector identifies them but reports `is_supported_epyc: false`. Do not
+infer support from AVX-512 alone.
+
+The presence of AMD Instinct GPUs does not change CPU support. Use this skill
+when the requested endpoint should execute on EPYC; use
+`serving-llms-on-instinct` when it should execute on a GPU. Both serving engines
+may coexist on the same host.
+
+## Runtime and stack compatibility
+
+Detecting a supported CPU is not the same as running a validated software stack.
+`scripts/validate.py --generation <gen>` probes the **selected** runtime (the
+container image when present, else the conda/host env) for its exact
+`vllm`/`zentorch`/`torch` versions and the **active vLLM platform**, then reports
+`compatibility.status`:
+
+- `proceed` -- a Zen platform is active (zentorch acceleration on) and the stack is
+  the validated default or a validated family.
+- `blocked` (error) -- the stock `CpuPlatform` is active, so serving would run
+  **without** zentorch. Two vLLM paths select a Zen platform: the in-tree
+  `ZenCpuPlatform` (vLLM detects an AMD AVX-512 CPU with `zentorch` importable) and
+  the out-of-tree `zentorch` plugin. If neither is active, fix the environment or
+  use the pinned image; do not serve an unaccelerated CPU stack.
+- `confirmation_required` (`requires_confirmation: true`) -- **Venice on a vLLM
+  other than the pinned default**. AMD documents 6th Gen EPYC as a zentorch target,
+  but this recipe has not validated Venice end-to-end on an off-default version.
+  Venice on the pinned `vllm_version` proceeds with no warning; on any other
+  version, stop, recommend the pinned image, and get an explicit user go/no-go.
+
+The probe only runs once the image is local, so after a first `pull` re-run
+`validate.py` to gate on the real stack rather than the tag. The container tag
+pins the AMD-published integration stack; a conda env may differ, so
+`check_model.py` should use the probed `stack.vllm` for that path.
 
 ## Runtime selection
 
@@ -49,11 +96,14 @@ From `data/epyc.json`. Unlike the Instinct (GPU) skill there are **no**
 
 Image: `amdih/zendnn_zentorch:<tag>` -- the public vLLM + zentorch CPU image on
 Docker Hub (no internal-registry access needed). The exact tag lives in
-`data/epyc.json`; read it, never hardcode it.
+`data/epyc.json`; read it, never hardcode it. The image and `vllm_version` are
+pinned together so `check_model.py` reads the registry for the runtime that will
+actually serve the model. This reproducibility pin applies to the default
+container recipe; it does not replace or modify an existing conda environment.
 
 ## Precision and modality
 
-| Dtype | EPYC (Zen) | Notes |
+| Dtype | Supported EPYC server target | Notes |
 |---|---|---|
 | BF16 | Native (default) | throughput default |
 | FP16 | Native | |
@@ -66,6 +116,39 @@ text **and** multimodal generation endpoints are allowed; pooling/embedding/
 reranker and non-LLM architectures are rejected (not chat/completion endpoints).
 A vLLM-supported multimodal arch may still hit a GPU-only kernel on CPU -- that
 surfaces at load, where the no-retry rule applies.
+
+## Client endpoints and parameters
+
+`check_model.py` reports the endpoint the model actually supports so the handoff
+matches reality instead of always assuming chat:
+
+| Model | `chat_template.status` | `primary_endpoint` | Client call |
+|---|---|---|---|
+| Instruct/chat (ships a template) | `present` | `chat_completions` | `POST /v1/chat/completions` with `messages` |
+| Base text (no template) | `absent` | `completions` | `POST /v1/completions` with `prompt` |
+| Multiple named templates, no `default` | `ambiguous` | `completions` | completions now; chat needs `--chat-template`/a chosen name |
+| Template unreadable (gated/offline) | `unknown` | `completions` | completions; chat also works if a template exists |
+| Multimodal, no usable template | `absent`/`ambiguous` | none (`launchable: false`) | stop -- supply `--chat-template` or another model |
+
+`/v1/chat/completions` applies the model's chat template to structured `messages`
+and returns `choices[0].message.content`. `/v1/completions` takes a raw `prompt`
+(no template) and returns `choices[0].text`. Never invent a chat template; only
+enable chat when a real one is present or the user supplies `--chat-template`.
+
+Request parameters worth surfacing to users:
+
+| Parameter | Meaning |
+|---|---|
+| `max_tokens` | Output-token cap. `prompt_tokens + max_tokens` must be `<= --max-model-len`. |
+| `temperature` | Randomness; `0` is deterministic/greedy. |
+| `top_p` | Nucleus sampling; tune this **or** `temperature`, not both. |
+| `stream` | `true` streams tokens over SSE instead of one blocking reply. |
+| `stop` | String(s) that end generation early. |
+
+The base URL always ends in `/v1`. The OpenAI Python SDK requires a non-empty
+`api_key`, so pass a placeholder (e.g. `"EMPTY"`) when the server has no auth.
+The model repo's `generation_config.json` can set sampling defaults, so pass
+explicit values when determinism matters.
 
 ## CPU sizing
 

@@ -1,17 +1,18 @@
 # AMD Skills Walkthroughs: `serving-llms-on-epyc`
 
 The goal of this skill is to teach your AI agent to bring up a vLLM OpenAI-compatible
-endpoint on an **AMD EPYC CPU** host using the zentorch backend — detecting the CPU,
+endpoint on an **AMD EPYC™ CPU** host using the zentorch backend — detecting the CPU,
 validating the environment, checking the model fits, sizing the runtime to the
 hardware, launching, and verifying the endpoint responds.
 
 **What you'll end up with:** a running `vllm serve` endpoint on your EPYC box (in a
 Docker/Podman container, or a conda env), sized to a single socket and ready to answer
-OpenAI `/v1/chat/completions` requests.
+OpenAI requests — `/v1/chat/completions` for instruct/chat models (those that ship a
+chat template) or `/v1/completions` for base models.
 
 ## Prerequisites
 
-- An **AMD EPYC CPU with AVX-512 support** — i.e. **Zen4+ (Genoa / Bergamo / Siena / Turin) or newer**. This is CPU serving (no GPU required); AVX-512 is required for the zentorch CPU path, and `detect.py` reports it (`avx512`).
+- A supported **AMD EPYC™ server CPU with AVX-512**: **4th Gen** (Genoa / Bergamo / Siena), **5th Gen** (Turin), or **6th Gen** (Venice). `detect.py` reports both `is_supported_epyc` and `avx512`; both must be true. EPYC 4004/4005 processors may expose AVX-512, but they are not documented ZenDNN server targets for this recipe and are treated as unsupported. This is CPU serving; a GPU is not required, but a host may also contain AMD Instinct GPUs.
 - A container runtime — **Docker** or **Podman** — *or* a conda env with `vllm` + `zentorch` installed.
 - Enough host RAM for the model (weights + KV cache both live in RAM on CPU).
 - A HuggingFace token in `HF_TOKEN` **only** for gated models (Llama, Gemma). The default model (Qwen3) needs none.
@@ -19,8 +20,8 @@ OpenAI `/v1/chat/completions` requests.
 
 ## Step 1 - Understanding which skills are available
 
-* Run `claude "Which skills can you see?" --model sonnet`. You should see a list of skills that does **not** include anything about serving LLMs on EPYC / CPU.
-* Make sure there is no `AGENTS.md` file in your local folder.
+* Start in a clean scratch directory, then run `claude "Which skills can you see?" --model sonnet`. You should see a list of skills that does **not** include anything about serving LLMs on EPYC / CPU.
+* Confirm the scratch directory has no `AGENTS.md`, `CLAUDE.md`, `.claude/skills`, or `.agents/skills`. Existing agent instructions or installed skill copies can change discovery and invalidate the before/after comparison. Do not delete instructions from a real project; use a clean scratch directory instead.
 
 ## Step 2 - Enabling claude to see `serving-llms-on-epyc`
 
@@ -42,26 +43,56 @@ Serve Qwen/Qwen3-0.6B on this AMD EPYC box with vLLM and zentorch.
 
 Claude should:
 
-1. **Detect the CPU** — confirm it is AMD EPYC and read the generation (Genoa/Turin/…), AVX-512, physical cores, NUMA layout, and RAM.
+1. **Detect the CPU** — confirm it is a supported AMD EPYC target and read the generation (Genoa/Turin/Venice/…), AVX-512, physical cores, NUMA layout, and RAM.
 2. **Validate the environment** — find an accessible runtime (Docker or Podman, else the conda path), check the image, `HF_TOKEN`, and RAM; report any perf-library advisories.
 3. **Check vLLM supports the model** — verify the architecture against vLLM's model registry (it does not blanket-block multimodal; it rejects non-chat models like embeddings/rerankers).
 4. **Check it fits host RAM** — weights + KV cache + headroom vs available RAM.
 5. **Size the runtime to the hardware** — bind to one socket's physical cores, size the KV cache from that socket's local RAM, and bind memory to that socket (this is **single-socket serving**; vLLM scales poorly across sockets).
 6. **Confirm the plan with you** — present a sized summary (model, path, precision, fit, CPU sizing, port) and wait for you to approve before launching.
-7. **Launch and verify** — pull the public `amdih/zendnn_zentorch` image, run `vllm serve`, poll `/health`, and prove `/v1/chat/completions` works.
+7. **Launch and verify** — pull the public `amdih/zendnn_zentorch` image, run `vllm serve`, poll `/health`, confirm the model is in `/v1/models`, and prove the endpoint the model supports (chat or completions) works.
 
 On any failure it reports the cause + logs and **stops** — it does not retry or start a debugging loop.
 
 ## Step 4 - Talk to the endpoint
 
-Once Claude reports the endpoint is healthy, call it — use the **port from Claude's
-connection table** (it uses `8000` by default):
+Once Claude reports the endpoint is healthy, use the **base URL, served-model name,
+and endpoint from Claude's connection table** (it uses port `8000` by default). Qwen3
+ships a chat template, so it serves `/v1/chat/completions`:
 
 ```bash
 curl -s http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"Qwen/Qwen3-0.6B","messages":[{"role":"user","content":"Hello"}]}'
+  -d '{"model":"Qwen/Qwen3-0.6B","messages":[{"role":"user","content":"Hello"}],"max_tokens":128}'
 ```
+
+A **base** model (no chat template) serves `/v1/completions` with a raw `prompt`
+instead — Claude tells you which endpoint applies:
+
+```bash
+curl -s http://localhost:8000/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"<served-model>","prompt":"Hello, world","max_tokens":128}'
+```
+
+Prefer Python? Point the OpenAI SDK at the local server (`base_url` ends in `/v1`;
+the SDK needs a non-empty key, so use any placeholder when there is no auth):
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="EMPTY")
+model = client.models.list().data[0].id
+r = client.chat.completions.create(
+    model=model,
+    messages=[{"role": "user", "content": "Hello"}],
+    max_tokens=128,
+)
+print(r.choices[0].message.content)
+```
+
+`max_tokens` caps the output and `prompt_tokens + max_tokens` must stay within the
+served `--max-model-len`. Set `temperature` (0 for deterministic) and `stream=True`
+to stream tokens.
 
 ## Step 5 - (Optional) Going beyond
 

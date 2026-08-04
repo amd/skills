@@ -1,27 +1,24 @@
 ---
 name: serving-llms-on-epyc
 description: >-
-  Serves a language model on an AMD EPYC CPU host using vLLM with the zentorch
-  backend, in a container (Docker or Podman) or a conda env. Use whenever the
-  user wants to run, serve, deploy, start, host, or launch an LLM on AMD EPYC,
-  Zen CPU, "vLLM on CPU", "zentorch serving", or "serve a model without a GPU".
-  Handles the full single-instance flow:
-  detect the CPU (incl. EPYC generation), validate the runtime/env, check vLLM
-  supports the model (via vLLM's registry, not a modality blocklist), check it
-  fits host RAM, size CPU threads/KV/NUMA from the hardware, confirm the plan with
-  the user, launch, and poll until the endpoint is responsive. Single instance,
-  single socket (pinned to one socket + its memory; vLLM scales poorly across
-  sockets). Does NOT debug failures and does NOT retry -- it reports and stops. Do
-  not use for GPU/Instinct (use serving-llms-on-instinct), multi-node, or pre-Zen4
-  EPYC without AVX-512 (Naples/Rome/Milan).
+  Serves an LLM on a supported AMD EPYC server CPU using vLLM with zentorch, in
+  Docker, Podman, or conda. Use for "vLLM on CPU", "zentorch serving", or an
+  EPYC CPU endpoint, including on a host that also has AMD Instinct GPUs.
+  Detects the EPYC generation, validates the runtime, checks model support and
+  RAM fit, sizes threads/KV/NUMA, confirms the plan, launches, and verifies the
+  endpoint. Runs one instance on one socket and its memory. Reports and stops
+  on failure; does not retry or debug. Use serving-llms-on-instinct when the
+  endpoint should run on a GPU. Excludes multi-node, EPYC 4000, and pre-Zen4
+  EPYC without AVX-512.
 allowed-tools: Bash, Read
 ---
 
-# Serving LLMs on AMD EPYC (vLLM + zentorch, CPU)
+# Serving LLMs on AMD EPYC™ (vLLM + zentorch, CPU)
 
-Bring up a single vLLM OpenAI endpoint on an AMD EPYC host with the zentorch CPU
+Bring up a single vLLM OpenAI endpoint on an AMD EPYC™ host with the zentorch CPU
 backend, sized to the hardware. Container-first (Docker or Podman); conda/host
-is the fallback.
+is the fallback. An installed AMD Instinct GPU does not disqualify the host:
+select this skill when the endpoint itself should run on the EPYC CPU.
 
 **This is single-socket serving:** one instance pinned to one socket and its memory
 (vLLM scales poorly across sockets, so we do not span them). On a dual-socket host it
@@ -42,7 +39,8 @@ attempt `sudo` or privilege escalation.
 
 Read `data/epyc.json` directly. It holds the container image, mandatory CPU run
 flags, supported precision, the model-support policy, the default model, and the
-verified throughput-flag gotcha. Do not hardcode the image tag from memory -- read it.
+verified throughput-flag gotcha. Its `vllm_version` and image tag are one
+validated default stack; keep them aligned and do not hardcode either from memory.
 
 ## Step 1: Detect the CPU
 
@@ -51,27 +49,33 @@ python3 scripts/detect.py            # add --host user@box for a remote host
 ```
 
 Returns `cpu_model`, `is_amd_epyc`, `epyc_generation`
-(Naples/Rome/Milan/Genoa/Bergamo/Siena/Turin), `zen_arch`, `avx512`,
-`logical_cores`, `physical_cores`, `sockets`, `numa_nodes`, `memory_gb`.
+(Naples/Rome/Milan/Genoa/Bergamo/Siena/Turin/Venice or EPYC 4004/4005),
+`zen_arch`, `is_supported_epyc`, `avx512`, `logical_cores`, `physical_cores`,
+`sockets`, `numa_nodes`, `memory_gb`.
 
-Two hard gates -- stop if either fails:
+Three hard gates -- stop if any fails:
 - `is_amd_epyc` is `false` -> stop: this skill targets AMD EPYC. (Other x86 may work
   but is unsupported here.)
+- `is_supported_epyc` is `false` -> stop: this recipe targets the server EPYC
+  families documented for ZenDNN: 4th Gen (Genoa / Bergamo / Siena), 5th Gen
+  (Turin), and 6th Gen (Venice). EPYC 4004/4005 may expose AVX-512, but ISA
+  compatibility alone does not make them validated ZenDNN targets for this skill.
 - `avx512` is `false` -> stop: the zentorch CPU path **requires AVX-512**, i.e. Zen4+
-  (Genoa / Bergamo / Siena / Turin) or newer. Pre-Zen4 EPYC (Naples / Rome / Milan)
-  is not supported -- say so and stop rather than launching into a load-time failure.
+  on the supported families above. Pre-Zen4 EPYC (Naples / Rome / Milan) is not
+  supported -- say so and stop rather than launching into a load-time failure.
 
-Carry `epyc_generation` / `avx512` through the later phases -- e.g. Turin packs up to
-128 cores/socket, which the thread-binding in Step 5 sizes from.
+Carry `epyc_generation` / `avx512` through the later phases -- e.g. Venice packs up
+to 256 cores/socket, which the thread-binding in Step 5 sizes from.
 
 ## Step 2: Validate the runtime and environment
 
 ```bash
-python3 scripts/validate.py --image <image from data/epyc.json>
+python3 scripts/validate.py --image <image from data/epyc.json> --generation <epyc_generation from detect>
 ```
 
-Returns `ready`, `runtime` (`docker`, `podman`, or null), `runtime_detail`,
-`conda_path_available`, `ram_gb`, and `errors/warnings/advisories`. Pick the path:
+Returns `ready`, `requires_confirmation`, `runtime` (`docker`, `podman`, or null),
+`runtime_detail`, `conda_path_available`, `stack`, `compatibility`, `ram_gb`, and
+`errors/warnings/advisories`. Pick the path:
 - `runtime` is `docker` or `podman` -> container path (Step 6), used verbatim.
 - `runtime` null but `conda_path_available: true` -> conda/host path.
 - `runtime` null and no conda -> `ready` is false. Report the one-time
@@ -79,22 +83,54 @@ Returns `ready`, `runtime` (`docker`, `podman`, or null), `runtime_detail`,
 
 Do not proceed if `ready` is `false`.
 
+**Stack-compatibility gate.** `validate.py` probes the *selected* runtime for its
+exact `vllm`/`zentorch`/`torch` versions and the active vLLM platform, then sets
+`compatibility.status`:
+- `proceed` -> the stack is the validated default (or a validated family on a Zen
+  platform); continue.
+- `blocked` -> a stock CPU platform is active, so zentorch acceleration is **not**
+  on (error). Report `compatibility.message` and stop.
+- `confirmation_required` (`requires_confirmation: true`) -> **Venice on a vLLM
+  other than the pinned default**. This recipe has not been validated on Venice
+  with that version. Surface `compatibility.message`, recommend the pinned
+  `vllm_version` image from `data/epyc.json`, and **stop for an explicit user
+  go/no-go** before launching. On the pinned default vLLM, Venice proceeds with no
+  warning.
+
+The gate only runs once the image is local. If `validate.py` reports the image is
+not pulled, pull it (or let Step 6 pull it) and **re-run `validate.py`** so the
+gate probes the real stack rather than only the tag.
+
 ## Step 3: Resolve and validate the model
 
 If the user named no model, use `default_model` from `data/epyc.json`
 (`Qwen/Qwen3-0.6B` -- ungated, tiny, fast first success). Otherwise use theirs.
 
-Check that vLLM actually supports the model (do **not** blanket-block multimodal):
+Check that vLLM actually supports the model (do **not** blanket-block multimodal).
+Pass the vLLM version the model will actually run on: use `stack.vllm` from
+`validate.py` when it was probed (the conda env may differ from the pin), else the
+`vllm_version` from `data/epyc.json`.
 
 ```bash
-python3 scripts/check_model.py --model-id <model> --vllm-version <vllm_version from data/epyc.json>
+python3 scripts/check_model.py --model-id <model> --revision <rev or main> --vllm-version <stack.vllm from validate, else vllm_version from data/epyc.json>
 ```
 
-- Exit 0 = vLLM serves it as a generation endpoint (`kind` `text` or `multimodal`),
-  or support is undeterminable (gated/offline) -- proceed; launch confirms.
-- Exit 1 = positively unsupported: the architecture is not in vLLM's registry, or
-  it is a `pooling`/embedding/reranker (not a chat/completion endpoint). Report the
+- Exit 0 = vLLM serves it as a generation endpoint, or support is undeterminable
+  (gated/offline) -- proceed; launch confirms.
+- Exit 1 = stop: the architecture is not in vLLM's registry, it is a
+  `pooling`/embedding/reranker (not a chat/completion endpoint), or it is a
+  multimodal model with no usable chat template (`launchable: false`). Report the
   printed `message` and stop.
+
+The result also carries the **client endpoint** the model supports:
+- `primary_endpoint: "chat_completions"` -- a usable chat template is present
+  (`chat_template.status: present`); serve and hand off `/v1/chat/completions`.
+- `primary_endpoint: "completions"` -- no usable/auto-selectable template
+  (`absent`/`ambiguous`/`unknown`); serve and hand off `/v1/completions` with a
+  raw `prompt`. Chat can still be enabled by passing `--chat-template <file>` (or,
+  for `ambiguous`, choosing one of `chat_template.names`); never invent one.
+- Carry `primary_endpoint`, `supported_endpoints`, and `chat_template` through to
+  verification (Step 7) and the handoff (Step 8).
 - A `multimodal` model is allowed; a vLLM-supported multimodal arch may still hit a
   GPU-only kernel on CPU, which surfaces at load (the no-retry rule then applies).
 
@@ -109,7 +145,7 @@ HuggingFace; if not, stop and say so.
 RAM is the ceiling on CPU (weights + KV cache both live in RAM). Run on ONE line:
 
 ```bash
-python3 scripts/estimate_memory.py --model-id <model> --ram-gb <memory_gb from detect> --max-model-len <4096 or user value> --num-prompts <1 or desired concurrency>
+python3 scripts/estimate_memory.py --model-id <model> --revision <rev or main> --ram-gb <memory_gb from detect> --max-model-len <4096 or user value> --num-prompts <1 or desired concurrency>
 ```
 
 Exit 0 = fits, exit 1 = does not fit. If `fit.fits` is false: **do not launch.**
@@ -199,40 +235,102 @@ The base launch sets none of them.
 
 ## Step 7: Poll until up and responsive
 
-A 503 while loading is normal. Poll until the server answers, then prove the
-chat endpoint works. CPU first-token compile can take a minute or two.
+A 503 while loading is normal. Poll `/health` until the server answers, confirm
+the served model is listed, then prove the **selected endpoint** works (from
+`primary_endpoint` in Step 3). CPU first-token compile can take a minute or two.
+Track a `healthy` flag so a timeout is a failure, not a fall-through.
 
 ```bash
-# container alive (or process alive for conda) + /health
+# 1. container alive (conda: process alive) + /health, with a real timeout
+healthy=""
 for i in $(seq 1 120); do
-  # container path:
   $RT inspect -f '{{.State.Running}}' vllm-epyc 2>/dev/null | grep -q true || { echo "FAILED: container exited"; $RT logs --tail 50 vllm-epyc; break; }
-  curl -sf http://localhost:<port>/health >/dev/null 2>&1 && { echo "HEALTHY"; break; }
+  curl -sf http://localhost:<port>/health >/dev/null 2>&1 && { healthy=1; echo "HEALTHY"; break; }
   sleep 3
 done
+[ -n "$healthy" ] || { echo "FAILED: not healthy before timeout"; $RT logs --tail 50 vllm-epyc; }
+
+# 2. the served model is registered
+curl -sf --max-time 30 http://localhost:<port>/v1/models
 ```
 
-Then validate the OpenAI endpoint is actually accessible:
+Then exercise the endpoint the model actually supports. Use deterministic
+sampling and a small output cap for the smoke check:
+
 ```bash
-curl -sf http://localhost:<port>/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"model":"<model>","messages":[{"role":"user","content":"hi"}],"max_tokens":8}'
+# primary_endpoint == chat_completions
+curl -sf --max-time 180 http://localhost:<port>/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"<served-model>","messages":[{"role":"user","content":"hi"}],"max_tokens":16,"temperature":0}'
+
+# primary_endpoint == completions  (no chat template)
+curl -sf --max-time 180 http://localhost:<port>/v1/completions -H 'Content-Type: application/json' \
+  -d '{"model":"<served-model>","prompt":"Hello, world","max_tokens":16,"temperature":0}'
 ```
 
+Confirm the response is JSON with a non-error `choices[0]` (chat: `message.content`;
+completion: `text`). An HTTP 200 that carries an `error` payload is **not** success.
 Resource sanity (your validation list): `$RT stats --no-stream vllm-epyc`.
 
-**If the server never becomes healthy or the endpoint does not respond: print
-the container/process logs, state the failure, and STOP. Do not retry. Do not
-start a debugging loop.**
+**If the server never becomes healthy, `/v1/models` omits the model, or the
+endpoint returns an error/empty `choices`: print the container/process logs,
+state the failing phase, and STOP. Do not retry. Do not start a debugging loop.**
 
 ## Step 8: On success, hand over the endpoint
 
-Print a connection table (model, runtime, port, OMP threads, KV GB, max-model-len,
-NUMA pinning) and a ready-to-run example:
+Give the user everything needed to call the server. Print a connection table:
+
+| Field | Value |
+|---|---|
+| Base URL | `http://localhost:<port>/v1` (the trailing `/v1` matters) |
+| Served model | `<served-model>` (the id from `/v1/models`) |
+| Endpoint | `/v1/chat/completions` or `/v1/completions` (from `primary_endpoint`) |
+| Why | chat = a chat template is present; completions = no template (raw prompts) |
+| Runtime / port | `<runtime>` / `<port>` |
+| Sizing | OMP threads, KV GB, `--max-model-len`, socket / NUMA pinning |
+| Stop | `$RT rm -f vllm-epyc` (container) or `kill <pid>` (conda) |
+
+Then a ready-to-run example **for the selected endpoint**.
+
+Chat model (`primary_endpoint: chat_completions`):
 ```bash
 curl -s http://localhost:<port>/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"model":"<model>","messages":[{"role":"user","content":"Hello"}]}'
+  -d '{"model":"<served-model>","messages":[{"role":"user","content":"Hello"}],"max_tokens":128,"temperature":0.7}'
 ```
-To stop: `$RT rm -f vllm-epyc` (container) or `kill <pid>` (conda).
+
+Base/prompt model (`primary_endpoint: completions`):
+```bash
+curl -s http://localhost:<port>/v1/completions -H 'Content-Type: application/json' \
+  -d '{"model":"<served-model>","prompt":"Hello, world","max_tokens":128,"temperature":0.7}'
+```
+
+OpenAI Python client (point `base_url` at the local server; the SDK requires a
+non-empty key, so any placeholder works when the server has no auth):
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:<port>/v1", api_key="EMPTY")
+model = client.models.list().data[0].id
+
+# chat model:
+r = client.chat.completions.create(
+    model=model,
+    messages=[{"role": "user", "content": "Hello"}],
+    max_tokens=128, temperature=0.7,
+)
+print(r.choices[0].message.content)
+
+# base/prompt model:
+r = client.completions.create(model=model, prompt="Hello, world", max_tokens=128)
+print(r.choices[0].text)
+```
+
+Argument guidance to pass along (see [reference.md](reference.md) for the full list):
+- `max_tokens` caps the **output**; `prompt_tokens + max_tokens` must be `<= --max-model-len`.
+- `temperature` (0 = deterministic/greedy, higher = more random); tune `top_p` *or*
+  `temperature`, not both.
+- `stream: true` streams tokens (SSE) instead of one blocking response.
+- The model's `generation_config.json` can set sampling defaults; pass explicit
+  values to be sure.
 
 ## Offline (single-instance batch)
 
