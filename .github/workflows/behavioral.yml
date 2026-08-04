@@ -174,16 +174,28 @@ jobs:
     if: needs.discover.outputs.instinct == 'true'
     runs-on: [self-hosted, Linux, X64, mi300x, gpu, rocm]
     timeout-minutes: 45
+    # Scopes the Anthropic key to this job alone: only jobs that name this
+    # environment can read its secrets, unlike a repo-level secret.
+    environment: behavioral-instinct
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
-      ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
-      ANTHROPIC_CUSTOM_HEADERS: |
-        Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
-        user: a1_ucicd
+      # The MI300X runner lives outside the AMD network, so it can't reach the
+      # internal gateway the strix_halo jobs use. It calls api.anthropic.com
+      # directly with its own budgeted key, hence no BASE_URL / CUSTOM_HEADERS.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       BEHAVIORAL_SKILL: serving-llms-on-instinct
       # Model pin: opus only. The harness also enforces this under CI.
       BEHAVIORAL_MODEL: opus
     steps:
+      - name: Verify the Anthropic key is available
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "ANTHROPIC_API_KEY resolved to an empty value. GitHub withholds" >&2
+            echo "secrets from pull requests opened from forks; re-run this from" >&2
+            echo "a branch in amd/skills, or check that the secret is set on the" >&2
+            echo "behavioral-instinct environment." >&2
+            exit 1
+          fi
+
       - name: Check out repository
         uses: actions/checkout@v4
 
