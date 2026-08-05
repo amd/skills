@@ -44,6 +44,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from claude_eval import SKILLS_DIR  # noqa: E402
 
+
+def _safe_print(text: str) -> None:
+    """Print, falling back to `errors="replace"` if the console can't encode `text`."""
+    try:
+        print(text, flush=True)
+    except UnicodeEncodeError:
+        encoding = sys.stdout.encoding or "ascii"
+        print(text.encode(encoding, errors="replace").decode(encoding), flush=True)
+
 DEFAULT_SKILL = os.environ.get("BEHAVIORAL_SKILL", "local-ai-use")
 DEFAULT_MODEL = os.environ.get("BEHAVIORAL_MODEL", "opus")
 DEFAULT_EFFORT = os.environ.get("BEHAVIORAL_EFFORT", "high")
@@ -67,10 +76,9 @@ def _enforce_model_policy(model: str | None) -> str | None:
     """Coerce non-opus models to opus in CI; pass through otherwise."""
     if model is None or not _is_automated_env() or "opus" in model.lower():
         return model
-    print(
+    _safe_print(
         f"[behavioral] automated run: coercing model '{model}' -> "
-        f"'{AUTOMATED_MODEL}' to pin the CI model.",
-        flush=True,
+        f"'{AUTOMATED_MODEL}' to pin the CI model."
     )
     return AUTOMATED_MODEL
 
@@ -326,7 +334,7 @@ class Run:
         return self
 
     def _report(self, passed: bool, kind: str, detail: str) -> None:
-        print(f"  [{'PASS' if passed else 'FAIL'}] ({kind}) {detail}", flush=True)
+        _safe_print(f"  [{'PASS' if passed else 'FAIL'}] ({kind}) {detail}")
         assert passed, f"({kind}) {detail}"
 
 
@@ -366,7 +374,7 @@ class Agent:
         if self.workspace is None:
             raise RuntimeError("Agent.prompt() must be called inside a 'with' block")
 
-        print(f"\n[behavioral] skill='{self.skill}' model='{self.model}': {text}", flush=True)
+        _safe_print(f"\n[behavioral] skill='{self.skill}' model='{self.model}': {text}")
         events = _run_agent(text, self.workspace, self.model, self.effort)
         return Run(workspace=self.workspace, events=events, judge_model=self.model)
 
