@@ -286,98 +286,58 @@ probe shapes this gate must reject.
 
 ## Phase 3 — Launch
 
-After IR-2 and IR-1 pass, launch with Phase 2 values as CLI flags.
-`setsid nohup ... &` is required for runs longer than 5 minutes.
+After IR-2 and IR-1 pass, launch. `setsid nohup` is required for runs longer than
+5 minutes, so the run outlives the agent shell.
 
 ```bash
-cd "$REPO_ROOT"
-if [ -f "$REPO_ROOT/.env" ]; then set -a; . "$REPO_ROOT/.env"; set +a; fi
-export RUN_DIR="${USER_DATA_PATH}/optimizer_runs"
-. "${RUN_DIR}/workload.env"   # confirmed Phase 2 values — no silent defaults
-: "${MODEL_PATH:?MODEL_PATH empty — re-run the Persist the plan step}"
-. "${KERNEL_AGENT_ENV:-${USER_DATA_PATH}/runtime/kernel-agent.env.sh}"
-export PYTHON="${PYTHON:-$(command -v python3)}"
-export PATH="$(dirname "$PYTHON"):/usr/local/bin:$PATH"
-
-export RUN_TAG="$(basename "$MODEL_PATH")-$(date +%Y%m%d_%H%M%S)"
-export RUN_LOG="$RUN_DIR/run_${RUN_TAG}.log"
-export PID_FILE="$RUN_DIR/run_${RUN_TAG}.pid"
-export LAUNCH_INFO_FILE="$RUN_DIR/launch_${RUN_TAG}.json"
-mkdir -p "$RUN_DIR"
-
-# shellcheck disable=SC2086
-setsid nohup "$PYTHON" -m hyperloom.inference_optimizer.cli --verbose optimize \
-  --model "$MODEL_PATH" \
-  --framework "$FRAMEWORK" \
-  --tp "$TP" \
-  --ep "$EP" \
-  --conc "$CONC" \
-  --isl "$ISL" \
-  --osl "$OSL" \
-  --precision "$PRECISION" \
-  --max-hours "$MAX_HOURS" \
-  --target-gain "$TARGET_GAIN" \
-  --tick-interval-sec 30 \
-  --launch-info-file "$LAUNCH_INFO_FILE" \
-  ${OPT_FLAGS:-} \
-  > "$RUN_LOG" 2>&1 < /dev/null &
-echo $! > "$PID_FILE"
+export REPO_ROOT="$(pwd -P)"
+export SKILL_DIR="${SKILL_DIR:?absolute path of the directory holding this SKILL.md}"
+bash "${SKILL_DIR}/scripts/launch.sh"
 ```
 
-Every value comes from the confirmed `workload.env`; there are no `${VAR:-default}`
-fallbacks so a missing value fails loudly instead of silently launching a wrong
-config. Put any optional Phase 2 flags (`--no-kernel`, `--no-explore`,
+Every workload value comes from the confirmed `workload.env`; the script has no
+`${VAR:-default}` fallbacks, so a missing value fails loudly instead of launching
+a different config. Put any optional Phase 2 flags (`--no-kernel`, `--no-explore`,
 `--gpu-type`, `--model-class`, `--server-args`, `--compare-against-gpu`,
 `--quantize`, phase budget flags) into `OPT_FLAGS` in `workload.env`. `OPT_FLAGS`
-is word-split (unquoted `${OPT_FLAGS}`), so quote any flag value that contains
-spaces, e.g. `export OPT_FLAGS='--server-args "--foo bar"'`.
+is word-split, so quote any flag value that contains spaces, e.g.
+`export OPT_FLAGS='--server-args "--foo bar"'`.
 
 ### Launch health check (30 s after start)
 
-The `$!` recorded at launch is the **setsid wrapper** PID, which exits
-immediately — it is NOT the optimizer. Read the real `.pid` (and `.session_dir`)
-from the launch-info JSON with a tiny `python3` reader (no `jq` dependency) and
-rewrite `$PID_FILE` so the monitor watches the right process.
+Required after every launch and resume. The PID recorded at launch is the
+**setsid wrapper**, which exits immediately — it is NOT the optimizer. This reads
+the real `.pid` and `.session_dir` from the launch-info JSON, rewrites the PID
+file so the monitor watches the right process, and records both in
+`$RUN_DIR/last_launch.env` for the later phases.
 
 ```bash
-sleep 30
-read_json() { python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],''))" "$1" "$2" 2>/dev/null; }
-
-REAL_PID="$(read_json "$LAUNCH_INFO_FILE" pid)"
-[ -z "$REAL_PID" ] && REAL_PID="$(pgrep -f 'hyperloom.inference_optimizer.cli .*optimize' | head -1)"
-[ -n "$REAL_PID" ] && echo "$REAL_PID" > "$PID_FILE"
-test -d "/proc/$REAL_PID" && echo "optimizer_alive=true pid=$REAL_PID"
-
-SESSION_DIR="$(read_json "$LAUNCH_INFO_FILE" session_dir)"
-if [ -z "$SESSION_DIR" ]; then
-  echo "ERROR: no session_dir yet in $LAUNCH_INFO_FILE; inspect $RUN_LOG" >&2
-  exit 1
-fi
-test -f "$SESSION_DIR/manifest.json" && echo "manifest_present=true session_dir=$SESSION_DIR"
-test -f "$SESSION_DIR/state.json" && echo "state_exists=true"
+export REPO_ROOT="$(pwd -P)"
+export SKILL_DIR="${SKILL_DIR:?absolute path of the directory holding this SKILL.md}"
+bash "${SKILL_DIR}/scripts/launch_health.sh"
 ```
 
-Never guess `session_dir` by timestamp — always read it from the launch-info
-JSON.
+It exits non-zero when the launch-info JSON never appeared, no optimizer process
+can be found, or `session_dir` is still unset — inspect the reported run log in
+those cases. Never guess `session_dir` from a timestamp; concurrent sessions
+share `USER_DATA_PATH`.
 
 ## Phase 3 — Monitor
 
-Poll at most every 5 minutes unless debugging a startup failure.
+Poll at most every 5 minutes unless debugging a startup failure. Use the state
+reader the wheel ships rather than parsing `state.json` by hand — it also prints
+the recent lifecycle events.
 
 ```bash
-# Reuse the launch-info reader instead of hand-filling SESSION_DIR.
-read_json() { python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],''))" "$1" "$2" 2>/dev/null; }
-export SESSION_DIR="${SESSION_DIR:-$(read_json "$LAUNCH_INFO_FILE" session_dir)}"
-: "${SESSION_DIR:?SESSION_DIR unknown — inspect $LAUNCH_INFO_FILE}"
-python3 - <<'PY'
-import json, os, pathlib
-s = json.loads((pathlib.Path(os.environ["SESSION_DIR"]) / "state.json").read_text())
-for k in ("stop_reason", "baseline_tput", "cumulative_gain", "current_best",
-          "last_kernel_opt", "phase"):
-    print(f"{k}: {s.get(k)}")
-print("explore_last_round:", s.get("explore_search", {}).get("last_round"))
-PY
+export REPO_ROOT="$(pwd -P)"
+. "${USER_DATA_PATH}/optimizer_runs/last_launch.env"   # SESSION_DIR from launch
+STATE_TOOL="${REPO_ROOT}/hyperloom/inference_optimizer/tools/read_optimizer_state.py"
+[ -f "$STATE_TOOL" ] || STATE_TOOL="${REPO_ROOT}/src/hyperloom/inference_optimizer/tools/read_optimizer_state.py"
+"${PYTHON:-python3}" "$STATE_TOOL" "$SESSION_DIR"
 ```
+
+For recent action counts grouped by category, the wheel also ships
+`tools/event_counts.py`, invoked the same way.
 
 Report session id + log path, `baseline_tput` / `current_best` /
 `cumulative_gain`, explore accepted/rejected, last kernel opt (correctness,
@@ -386,40 +346,21 @@ speedup, KEEP/REVERT), and process-alive vs `stop_reason`. See
 
 ## Resume
 
-Resume runs in a fresh shell, so re-establish the same environment as launch,
-re-run the IR-2/IR-1 gates, and resume the **explicit** session — bare
-`--resume` auto-picks the latest session and may target the wrong run.
+Resume runs in a fresh shell. Re-run the IR-2 and IR-1 gates first, exactly as for
+a fresh launch — the script does not re-check them.
 
 ```bash
-cd "$REPO_ROOT"
-if [ -f "$REPO_ROOT/.env" ]; then set -a; . "$REPO_ROOT/.env"; set +a; fi
-export RUN_DIR="${USER_DATA_PATH}/optimizer_runs"
-. "${RUN_DIR}/workload.env"   # confirmed Phase 2 values
-. "${KERNEL_AGENT_ENV:-${USER_DATA_PATH}/runtime/kernel-agent.env.sh}"
-export PYTHON="${PYTHON:-$(command -v python3)}"
-export PATH="$(dirname "$PYTHON"):/usr/local/bin:$PATH"
-
-# Resume the exact session recorded from launch (never guess by timestamp).
-: "${SESSION_DIR:?SESSION_DIR unknown — read .session_dir from the launch-info JSON}"
-
-# Re-run IR-2 (install) unless the carve-out holds, then IR-1 (GPU preflight)
-# in this shell before resuming — same as a fresh launch.
-
-export RESUME_TAG="resume-$(date +%Y%m%d_%H%M%S)"
-export RESUME_LOG="$RUN_DIR/run_${RESUME_TAG}.log"
-# shellcheck disable=SC2086
-setsid nohup "$PYTHON" -m hyperloom.inference_optimizer.cli --verbose optimize \
-  --resume --resume-from "$SESSION_DIR" \
-  --tick-interval-sec 30 \
-  --launch-info-file "$RUN_DIR/launch_${RESUME_TAG}.json" \
-  ${OPT_FLAGS:-} \
-  > "$RESUME_LOG" 2>&1 < /dev/null &
+export REPO_ROOT="$(pwd -P)"
+export SKILL_DIR="${SKILL_DIR:?absolute path of the directory holding this SKILL.md}"
+bash "${SKILL_DIR}/scripts/resume.sh"
+bash "${SKILL_DIR}/scripts/launch_health.sh"
 ```
 
-Resume writes its own log (`run_resume-*.log`) so the original run log is
-preserved. Reuse the IR-2 carve-out rules; re-run `install.sh` if the shell or
-env changed. Run the same launch health check afterward to capture the real
-optimizer `.pid`.
+It resumes the session recorded in `last_launch.env` and always passes
+`--resume-from` explicitly, because a bare `--resume` auto-picks the newest
+session and can target the wrong run. Resume writes its own log
+(`run_resume-*.log`) so the original run log is preserved. Reuse the IR-2
+carve-out rules; re-run `install.sh` if the shell or env changed.
 
 | `stop_reason` | Action |
 |---|---|

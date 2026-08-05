@@ -63,10 +63,12 @@ optimizer skill that exists on disk — `hyperloom/inference_optimizer/SKILL.md`
 for a wheel install, `src/hyperloom/inference_optimizer/SKILL.md` for a source
 checkout.
 
-Do this check by reading `.env` line by line (`grep`-style), never by sourcing it.
-Values are written unquoted and some legitimately contain spaces — for example
-`ANTHROPIC_CUSTOM_HEADERS=Ocp-Apim-Subscription-Key: <key>` — so `. ./.env`
-executes the tail of such a line as a command. Never echo a key value into chat.
+Inspect `.env` with `grep` rather than echoing it, and never print a key value
+into chat. Phase 3 loads `.env` with a shell `source`, so any value containing a
+space must stay double-quoted — `hyperloom-setup` writes
+`ANTHROPIC_CUSTOM_HEADERS="Ocp-Apim-Subscription-Key: ${ANTHROPIC_API_KEY}"` for
+exactly that reason. A hand-edited `.env` that drops those quotes makes the launch
+shell fail with exit 127.
 
 Do not write your own live probe of the LLM endpoint. Hyperloom's `optimize`
 preflight already probes `<base_url>/models` with the operator's auth and custom
