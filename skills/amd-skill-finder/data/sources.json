@@ -1,0 +1,285 @@
+{
+  "schema_version": 1,
+  "excluded_repositories": [
+    "ai-dynamo/dynamo"
+  ],
+  "amd_signals": [
+    "amd",
+    "rocm",
+    "hip",
+    "instinct",
+    "ryzen ai",
+    "mi100",
+    "mi200",
+    "mi210",
+    "mi250",
+    "mi250x",
+    "mi300",
+    "mi300a",
+    "mi300x",
+    "mi325x",
+    "mi350x",
+    "mi355x",
+    "gfx90a",
+    "gfx942",
+    "gfx950",
+    "radeon"
+  ],
+  "projects": [
+    {
+      "id": "rocm-platform",
+      "display_name": "ROCm platform and documentation",
+      "description": "ROCm installation, compatibility, system components, release information, and platform documentation.",
+      "categories": ["system-platform", "gpu-development"],
+      "keywords": ["install rocm", "rocm compatibility", "rocm release", "driver", "runtime", "linux", "system management", "rocm docs"],
+      "repositories": [
+        {"repo": "ROCm/ROCm", "role": "canonical", "tier": "amd-official", "priority": 100, "path_hints": ["README.md", "docs"]},
+        {"repo": "ROCm/rocm-docs-core", "role": "documentation", "tier": "amd-official", "priority": 98, "path_hints": ["docs"]},
+        {"repo": "ROCm/rocm-systems", "role": "systems", "tier": "amd-official", "priority": 94, "path_hints": ["projects", "docs"]}
+      ]
+    },
+    {
+      "id": "hip",
+      "display_name": "HIP",
+      "description": "AMD GPU programming, CUDA-to-HIP porting, HIP runtime APIs, compilation, and debugging.",
+      "categories": ["gpu-development", "kernel-compilers"],
+      "keywords": ["hip", "hipify", "cuda port", "cuda to hip", "hip runtime", "hip kernel", "hipcc", "gpu programming"],
+      "repositories": [
+        {"repo": "ROCm/hip", "role": "canonical", "tier": "amd-official", "priority": 100, "path_hints": ["docs", "include", "samples"]}
+      ]
+    },
+    {
+      "id": "rccl",
+      "display_name": "RCCL",
+      "description": "Collective communication and multi-GPU or multi-node training on AMD GPUs.",
+      "categories": ["networking", "training", "system-platform"],
+      "keywords": ["rccl", "collective", "allreduce", "all gather", "multi gpu", "multi node", "nccl", "distributed training"],
+      "repositories": [
+        {"repo": "ROCm/rccl", "role": "canonical", "tier": "amd-official", "priority": 100, "path_hints": ["docs", "tools", "test"]}
+      ]
+    },
+    {
+      "id": "rocprofiler-sdk",
+      "display_name": "ROCprofiler SDK",
+      "description": "ROCm profiling, tracing, performance counters, and workload analysis.",
+      "categories": ["profiling", "gpu-development"],
+      "keywords": ["rocprofiler", "rocprof", "profile", "profiling", "trace", "performance counter", "roofline", "bottleneck"],
+      "repositories": [
+        {"repo": "ROCm/rocprofiler-sdk", "role": "canonical", "tier": "amd-official", "priority": 100, "path_hints": ["source/docs", "samples", "tests"]}
+      ]
+    },
+    {
+      "id": "aiter",
+      "display_name": "AITER",
+      "description": "AMD inference operators and optimized kernels for transformer workloads.",
+      "categories": ["inference", "kernel-compilers"],
+      "keywords": ["aiter", "attention", "mla", "moe", "gemm", "operator", "optimized kernel", "transformer kernel", "inference kernel"],
+      "repositories": [
+        {"repo": "ROCm/aiter", "role": "canonical", "tier": "amd-official", "priority": 100, "path_hints": ["aiter", "op_tests", "docs", "examples"]}
+      ]
+    },
+    {
+      "id": "atom",
+      "display_name": "ATOM",
+      "description": "Composable AMD inference kernels and integrations for high-performance model serving.",
+      "categories": ["inference", "kernel-compilers"],
+      "keywords": ["atom", "attention", "moe", "gemm", "kernel", "inference optimization", "composable kernel"],
+      "repositories": [
+        {"repo": "ROCm/ATOM", "role": "canonical", "tier": "amd-official", "priority": 100, "path_hints": ["aiter", "csrc", "examples", "docs"]}
+      ]
+    },
+    {
+      "id": "quark",
+      "display_name": "AMD Quark",
+      "description": "Model quantization, calibration, export, and low-precision deployment on AMD hardware.",
+      "categories": ["quantization", "inference", "training"],
+      "keywords": ["quark", "quantization", "quantize", "fp8", "mxfp4", "int8", "int4", "calibration", "onnx quantization", "pytorch quantization"],
+      "repositories": [
+        {"repo": "amd/Quark", "role": "canonical", "tier": "amd-official", "priority": 100, "path_hints": ["docs", "examples", "quark"]}
+      ]
+    },
+    {
+      "id": "magpie",
+      "display_name": "Magpie",
+      "description": "AMD GPU workload trace collection and kernel performance evaluation.",
+      "categories": ["profiling", "gpu-development"],
+      "keywords": ["magpie", "kernel evaluator", "benchmark kernel", "collect trace", "gpu trace", "performance measurement"],
+      "repositories": [
+        {"repo": "AMD-AGI/Magpie", "role": "canonical", "tier": "amd-official", "priority": 100, "path_hints": ["skills", "docs", "src"]}
+      ]
+    },
+    {
+      "id": "tracelens",
+      "display_name": "TraceLens",
+      "description": "Agent-assisted AMD GPU trace analysis, bottleneck identification, and optimization planning.",
+      "categories": ["profiling", "gpu-development"],
+      "keywords": ["tracelens", "analyze trace", "trace analysis", "bottleneck", "roofline", "kernel analysis", "performance trace"],
+      "repositories": [
+        {"repo": "AMD-AGI/TraceLens", "role": "canonical", "tier": "amd-official", "priority": 100, "path_hints": ["TraceLens/Agent", "docs"]}
+      ]
+    },
+    {
+      "id": "mori",
+      "display_name": "MORI",
+      "description": "Modular RDMA, expert-parallel communication, shared memory, collectives, and KV-cache transfer on AMD GPUs.",
+      "categories": ["networking", "kv-cache", "inference"],
+      "keywords": ["mori", "rdma", "gpu direct", "gpudirect", "ibgda", "expert parallel", "dispatch combine", "mori ep", "mori io", "mori shmem", "kv cache transfer", "disaggregated serving"],
+      "repositories": [
+        {"repo": "ROCm/mori", "role": "canonical", "tier": "amd-official", "priority": 100, "path_hints": ["docs", "examples", "python", "include"]}
+      ]
+    },
+    {
+      "id": "hyperloom",
+      "display_name": "ROCm Hyperloom",
+      "description": "Agentic end-to-end inference and GPU-kernel optimization on AMD GPUs.",
+      "categories": ["profiling", "inference", "kernel-compilers"],
+      "keywords": ["hyperloom", "auto optimize", "agentic optimization", "optimize workload", "optimize kernel", "performance bottleneck", "inference optimization", "benchmark optimization"],
+      "repositories": [
+        {"repo": "AMD-AGI/Hyperloom", "role": "canonical", "tier": "amd-official", "priority": 100, "path_hints": ["src/hyperloom/inference_optimizer/SKILL.md", "docs", "examples", "src"]}
+      ]
+    },
+    {
+      "id": "pytorch",
+      "display_name": "PyTorch",
+      "description": "PyTorch development, compilation, distributed training, and inference on ROCm.",
+      "categories": ["training", "inference", "kernel-compilers"],
+      "keywords": ["pytorch", "torch", "torch compile", "torch distributed", "inductor", "fsdp", "dtensor", "torchrun", "pytorch rocm"],
+      "repositories": [
+        {"repo": "ROCm/pytorch", "role": "amd-fork", "tier": "amd-official", "priority": 100, "path_hints": ["docs", "torch", ".ci"]},
+        {"repo": "pytorch/pytorch", "role": "upstream", "tier": "reviewed-upstream", "priority": 82, "path_hints": ["docs", "torch", ".ci"]}
+      ]
+    },
+    {
+      "id": "jax",
+      "display_name": "JAX",
+      "description": "JAX, XLA compilation, sharding, and distributed workloads on ROCm.",
+      "categories": ["training", "kernel-compilers"],
+      "keywords": ["jax", "xla", "pjit", "sharding", "jax rocm", "jax distributed", "jax gpu"],
+      "repositories": [
+        {"repo": "ROCm/jax", "role": "amd-fork", "tier": "amd-official", "priority": 100, "path_hints": ["docs", "jax", "tests"]},
+        {"repo": "jax-ml/jax", "role": "upstream", "tier": "reviewed-upstream", "priority": 82, "path_hints": ["docs", "jax", "tests"]}
+      ]
+    },
+    {
+      "id": "triton",
+      "display_name": "Triton",
+      "description": "Triton language, compiler, kernels, and performance work on AMD GPUs.",
+      "categories": ["kernel-compilers", "gpu-development"],
+      "keywords": ["triton", "triton language", "triton kernel", "triton compiler", "tl dot", "autotune", "kernel compiler", "triton rocm"],
+      "repositories": [
+        {"repo": "ROCm/triton", "role": "amd-fork", "tier": "amd-official", "priority": 100, "path_hints": ["docs", "python/tutorials", "python/test", "third_party/amd"]},
+        {"repo": "triton-lang/triton", "role": "upstream", "tier": "reviewed-upstream", "priority": 82, "path_hints": ["docs", "python/tutorials", "python/test"]}
+      ]
+    },
+    {
+      "id": "vllm",
+      "display_name": "vLLM",
+      "description": "High-throughput LLM inference and serving, including AMD ROCm integrations.",
+      "categories": ["inference"],
+      "keywords": ["vllm", "serve llm", "llm server", "openai server", "tensor parallel", "expert parallel", "paged attention", "prefix cache", "speculative decoding"],
+      "repositories": [
+        {"repo": "vllm-project/vllm", "role": "upstream", "tier": "reviewed-upstream", "priority": 90, "path_hints": ["docs", "examples", "vllm", "tests"]}
+      ]
+    },
+    {
+      "id": "vllm-recipes",
+      "display_name": "vLLM recipes",
+      "description": "Known-good model serving recipes, feature flags, and AMD hardware overrides for vLLM.",
+      "categories": ["inference"],
+      "keywords": ["vllm recipe", "model recipe", "serve kimi", "serve qwen", "serve deepseek", "tool calling", "reasoning parser", "hardware override"],
+      "repositories": [
+        {"repo": "vllm-project/recipes", "role": "recipes", "tier": "reviewed-upstream", "priority": 92, "path_hints": ["models", "docs"]}
+      ]
+    },
+    {
+      "id": "sglang",
+      "display_name": "SGLang",
+      "description": "High-performance LLM serving, distributed inference, and AMD ROCm integrations.",
+      "categories": ["inference"],
+      "keywords": ["sglang", "sgl kernel", "sglang server", "radix cache", "disaggregated serving", "expert parallel", "prefill decode", "pd disaggregation"],
+      "repositories": [
+        {"repo": "sgl-project/sglang", "role": "upstream", "tier": "reviewed-upstream", "priority": 90, "path_hints": ["docs", "examples", "python", "sgl-kernel", "test"]}
+      ]
+    },
+    {
+      "id": "torchtitan",
+      "display_name": "TorchTitan",
+      "description": "PyTorch-native large-model training and distributed training recipes.",
+      "categories": ["training"],
+      "keywords": ["torchtitan", "train llm", "large model training", "fsdp", "tensor parallel", "pipeline parallel", "distributed checkpoint", "float8 training"],
+      "repositories": [
+        {"repo": "pytorch/torchtitan", "role": "upstream", "tier": "reviewed-upstream", "priority": 90, "path_hints": ["docs", "torchtitan", "train_configs", ".ci"]}
+      ]
+    },
+    {
+      "id": "lmcache",
+      "display_name": "LMCache",
+      "description": "KV-cache reuse, offload, transfer, and disaggregated LLM serving.",
+      "categories": ["kv-cache", "inference"],
+      "keywords": ["lmcache", "kv cache", "kv cache reuse", "cache offload", "cache transfer", "disaggregated serving", "prefill decode", "remote cache"],
+      "repositories": [
+        {"repo": "LMCache/LMCache", "role": "upstream", "tier": "reviewed-upstream", "priority": 90, "path_hints": ["docs", "examples", "lmcache"]}
+      ]
+    },
+    {
+      "id": "mooncake",
+      "display_name": "Mooncake",
+      "description": "Distributed KV-cache transfer, storage, and prefill/decode disaggregation.",
+      "categories": ["kv-cache", "networking", "inference"],
+      "keywords": ["mooncake", "kv cache", "transfer engine", "rdma", "prefill decode", "disaggregated serving", "distributed cache", "gpu direct"],
+      "repositories": [
+        {"repo": "kvcache-ai/Mooncake", "role": "upstream", "tier": "reviewed-upstream", "priority": 90, "path_hints": ["docs", "examples", "mooncake-transfer-engine", "scripts"]}
+      ]
+    },
+    {
+      "id": "tilelang",
+      "display_name": "TileLang",
+      "description": "A tile-oriented language for authoring and tuning high-performance accelerator kernels.",
+      "categories": ["kernel-compilers", "gpu-development"],
+      "keywords": ["tilelang", "tile language", "kernel dsl", "gpu kernel", "kernel optimization", "tensor core", "matrix core", "autotune"],
+      "repositories": [
+        {"repo": "tile-ai/tilelang", "role": "upstream", "tier": "reviewed-upstream", "priority": 88, "path_hints": ["docs", "examples", "tilelang"]}
+      ]
+    },
+    {
+      "id": "nixl",
+      "display_name": "NIXL",
+      "description": "Cross-vendor inference data transfer and memory movement, including ROCm and UCX paths.",
+      "categories": ["networking", "kv-cache", "inference"],
+      "keywords": ["nixl", "data transfer", "memory transfer", "kv transfer", "ucx", "rdma", "gpu direct", "prefill decode", "disaggregated serving"],
+      "repositories": [
+        {"repo": "ai-dynamo/nixl", "role": "upstream", "tier": "reviewed-upstream", "priority": 88, "path_hints": ["docs", "examples", "src", "contrib"]}
+      ]
+    },
+    {
+      "id": "miles",
+      "display_name": "Miles",
+      "description": "Reinforcement-learning post-training for large language and vision-language models.",
+      "categories": ["post-training", "training"],
+      "keywords": ["miles", "reinforcement learning", "rl post training", "post training", "reward model", "rollout", "grpo", "ppo", "rlhf"],
+      "repositories": [
+        {"repo": "radixark/miles", "role": "upstream", "tier": "reviewed-upstream", "priority": 88, "path_hints": ["docs", "examples", "miles"]}
+      ]
+    },
+    {
+      "id": "verl",
+      "display_name": "VERL",
+      "description": "Flexible reinforcement-learning post-training with hybrid distributed execution.",
+      "categories": ["post-training", "training"],
+      "keywords": ["verl", "hybridflow", "reinforcement learning", "rl post training", "post training", "rollout", "grpo", "ppo", "rlhf"],
+      "repositories": [
+        {"repo": "verl-project/verl", "role": "upstream", "tier": "reviewed-upstream", "priority": 90, "path_hints": ["docs", "examples", "verl"]}
+      ]
+    },
+    {
+      "id": "vime",
+      "display_name": "VIME",
+      "description": "vLLM-based reinforcement-learning post-training and scalable rollout generation.",
+      "categories": ["post-training", "training", "inference"],
+      "keywords": ["vime", "vllm post training", "reinforcement learning", "rl post training", "post training", "rl scaling", "rollout backend", "megatron", "grpo", "ppo", "slime"],
+      "repositories": [
+        {"repo": "vllm-project/vime", "role": "upstream", "tier": "reviewed-upstream", "priority": 90, "path_hints": ["docs", "examples", "vime"]}
+      ]
+    }
+  ]
+}

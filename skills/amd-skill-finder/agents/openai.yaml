@@ -1,0 +1,4 @@
+interface:
+  display_name: "AMD Skill Finder"
+  short_description: "Find trusted AMD and ROCm skills and sources."
+  default_prompt: "Use $amd-skill-finder to find the best AMD skill or ROCm source for my task."
