@@ -45,7 +45,7 @@ Captures the model's graph metadata, op-type coverage, quantizable-op count, dep
 compatibility, and risks. Schema is shared with the Torch intake; ONNX-specific fields live under
 `model.onnx_specific` and `quantization_targets.onnx_specific`.
 
-Schema: [`model_analysis.schema.json`](../../shared/contracts/model_analysis.schema.json)
+Schema: [`model_analysis.schema.json`](https://github.com/amd/Quark/blob/1b229f781a1974cc742884e42d8eefc1eebb4f0a/.claude/skills-impl/shared/contracts/model_analysis.schema.json)
 
 ```json
 {

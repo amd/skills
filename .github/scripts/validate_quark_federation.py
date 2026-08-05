@@ -45,6 +45,8 @@ LEGACY_NAMES = {
     "quark-torch-eval-runner",
 }
 SKILL_NAME_RE = re.compile(r"`(quark-[a-z0-9-]+)`")
+MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*\]\((?P<target>[^)\s]+)")
+URI_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 POINTER_TEXT = "Read and follow the instructions in `.claude/skills-impl/"
 
 
@@ -125,6 +127,36 @@ def validate_skill(
     stale = {legacy for legacy in LEGACY_NAMES if legacy in all_markdown}
     if stale:
         fail(errors, f"{name}: stale upstream skill names remain: {sorted(stale)}")
+
+    root = skill_dir.resolve()
+    for markdown_path in skill_dir.rglob("*.md"):
+        markdown = markdown_path.read_text(encoding="utf-8")
+        for match in MARKDOWN_LINK_RE.finditer(markdown):
+            target = match.group("target")
+            if (
+                not target
+                or target.startswith(("#", "/"))
+                or "\\" in target
+                or URI_SCHEME_RE.match(target)
+            ):
+                continue
+            path_part = target.partition("#")[0]
+            resolved_target = (markdown_path.parent / path_part).resolve()
+            try:
+                resolved_target.relative_to(root)
+            except ValueError:
+                fail(
+                    errors,
+                    f"{name}: local Markdown link escapes the installed skill: "
+                    f"{markdown_path.relative_to(skill_dir)} -> {target}",
+                )
+                continue
+            if not resolved_target.exists():
+                fail(
+                    errors,
+                    f"{name}: local Markdown link is missing from the installed skill: "
+                    f"{markdown_path.relative_to(skill_dir)} -> {target}",
+                )
 
 
 def validate_behavioral_contracts(errors: list[str]) -> None:

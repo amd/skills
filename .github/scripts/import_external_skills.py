@@ -401,6 +401,22 @@ def rewrite_external_references_in_text(
 
         chosen = file_rel if file_rel in repo_files else root_rel
         if chosen.startswith(("..", "/")):
+            # Some upstream skills were written for a repository-specific
+            # loader and contain one too few `..` components. When the
+            # intended repository file is still unambiguous, recover it by
+            # matching the non-parent suffix. This keeps the standalone copy
+            # useful while pinning the correction to the imported commit.
+            suffix = posixpath.normpath(path_part)
+            while suffix.startswith("../"):
+                suffix = suffix[3:]
+            suffix_matches = sorted(
+                candidate
+                for candidate in repo_files
+                if suffix and (candidate == suffix or candidate.endswith(f"/{suffix}"))
+            )
+            if len(suffix_matches) == 1:
+                chosen = suffix_matches[0]
+        if chosen.startswith(("..", "/")):
             return match.group(0)
 
         url = f"https://github.com/{repo}/blob/{commit}/{chosen}{frag}"

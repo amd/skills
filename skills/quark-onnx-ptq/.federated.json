@@ -5,6 +5,6 @@
   "commit": "1b229f781a1974cc742884e42d8eefc1eebb4f0a",
   "path": ".claude/skills/quark-onnx-ptq",
   "license": "MIT",
-  "imported_at": "2026-08-05T21:07:39Z",
+  "imported_at": "2026-08-05T21:13:23Z",
   "implementation_path": ".claude/skills-impl/l2-workflows/onnx/quark-onnx-ptq-workflow"
 }

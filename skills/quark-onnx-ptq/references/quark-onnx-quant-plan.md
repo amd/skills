@@ -54,7 +54,7 @@ Records the chosen preset (or custom config), calibration method, algorithm list
 overrides, NPU flag, external-data setting, and evaluation intent. Shares the schema with the
 Torch plan; ONNX-specific fields live under `onnx_specific`.
 
-Schema: [`quant_plan.schema.json`](../../shared/contracts/quant_plan.schema.json)
+Schema: [`quant_plan.schema.json`](https://github.com/amd/Quark/blob/1b229f781a1974cc742884e42d8eefc1eebb4f0a/.claude/skills-impl/shared/contracts/quant_plan.schema.json)
 
 ```json
 {
