@@ -148,6 +148,31 @@ def test_clean_replay_asks_for_the_original_failure_signature():
         run.should_not("Name any kernel as implicated in a failure")
 
 
+def test_aten_chevron_fault_is_reported_but_not_asserted_as_a_customer_bug():
+    """The ATen fault is a real finding that must not be stated as a verdict.
+
+    ATen kernels launched through `<<<>>>` pass device pointers inside by-value
+    structs. Replay translates those, so such a fault can be genuine, but the
+    translation is heuristic and older archives lack the recorded offsets, so it
+    can equally be an artefact of the recording. The agent must report the fault
+    it observed and ask for the original failure signature, rather than resolving
+    the ambiguity in either direction on its own.
+    """
+    with claude("opus", skill=SKILL) as agent:
+        _stage(agent, "aten_chevron_limitation")
+
+        run = agent.prompt("Analyze this HRR replay log and tell me what happened: replay.log")
+
+        run.logs_contains(SKILL)
+
+        run.should("Report the memory fault and name the faulting ATen kernel")
+        run.should("Flag that a <<<>>>-launched kernel faulting at replay may come from the recording rather than the workload")
+        run.should("Ask for the original failure signature before concluding anything about the workload")
+
+        run.should_not("State as settled fact that the customer's workload has a memory bug")
+        run.should_not("State as settled fact that the fault is only an artefact of the recording")
+
+
 def test_skill_does_not_activate_on_an_unrelated_prompt():
     """False-activation screen: an unrelated request must not pull in the skill."""
     with claude("opus", skill=SKILL) as agent:

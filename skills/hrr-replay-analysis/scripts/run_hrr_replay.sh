@@ -10,6 +10,7 @@ ARCHIVE=""
 LOG=""
 DO_ANALYZE=0
 DO_INFO=0
+NO_SYNC=0
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -18,6 +19,7 @@ while [[ $# -gt 0 ]]; do
     --log) LOG="$2"; shift 2 ;;
     --analyze) DO_ANALYZE=1; shift ;;
     --info) DO_INFO=1; shift ;;
+    --no-sync) NO_SYNC=1; shift ;;
     --) shift; EXTRA_ARGS+=("$@"); break ;;
     *) EXTRA_ARGS+=("$1"); shift ;;
   esac
@@ -127,6 +129,24 @@ fi
 
 GPU="$(pick_gpu)"
 
+# Default replay serializes the GPU once at the end, so a fault is reported but
+# not attributed to a launch -- the finding then has no failing event and no
+# kernel. Synchronizing after every launch is what makes the last launch line
+# before the fault the culprit. Opt out with --no-sync when throughput matters
+# more than attribution (a long soak). --timing opts out on its own: serializing
+# every launch is exactly what a timing run must not do.
+PLAY_ARGS=(${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
+if [[ "$NO_SYNC" == "0" ]]; then
+  skip_sync=0
+  for a in ${PLAY_ARGS[@]+"${PLAY_ARGS[@]}"}; do
+    case "$a" in --sync-after-launch|--sync-after-event|--timing) skip_sync=1 ;; esac
+  done
+  if [[ "$skip_sync" == "0" ]]; then
+    PLAY_ARGS+=("--sync-after-launch")
+    echo "[run_hrr_replay] adding --sync-after-launch (disable with --no-sync)" >&2
+  fi
+fi
+
 if [[ -z "$LOG" ]]; then
   LOG="hrr-replay-$(basename "$ARCHIVE")-$(date -u +%Y%m%dT%H%M%SZ).log"
 fi
@@ -137,7 +157,8 @@ set +e
 # hrr-playback is a HIP program, so mask with HIP_VISIBLE_DEVICES. Setting
 # ROCR_VISIBLE_DEVICES as well re-indexes the devices underneath the HIP mask,
 # which can land the replay on a different card than the one selected here.
-HIP_VISIBLE_DEVICES="$GPU" "$HRR_PLAY" "$ARCHIVE" "${EXTRA_ARGS[@]}" 2>&1 | tee "$LOG"
+HIP_VISIBLE_DEVICES="$GPU" "$HRR_PLAY" "$ARCHIVE" \
+  ${PLAY_ARGS[@]+"${PLAY_ARGS[@]}"} 2>&1 | tee "$LOG"
 RC=${PIPESTATUS[0]}
 set -e
 

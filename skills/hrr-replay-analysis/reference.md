@@ -132,6 +132,14 @@ Memory access fault by GPU node-4 (Agent handle: 0x...) on address 0x7f2c0a80000
 :0:rocdevice.cpp:NNNN: Memory Fault Error [..., faulting addr: 0x7f2c0a800000, kernel: Cijk_...]
 ```
 
+The bracket's leading fields vary by ROCm build. Both of these appear in the
+wild and both are parsed:
+
+```
+Memory Fault Error [GPU index: 0, faulting addr: 0x..., kernel: hrr_fault_kernel]
+Memory Fault Error [host: h1, GPU index: 2, faulting addr: 0x..., kernel: Cijk_...]
+```
+
 Extract: **fault_address**, **kernel_name**, **gpu_node**, **fault_reason**.
 
 A GPU fault usually also trips an HRR abort line (below). The memory fault is
@@ -145,6 +153,17 @@ Dispatch Header = 0x..., grid=[...], workgroup=[...], kernarg_address=0x..., ker
 
 Extract: **kernarg_address**, **grid**, **workgroup** — ties the fault to the
 launch packet.
+
+### Per-event progress (`--sync-after-launch`)
+
+```
+[HRR] Event 1304: hipModuleLaunchKernel   -> Kernel '..._FillFunctor...' OK
+[HRR] Event 1324: hipModuleLaunchKernel
+```
+
+The last of these before a fault is the failing dispatch. A GPU fault aborts the
+process before HRR writes its own `Fatal` line, so on a hard memory fault this
+is often the only record of **failing_call_index** and the implicated kernel.
 
 ### Fatal abort
 
@@ -172,7 +191,7 @@ than host numerics.
 |------|-----|
 | `--info` | Archive summary; no GPU required |
 | `--info --events` | Full event log (very large) |
-| `--sync-after-launch` | Synchronize after every launch → attribute a fault to a kernel |
+| `--sync-after-launch` | Synchronize after every launch → attribute a fault to a kernel. `run_hrr_replay.sh` adds this by default; `--no-sync` opts out, and `--timing` opts out on its own |
 | `--sync-after-event` | Synchronize after every event → attribute a fault to any event (slowest) |
 | `--single-thread` | Replay on one thread; deterministic ordering |
 | `--repair` | Rewrite a torn archive tail in place |
