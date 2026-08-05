@@ -1,0 +1,14 @@
+[run_hrr_replay] playback=/opt/rocm/bin/hrr-playback
+[run_hrr_replay] adding --sync-after-launch (disable with --no-sync)
+[run_hrr_replay] GPU=3 archive=/data/llama_run.hrr/pid-680
+[HRR] Archive : 177203 events, 8214 kernels, 4733 blobs, 41 code objects
+[HRR] Complete:     yes (clean shutdown)
+[HRR] [replay] Device state OK — beginning replay
+[HRR] Event 41188: hipMallocAsync
+[HRR] Event 41202: hipModuleLaunchKernel   -> Kernel '_ZN2at6native29vectorized_elementwise_kernelILi4EZZZNS0_18add_kernel_cudaERNS_18TensorIteratorBaseEENKUlvE_clEvENKUlvE2_clEvEUlffE_NS_6detail5ArrayIPcLi3EEEEEviT0_T1_' OK
+[HRR] Event 41266: hipMemcpyAsync
+[HRR] Event 41310: hipLaunchKernel
+:0:rocdevice.cpp :3608: Memory Fault Error [GPU index: 0, faulting addr: 0x7f8c11a00000, kernel: _ZN2at6native29vectorized_elementwise_kernelILi4EZZZNS0_18mul_kernel_cudaERNS_18TensorIteratorBaseEENKUlvE_clEvENKUlvE2_clEvEUlffE_NS_6detail5ArrayIPcLi3EEEEEviT0_T1_]
+Memory access fault by GPU node-4 (Agent handle: 0x55d1a2f00c40) on address 0x7f8c11a00000. Reason: Unknown.
+Aborted (core dumped)
+[run_hrr_replay] log=hrr-replay-pid-680-20260805T120400Z.log exit=134

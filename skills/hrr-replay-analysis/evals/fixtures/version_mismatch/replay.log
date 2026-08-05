@@ -1,0 +1,4 @@
+[HRR] hrr-playback 0.3.1 (format reader v3)
+[HRR] Opening archive pid-680
+[HRR] Version mismatch: file=4 reader=3
+[HRR] archive cannot be read by this build; nothing was replayed

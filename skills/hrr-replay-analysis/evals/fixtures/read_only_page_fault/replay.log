@@ -1,0 +1,10 @@
+[HRR] hrr-playback 0.4.0 (format reader v4)
+[HRR] Archive : 9109510 events, 11239 kernels, 11239 blobs, 187 code objects
+[HRR] Replaying pid-680 on GPU node-6
+[HRR progress] seq=4210000 elapsed=31.2s kernels=5120 d2h_pass=180 d2h_fail=0 d2h_attempted=180 last="Cijk_Ailk_Bljk_HHS_BH_MT64x64x32_MI16x16x16x1_WGM4"
+[HRR progress] seq=9109402 elapsed=68.9s kernels=11238 d2h_pass=396 d2h_fail=0 d2h_attempted=396 last="Cijk_Ailk_Bljk_HHS_BH_MT128x128x16_MI16x16x16x1_SK3_WGM8"
+[HRR] Dispatch: kernarg_address=0x7f2a3d201000 grid=[2048, 1, 1], workgroup=[256, 1, 1]
+Memory access fault by GPU node-6 (Agent handle: 0x55f1c02a4b80) on address 0x7f2a4c000000. Reason: Write to a read-only page.
+Memory Fault Error [host: gpu-node, GPU index: 2, faulting addr: 0x7f2a4c000000, kernel: Cijk_Ailk_Bljk_HHS_BH_MT128x128x16_MI16x16x16x1_SK3_WGM8]
+[HRR] Fatal: GPU error after T0 Event 9109510 (hipModuleLaunchKernel): 4 (hipErrorLaunchFailure)
+[HRR] aborting replay
