@@ -19,29 +19,14 @@ pick another dedicated path. `cd` into the chosen directory before installing.
 Skip when `hyperloom/` already exists in the directory (wheel layout) or
 `src/hyperloom/` exists (source checkout).
 
-Find the latest `hyperloom_inference_optimizer-*-py3-none-any.whl` from
-[AMD-AGI/Hyperloom releases](https://github.com/AMD-AGI/Hyperloom/releases).
-Do not pin a version in this skill — resolve the newest published wheel at
-install time. The repo is public, so the default path needs only `curl` and
-`python3` (no `gh` / `jq`):
+Find the latest release of
+[AMD-AGI/Hyperloom](https://github.com/AMD-AGI/Hyperloom/releases), tell the user
+that version, and ask whether to install it or a version they name. The wheel
+asset is `hyperloom_inference_optimizer-<version>-py3-none-any.whl`.
 
 ```bash
 cd "$INSTALL_DIR"   # the directory confirmed in Step 0
-wheel_url="$(curl -fsSL "https://api.github.com/repos/AMD-AGI/Hyperloom/releases?per_page=20" \
-  | python3 -c 'import sys, json
-for rel in json.load(sys.stdin):
-    for asset in rel.get("assets", []):
-        if asset["name"].startswith("hyperloom_inference_optimizer-"):
-            print(asset["browser_download_url"]); sys.exit(0)
-sys.exit("no matching wheel asset found")')"
-python3 -m pip install "$wheel_url" --target .
-```
-
-Optional shortcut when `gh` and `jq` are installed:
-
-```bash
-wheel_url="$(gh api repos/AMD-AGI/Hyperloom/releases?per_page=20 \
-  | jq -r '[.[] | .assets[]? | select(.name | startswith("hyperloom_inference_optimizer-")) | .browser_download_url][0]')"
+python3 -m pip install "<the chosen wheel URL>" --target .
 ```
 
 After install, confirm:
@@ -60,35 +45,59 @@ Restart the agent if the new skills are not visible.
   `.cursor/skills/hyperloom-setup/SKILL.md`
 - Claude Code: `/hyperloom-setup`
 
-That skill writes `.env`, collects LLM settings, sets `USER_DATA_PATH`, records
-`HYPERLOOM_RUN_MODE` (`baremetal` or `docker`), sets `HYPERLOOM_SKILL_PATH`,
-and on bare metal runs the host setup backend (`install_baremetal.sh`).
+That skill owns the credential questions, the run-mode question, and the bare-metal
+host setup backend (`install_baremetal.sh`). It is the source of truth for which
+LLM providers are accepted and which variable names they use, so do not
+reimplement it here or guess variable names from memory.
 
-**Fallback (inline):** when `/hyperloom-setup` is unavailable, write `.env` with
-placeholders and ask the user to edit secrets locally (never paste API keys into
-chat):
+If it is not available, restart the agent and re-check that
+`.cursor/skills/hyperloom-setup/SKILL.md` (or the `.claude/` / `.agents/`
+equivalent) exists. If it is still missing, the wheel install is incomplete —
+stop and report that, rather than hand-writing `.env`.
 
-`<INSTALL_DIR>` below is the directory confirmed in Step 0 (the wheel and `.env`
-location). `USER_DATA_PATH` may live under `<INSTALL_DIR>` or point elsewhere
-(e.g. shared storage) for run state.
+When it returns, verify `.env` before continuing. It must define
+`HYPERLOOM_RUN_MODE` (`baremetal` or `docker`), `USER_DATA_PATH`,
+`HYPERLOOM_SKILL_PATH`, and one complete LLM credential set. Check the values are
+real, not placeholders. `HYPERLOOM_SKILL_PATH` must point at the packaged
+optimizer skill that exists on disk — `hyperloom/inference_optimizer/SKILL.md`
+for a wheel install, `src/hyperloom/inference_optimizer/SKILL.md` for a source
+checkout.
 
-```bash
-cat > .env <<'EOF'
-ANTHROPIC_API_KEY=<PLEASE_FILL_IN>
-ANTHROPIC_BASE_URL=https://api.anthropic.com
-CLAUDE_MODEL=claude-opus-4-8
-USER_DATA_PATH=<INSTALL_DIR>/session
-HYPERLOOM_RUN_MODE=docker
-HYPERLOOM_SKILL_PATH=<INSTALL_DIR>/hyperloom/inference_optimizer/SKILL.md
-EOF
-```
+Do this check by reading `.env` line by line (`grep`-style), never by sourcing it.
+Values are written unquoted and some legitimately contain spaces — for example
+`ANTHROPIC_CUSTOM_HEADERS=Ocp-Apim-Subscription-Key: <key>` — so `. ./.env`
+executes the tail of such a line as a command. Never echo a key value into chat.
 
-Set `HYPERLOOM_SKILL_PATH` to the packaged optimizer skill:
+Do not write your own live probe of the LLM endpoint. Hyperloom's `optimize`
+preflight already probes `<base_url>/models` with the operator's auth and custom
+headers, and refuses to start on an auth failure, so a wrong key fails there in
+the first seconds rather than mid-run. Two of its outcomes are only warnings, and
+both must be surfaced to the user instead of scrolled past:
 
-- wheel: `<INSTALL_DIR>/hyperloom/inference_optimizer/SKILL.md`
-- source: `<INSTALL_DIR>/src/hyperloom/inference_optimizer/SKILL.md`
+- `gateway has no /models route (HTTP 404/405) ... Proceeding` — the key is
+  unverified, not verified. Expected when `ANTHROPIC_BASE_URL` is native
+  `https://api.anthropic.com`, which has no `/models` at that path.
+- `gateway catalog unreachable ... Proceeding with custom orchestration model
+  support enabled` — this is the auth failure downgraded to a warning because a
+  custom model id was allowed. A bad key looks like this instead of an error.
 
-Stop if any required secret still equals `<PLEASE_FILL_IN>`.
+## Docker run mode — the Phase 1 contract
+
+When `HYPERLOOM_RUN_MODE=docker`, `hyperloom-custom-advanced` owns the container
+steps (image, `docker run` flags, setup inside the container). Follow it rather
+than inventing flags. Regardless of how it gets there, all of the following must
+hold before Phase 3 launches anything, and every later command in this skill runs
+*inside* the container:
+
+- the container is running and you have a shell in it
+- `/dev/kfd` and `/dev/dri` are mapped, and `amd-smi` or `rocm-smi` works inside
+- the install directory from Step 0 and `USER_DATA_PATH` are mounted at the same
+  absolute paths inside the container, so `.env` and run state resolve identically
+- `MODEL_PATH` resolves inside the container
+- the setup backend has been run inside the container
+
+If any of these is unmet, fix it before Phase 3. Launching with a half-prepared
+container produces failures that look like optimizer bugs.
 
 ## Step 3 — Return to SKILL.md
 

@@ -25,9 +25,10 @@ See LICENSE for license information.
 
 You are the catalog entry point for Hyperloom optimization on AMD Instinct GPUs.
 Bootstrap the workspace, prepare the runtime environment, collect workload
-parameters, then install, launch, and monitor the optimizer. The packaged `inference_optimizer` skill
-(`HYPERLOOM_SKILL_PATH`) is the execution baseline; this catalog skill inlines
-the operator workflow so you can run end-to-end without bouncing across files.
+parameters, then install, launch, and monitor the optimizer. This skill owns the
+orchestration and the launcher gates; environment prep and workload intake are
+delegated to the skills the Hyperloom wheel installs, and
+`@${HYPERLOOM_SKILL_PATH}` (`inference_optimizer`) is the execution baseline.
 
 Do not manually optimize inside chat unless debugging.
 
@@ -38,6 +39,9 @@ Do not manually optimize inside chat unless debugging.
 - Python 3.10+ and network access to install the Hyperloom wheel
 - Anthropic (or compatible) LLM credentials for agent backends
 - A dedicated agent workspace directory
+
+Every command in this skill runs on that GPU host. Confirm the shell you are in
+is on it before Phase 0, so a bootstrap does not land on a machine with no GPU.
 
 The Hyperloom **runtime** ships via `pip install` of the published wheel.
 
@@ -63,12 +67,15 @@ Match `hyperloom-custom-advanced` section order — do **not** ask workload
 questions while writing `.env` or during `/hyperloom-setup`.
 
 - **Phase 0 Bootstrap** — `pip install`, `/hyperloom-setup` → `.env` (credentials + run mode only)
-- **Phase 1 Environment** — custom-advanced §Setup Configuration (baremetal: confirm host; docker: start container + setup inside)
+- **Phase 1 Environment** — custom-advanced §Setup Configuration (baremetal: confirm host; docker: start container + setup inside, contract in [setup.md](setup.md))
 - **Phase 2 Workload intake** — custom-advanced §Advanced Configuration → Model Resolution → show launch plan → user confirms
 - **Phase 3 Execute** — install.sh → preflight → launch → monitor → report
 
 Load `hyperloom-custom-advanced` at Phase 1 and follow its sections in order
 (discovery: `.cursor/` / `.claude/` / `.agents/skills/hyperloom-custom-advanced/SKILL.md`).
+If it is not on disk, stop and tell the user to restart the agent so the newly
+installed skills are picked up — do not improvise the environment or workload
+sections from memory, since the wheel is the source of truth for both.
 For deeper optimizer behavior read `@${HYPERLOOM_SKILL_PATH}` (`inference_optimizer`);
 Iron Rules + CLI reference: [reference.md](reference.md).
 
@@ -111,22 +118,14 @@ into the chosen directory before installing.
 Skip when `hyperloom/` (wheel) or `src/hyperloom/` (source) already exists in the
 confirmed directory.
 
-Find the latest `hyperloom_inference_optimizer-*-py3-none-any.whl` from
-[AMD-AGI/Hyperloom releases](https://github.com/AMD-AGI/Hyperloom/releases).
-The repo is public, so resolve the URL with `curl` + `python3` (no extra
-tooling). When `gh` and `jq` are installed the one-liner in [setup.md](setup.md)
-also works.
+Find the latest release of
+[AMD-AGI/Hyperloom](https://github.com/AMD-AGI/Hyperloom/releases), tell the user
+that version, and ask whether to install it or a version they name. The wheel
+asset is `hyperloom_inference_optimizer-<version>-py3-none-any.whl`.
 
 ```bash
 cd "$INSTALL_DIR"   # the directory confirmed above
-wheel_url="$(curl -fsSL "https://api.github.com/repos/AMD-AGI/Hyperloom/releases?per_page=20" \
-  | python3 -c 'import sys, json
-for rel in json.load(sys.stdin):
-    for asset in rel.get("assets", []):
-        if asset["name"].startswith("hyperloom_inference_optimizer-"):
-            print(asset["browser_download_url"]); sys.exit(0)
-sys.exit("no matching wheel asset found")')"
-python3 -m pip install "$wheel_url" --target .
+python3 -m pip install "<the chosen wheel URL>" --target .
 ```
 
 Confirm `hyperloom/inference_optimizer/assets/install.sh` exists. Restart the
@@ -266,80 +265,24 @@ In Docker mode, run this inside the container.
 not persist exports between shell calls.
 
 ```bash
+export SKILL_DIR="${SKILL_DIR:?absolute path of the directory holding this SKILL.md}"
 . "${USER_DATA_PATH}/optimizer_runs/workload.env"   # confirmed Phase 2 values
-: "${MODEL_PATH:?MODEL_PATH empty — re-run the Persist the plan step}"
-test -d "$MODEL_PATH" || { echo "ERROR: MODEL_PATH not a directory: $MODEL_PATH" >&2; exit 1; }
 export PYTHON="${PYTHON:-$(command -v python3)}"
-export IR1_VRAM_LIMIT_MIB="${IR1_VRAM_LIMIT_MIB:-500}"
-
-"$PYTHON" - <<'PY'
-import os, shutil, subprocess, sys
-
-fail = False
-
-try:
-    import torch
-    cuda_ok = torch.cuda.is_available()
-    print("torch_cuda_available=", cuda_ok)
-    print("torch_cuda_device_count=", torch.cuda.device_count())
-    if not cuda_ok:
-        print("gpu_unavailable=true")
-        fail = True
-except Exception as exc:
-    print("torch_check_error=", type(exc).__name__, str(exc)[:300])
-    fail = True
-
-patterns = ("hyperloom.inference_optimizer.cli", "Magpie",
-            "sglang.launch_server", "vllm.entrypoints")
-for pid in filter(str.isdigit, os.listdir("/proc")):
-    try:
-        cmd = open(f"/proc/{pid}/cmdline", "rb").read()
-    except Exception:
-        continue
-    text = cmd.replace(b"\0", b" ").decode("utf-8", "ignore")
-    if text and any(p in text for p in patterns):
-        print(f"existing_process {pid}: {text[:300]}")
-        fail = True
-
-# IR-1 VRAM gate: a GPU can hold VRAM without a matching process name above.
-limit = int(os.environ.get("IR1_VRAM_LIMIT_MIB", "500"))
-used = []
-if shutil.which("amd-smi"):
-    out = subprocess.run(["amd-smi", "metric", "-m", "--json"],
-                         capture_output=True, text=True)
-    if out.returncode == 0:
-        import json
-        for i, g in enumerate(json.loads(out.stdout or "[]")):
-            mib = (g.get("mem_usage", {}) or {}).get("used_vram", {}).get("value")
-            if mib is not None:
-                used.append((i, int(mib)))
-elif shutil.which("rocm-smi"):
-    out = subprocess.run(["rocm-smi", "--showmeminfo", "vram", "--json"],
-                         capture_output=True, text=True)
-    if out.returncode == 0:
-        import json, re
-        for card, info in json.loads(out.stdout or "{}").items():
-            raw = next((v for k, v in info.items() if "Used" in k), None)
-            if raw is not None:
-                used.append((card, int(int(re.sub(r"\D", "", str(raw)) or 0) / 1024 / 1024)))
-else:
-    print("vram_check_skipped=no_amd_smi_or_rocm_smi")
-
-for dev, mib in used:
-    marker = "OVER_LIMIT" if mib > limit else "ok"
-    print(f"gpu {dev}: used_vram_mib={mib} ({marker})")
-    if mib > limit:
-        fail = True
-
-sys.exit(1 if fail else 0)
-PY
+"$PYTHON" "${SKILL_DIR}/scripts/preflight.py"
 ```
 
-The script exits non-zero when stale serving processes are found or any GPU
-holds more than `IR1_VRAM_LIMIT_MIB` (default 500) MiB. Also exit non-zero if
-the model path is missing or GPUs are unavailable. If neither `amd-smi` nor
-`rocm-smi` is present the VRAM gate is skipped — confirm GPUs are idle manually.
-Never print API keys or tokens.
+The gate exits non-zero — do not launch — when `MODEL_PATH` is missing or has no
+`config.json`, torch sees no GPU, a foreign serving process still holds a card,
+or any GPU holds more than `IR1_VRAM_LIMIT_MIB` (default 500) MiB.
+
+It also blocks when VRAM cannot be read at all: no `amd-smi`/`rocm-smi` on
+`PATH`, a probe that exits non-zero, or output it cannot parse. An unreadable
+probe cannot rule out a busy GPU, and a foreign process holding VRAM under a
+different name would slip through. Confirm the GPUs are idle by hand before
+re-running with `IR1_ALLOW_UNVERIFIED_VRAM=1`.
+
+Never print API keys or tokens. `scripts/tests/test_preflight.py` covers the
+probe shapes this gate must reject.
 
 ## Phase 3 — Launch
 
