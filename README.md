@@ -72,6 +72,7 @@ Run and optimize on Ryzen AI.
 | --- | --- | --- |
 | [`local-ai-use`](skills/local-ai-use/SKILL.md) | Route image generation, text-to-speech, and speech-to-text through a local AI server to reduce token cost. | in-repo |
 | [`local-ai-app-integration`](skills/local-ai-app-integration/SKILL.md) | Integrate local AI into cloud LLM apps for offline support, better privacy, and lower API costs. | in-repo |
+| [`lemonade-router-builder`](skills/lemonade-router-builder/SKILL.md) | Set up a Lemonade model router that handles requests based on content, sensitivity, or required capabilities. | in-repo |
 
 ### Cross-Stack
 
@@ -81,7 +82,6 @@ Cross-stack skills, from client to cloud.
 | --- | --- | --- |
 | `rocm-doctor` | Diagnose ROCm / PyTorch / llama.cpp failures on AMD GPUs against a fixed list of known misconfigurations. | _planned_ |
 | `hyperloom-workload-optimizer` | Autonomously optimizes LLM inference on AMD GPUs. | _planned_ |
-| `lemonade-router-builder` | Setup a Lemonade model router that handles requests based on content, sensitivity, or required capabilities. | _planned_ |
 | `hrr-replay-analysis` | Record, replay, and analyze GPU workload behavior on ROCm across AMD Instinct, Radeon, and Ryzen hardware using HIP Record and Replay archives. | _planned_ |
 
 ### Server-Native
