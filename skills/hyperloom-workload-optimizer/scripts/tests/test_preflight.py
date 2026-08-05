@@ -71,6 +71,34 @@ CASES: list[tuple[str, str | None, bool, dict[str, str]]] = [
         {},
     ),
     (
+        "gpu list wrapped in a top-level container key, GPU busy",
+        _emit(
+            '{"gpu_data": [{"gpu": 0, "mem_usage": {"used_vram":'
+            ' {"value": %d, "unit": "MB"}}}]}' % BUSY_MIB
+        ),
+        False,
+        {},
+    ),
+    (
+        "gpu list wrapped in a top-level container key, GPU idle",
+        _emit(
+            '{"gpu_data": [{"gpu": 0, "mem_usage": {"used_vram":'
+            ' {"value": 283, "unit": "MB"}}}]}'
+        ),
+        True,
+        {},
+    ),
+    (
+        "wrapped gpu list alongside a sibling metadata key, GPU idle",
+        _emit(
+            '{"gpu_data": [{"gpu": 0, "mem_usage": {"used_vram":'
+            ' {"value": 283, "unit": "MB"}}}],'
+            ' "metadata": {"version": "26.2.2"}}'
+        ),
+        True,
+        {},
+    ),
+    (
         "scalar used_vram instead of value/unit map, GPU busy",
         _emit('[{"gpu": 0, "mem_usage": {"used_vram": %d}}]' % BUSY_MIB),
         False,

@@ -42,6 +42,10 @@ FOREIGN_SERVING_PATTERNS = (
     "vllm.entrypoints",
 )
 
+# amd-smi 26.x (ROCm 7.x) wraps the GPU list in a top-level container key
+# instead of emitting a bare list.
+GPU_LIST_KEYS = ("gpu_data", "gpus", "data")
+
 # amd-smi nests the reading differently across releases, so try each container
 # and key spelling rather than assuming one shape.
 MEM_CONTAINER_KEYS = ("mem_usage", "mem", "memory", "vram")
@@ -192,6 +196,12 @@ def _iter_gpu_entries(parsed: object, tool: str) -> list[tuple[object, object]]:
     if isinstance(parsed, list):
         return list(enumerate(parsed))
     if isinstance(parsed, dict):
+        # A known container key wins over the per-key scan below, so a sibling
+        # metadata object is not mistaken for a GPU entry.
+        for key in GPU_LIST_KEYS:
+            nested = parsed.get(key)
+            if isinstance(nested, list):
+                return list(enumerate(nested))
         entries = [(key, value) for key, value in parsed.items() if isinstance(value, dict)]
         if entries:
             return entries
