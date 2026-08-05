@@ -193,7 +193,9 @@ Infer `PRECISION` from the model name when obvious (e.g. an `FP8` model implies
 
 The Coordinator has no in-loop `setup` / `classify` — a value not asked here is
 silently lost to its default. Before running any Phase 3 command, present the
-full launch plan (including defaulted fields) and get explicit user confirmation:
+full launch plan (including defaulted fields) and get explicit user confirmation.
+
+Print the plan in the reply body as this aligned block:
 
 ```text
 Launch plan — please confirm:
@@ -206,6 +208,12 @@ Launch plan — please confirm:
   phases        --no-kernel (smoke)
   RUN_MODE      baremetal
 ```
+
+Never put the plan inside the confirmation prompt itself. A prompt renders as one
+wrapped paragraph, which collapses the alignment above into an unreadable blob the
+user has to search for `MAX_HOURS` in. Keep the prompt to a single short question
+such as `Approve this launch plan?`, and if you offer a "change something" option,
+name the field to change rather than making the user retype it as free text.
 
 Do **not** run `install.sh` or launch `optimize` until the user approves this plan.
 
