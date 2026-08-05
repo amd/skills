@@ -1,0 +1,18 @@
+[HRR] hrr-playback 0.4.0 (format reader v4)
+[HRR] Archive : 412773 events, 1904 kernels, 1904 blobs, 42 code objects
+[HRR] Replaying pid-1842 on GPU node-4
+[HRR progress] seq=412773 elapsed=12.4s kernels=1904 d2h_pass=401 d2h_fail=0 d2h_attempted=401 last="_ZN2at6native18elementwise_kernelILi128ELi2EEEvi"
+D2H checks   : 401 pass, 0 fail, 0 skipped
+[HRR] PASS
+
+HRR Archive: pid-1842
+========================================
+Complete:     yes (clean shutdown)
+Events:       412773
+Kernels:      1904
+
+Kernel Summary (first 20):
+  ID   Kernel                                             Grid            Block           SharedMem
+  --   ------                                             ----            -----           ---------
+  0    Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_MT128x128x12       [2048,1,1]      [256,1,1]       0
+  1    _ZN2at6native18elementwise_kernelILi128ELi2EEEvi    [512,1,1]       [128,1,1]       0
