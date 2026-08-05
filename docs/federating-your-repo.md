@@ -18,6 +18,11 @@ this repo.
 - Skills live in a known directory in your repo (e.g. `skills/`).
 - Pick a branch to track (e.g. `main` or a release branch).
 
+Product repositories may also keep lightweight public wrapper folders that
+point to implementations elsewhere in the same repository. See
+[Wrapper-based product skills](#wrapper-based-product-skills) for the stricter
+format and standalone packaging behavior.
+
 ## Add your source
 
 Edit [`.github/scripts/sources.yml`](../.github/scripts/sources.yml) and append an entry:
@@ -35,6 +40,52 @@ sources:
 ```
 
 Use `as:` to namespace skills as `<project>-<skill>` so catalog names stay unique.
+
+## Wrapper-based product skills
+
+Set `resolve_wrappers: true` when the public skill folders contain only routing
+frontmatter and an exact implementation pointer:
+
+```markdown
+---
+name: my-product-build
+description: Build a project with My Product. Use when ...
+---
+
+Read and follow the instructions in `.agents/skills-impl/my-product-build/SKILL.md`.
+```
+
+Configure `path` at a common ancestor of both the public wrappers and their
+implementations, then address each wrapper relative to that path:
+
+```yaml
+  - name: amd-myproduct
+    repo: AMD-Org/MyProduct
+    ref: v1.0
+    path: .agents
+    license: MIT
+    resolve_wrappers: true
+    skills:
+      - name: skills/my-product-build
+        as: myproduct-build
+```
+
+The importer uses the wrapper's `name` and `description` for routing, vendors
+the implementation and its adjacent resources, rewrites escaping Markdown
+links to the pinned upstream commit, and bundles referenced non-public helper
+skills under `references/`. The generated catalog folder is therefore usable
+when installed by itself; the wrapper is never shipped as a broken pointer.
+
+Wrapper resolution is deliberately strict: the body must contain exactly the
+single `Read and follow .../SKILL.md` sentence, the target must be a tracked
+file inside the same repository, and implementation skill names must be
+unique beneath the configured source path.
+
+If a released implementation contains stale internal skill names, the source
+or an individual skill entry may declare a narrow `aliases:` mapping from each
+upstream term to its catalog wording. Skill-entry aliases override source-wide
+values. Keep these corrections exceptional and remove them when the next
+product release fixes the source.
 
 ## Import
 

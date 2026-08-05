@@ -14,16 +14,25 @@
 #       ref:     branch, tag, or full commit SHA (pinned for reproducibility)
 #       path:    directory inside the repo that contains skill folders
 #       license: SPDX license identifier (carried into the marker file)
+#       aliases: optional source-wide terminology corrections applied to every
+#                standalone copy; skill-entry aliases override these values
+#       resolve_wrappers: optional boolean. When true, each public skill folder
+#                must be a pointer to a repository-owned implementation
+#                SKILL.md. The importer produces a standalone catalog copy and
+#                bundles non-public helper procedures as references.
 #       skills:  list of skill folder names to import from `path`
 #                Either a bare string (folder name) or a mapping:
 #                  { name: <folder>, as: <local-name>,
-#                    marketplace_description: <override> }
+#                    marketplace_description: <override>,
+#                    aliases: { <upstream-term>: <catalog-term> } }
 #                `as` vendors the skill under a different local catalog name
 #                (folder + marketplace entry + SKILL.md `name`). Federated
 #                skills use a `<projectrepo>-<skill>` convention, e.g. the
 #                TraceLens `analysis-orchestrator` skill is imported `as:
 #                tracelens-analysis-orchestrator`. The upstream `name` is
 #                still used to locate the folder in the source repo.
+#                `aliases` applies narrow terminology corrections to the
+#                standalone copy without changing the product-owned source.
 #
 # To add or remove an imported skill, edit `skills:` here and then run the
 # "Import external skills" workflow. The workflow opens a pull request with
@@ -46,3 +55,59 @@ sources:
     skills:
       - name: analysis-orchestrator
         as: tracelens-analysis-orchestrator
+  - name: amd-quark
+    repo: amd/Quark
+    ref: v0.12
+    path: .claude
+    license: MIT
+    resolve_wrappers: true
+    aliases:
+      quark-onnx-doc-drift-check: the Quark repository's internal ONNX documentation drift checker
+      quark-onnx-router: the matching public quark-onnx skill
+      quark-onnx-skill-sync: the Quark repository's internal ONNX skill synchronizer
+      quark-torch-doc-drift-check: the Quark repository's internal Torch documentation drift checker
+      quark-torch-eval-runner: the Quark repository's internal skill evaluator
+      quark-torch-router: the matching public quark-torch skill
+      quark-torch-skill-sync: the Quark repository's internal Torch skill synchronizer
+    skills:
+      - name: skills/quark-env-preflight
+        as: quark-env-preflight
+      - name: skills/quark-install
+        as: quark-install
+      - name: skills/quark-onnx-autosearch-pro
+        as: quark-onnx-autosearch-pro
+      - name: skills/quark-onnx-debug
+        as: quark-onnx-debug
+        aliases:
+          quark-doc-drift-check: the Quark repository's internal ONNX documentation drift checker
+          quark-skill-sync: the Quark repository's internal ONNX skill synchronizer
+      - name: skills/quark-onnx-install
+        as: quark-onnx-install
+      - name: skills/quark-onnx-model-intake
+        as: quark-onnx-model-intake
+      - name: skills/quark-onnx-ptq
+        as: quark-onnx-ptq
+      - name: skills/quark-onnx-result-validator
+        as: quark-onnx-result-validator
+      - name: skills/quark-torch-debug
+        as: quark-torch-debug
+      - name: skills/quark-torch-export
+        as: quark-torch-export
+        aliases:
+          quark-onnx-export: quark-onnx-ptq
+      - name: skills/quark-torch-file2file-quantization
+        as: quark-torch-file2file-quantization
+      - name: skills/quark-torch-install
+        as: quark-torch-install
+      - name: skills/quark-torch-llm-eval
+        as: quark-torch-llm-eval
+      - name: skills/quark-torch-llm-ptq-eval
+        as: quark-torch-llm-ptq-eval
+      - name: skills/quark-torch-model-intake
+        as: quark-torch-model-intake
+      - name: skills/quark-torch-ptq
+        as: quark-torch-ptq
+      - name: skills/quark-torch-result-validator
+        as: quark-torch-result-validator
+        aliases:
+          quark-quantization-result-validator: quark-torch-result-validator

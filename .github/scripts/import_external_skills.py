@@ -12,6 +12,11 @@ For each source, the script:
 2. Copies each named skill folder into `skills/<skill>/`. When refreshing an
    existing import, a local `evals/` subdirectory is kept if the upstream
    skill folder does not ship one (catalog-authored behavioral tests).
+   Sources that set `resolve_wrappers: true` may expose lightweight public
+   wrappers whose body points at a repository-owned implementation SKILL.md.
+   The importer resolves that entrypoint, copies its adjacent resources, and
+   bundles any non-public helper skills as one-level references so the
+   installed catalog skill remains self-contained.
 2b. Optionally vendors the skill under a different local catalog name (the
    `as:` field on a skill entry). Federated skills follow a
    `<projectrepo>-<skill>` naming convention in this catalog (e.g. the
@@ -60,12 +65,12 @@ import posixpath
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
+import textwrap
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
 import yaml
 
@@ -101,12 +106,26 @@ URI_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 # description is still available in the vendored SKILL.md.
 MARKETPLACE_DESCRIPTION_MAX = 320
 
+# Exact public-wrapper body supported by `resolve_wrappers`. Requiring the
+# whole body to match keeps resolution explicit and prevents prose from being
+# interpreted as a filesystem instruction.
+SKILL_POINTER_RE = re.compile(
+    r"\A\s*Read and follow the instructions in `(?P<path>[^`]+/SKILL\.md)`\.\s*\Z"
+)
+# Runtime snippets in repository-native skills sometimes assume execution from
+# the source checkout. Standalone catalog copies instead resolve resources from
+# the loaded SKILL.md location.
+SKILL_DIR_ASSIGNMENT_RE = re.compile(
+    r"(?m)^(?P<indent>[ \t]*)SKILL_DIR=\.claude/skills-impl/[^\s]+[ \t]*$"
+)
+
 
 @dataclass
 class SkillSpec:
     folder: str
     local_name: str | None = None
     marketplace_description_override: str | None = None
+    aliases: dict[str, str] | None = None
 
     @property
     def dest_name(self) -> str:
@@ -122,6 +141,24 @@ class Source:
     path: str
     license: str
     skills: list[SkillSpec]
+    resolve_wrappers: bool = False
+    aliases: dict[str, str] | None = None
+    selected_skills: list[SkillSpec] | None = None
+
+    @property
+    def import_skills(self) -> list[SkillSpec]:
+        return self.selected_skills if self.selected_skills is not None else self.skills
+
+
+@dataclass
+class ResolvedSkill:
+    spec: SkillSpec
+    public_dir: Path
+    implementation_dir: Path
+    public_path: str
+    implementation_path: str
+    public_frontmatter: dict
+    implementation_name: str
 
 
 @dataclass
@@ -144,7 +181,7 @@ def parse_sources(catalog: Path) -> list[Source]:
     sources: list[Source] = []
     for idx, raw in enumerate(raw_sources):
         if not isinstance(raw, dict):
-            raise ValueError(f"sources[{idx}] must be a mapping.")
+            raise TypeError(f"sources[{idx}] must be a mapping.")
         try:
             name = raw["name"]
             repo = raw["repo"]
@@ -156,6 +193,17 @@ def parse_sources(catalog: Path) -> list[Source]:
             ) from None
 
         license_str = raw.get("license", "UNKNOWN")
+        source_aliases = raw.get("aliases")
+        if source_aliases is not None and (
+            not isinstance(source_aliases, dict)
+            or not all(
+                isinstance(old, str) and isinstance(new, str)
+                for old, new in source_aliases.items()
+            )
+        ):
+            raise ValueError(
+                f"sources[{idx}].aliases must be a string-to-string mapping."
+            )
         skills_raw = raw.get("skills") or []
         if not isinstance(skills_raw, list) or not skills_raw:
             raise ValueError(
@@ -168,6 +216,18 @@ def parse_sources(catalog: Path) -> list[Source]:
             if isinstance(sk, str):
                 skills.append(SkillSpec(folder=sk))
             elif isinstance(sk, dict) and "name" in sk:
+                aliases = sk.get("aliases")
+                if aliases is not None and (
+                    not isinstance(aliases, dict)
+                    or not all(
+                        isinstance(old, str) and isinstance(new, str)
+                        for old, new in aliases.items()
+                    )
+                ):
+                    raise ValueError(
+                        f"sources[{idx}].skills[{sk_idx}].aliases must be a "
+                        "string-to-string mapping."
+                    )
                 skills.append(
                     SkillSpec(
                         folder=sk["name"],
@@ -175,6 +235,7 @@ def parse_sources(catalog: Path) -> list[Source]:
                         marketplace_description_override=sk.get(
                             "marketplace_description"
                         ),
+                        aliases=aliases,
                     )
                 )
             else:
@@ -191,6 +252,8 @@ def parse_sources(catalog: Path) -> list[Source]:
                 path=path.strip("/"),
                 license=license_str,
                 skills=skills,
+                resolve_wrappers=bool(raw.get("resolve_wrappers", False)),
+                aliases=source_aliases,
             )
         )
     return sources
@@ -253,11 +316,13 @@ def _should_skip_target(target: str) -> bool:
     t = target.strip()
     if not t:
         return True
+    # Regex examples such as `[A-Za-z](\w+)` are not Markdown links even
+    # though they match the lightweight link parser above.
+    if "\\" in t:
+        return True
     if t[0] in "#/":
         return True
-    if URI_SCHEME_RE.match(t):
-        return True
-    return False
+    return bool(URI_SCHEME_RE.match(t))
 
 
 def rewrite_external_references(
@@ -280,55 +345,69 @@ def rewrite_external_references(
     (e.g. `reference.md`) are left untouched so they keep working locally.
     """
     repo_skill_path = repo_skill_path.strip("/")
-
-    def replace_in(text: str) -> tuple[str, list[tuple[str, str]]]:
-        rewrites: list[tuple[str, str]] = []
-
-        def _sub(match: re.Match[str]) -> str:
-            target = match.group("target")
-            if _should_skip_target(target):
-                return match.group(0)
-            path_part, sep, anchor = target.partition("#")
-            frag = sep + anchor if sep else ""
-            if not path_part:
-                return match.group(0)
-
-            # Resolve the link both as the markdown spec would (relative to
-            # the file's folder in the repo) and relative to the repo root,
-            # since skill docs often write repo-root-relative paths.
-            skill_rel = posixpath.normpath(posixpath.join(repo_skill_path, path_part))
-            root_rel = posixpath.normpath(path_part)
-
-            within_skill = skill_rel == repo_skill_path or skill_rel.startswith(
-                repo_skill_path + "/"
-            )
-            if within_skill and skill_rel in repo_files:
-                # Genuine intra-skill link; it was copied, leave it local.
-                return match.group(0)
-
-            if skill_rel in repo_files:
-                chosen = skill_rel
-            else:
-                chosen = root_rel
-
-            # Can't map something that points above the repo root.
-            if chosen.startswith("..") or chosen.startswith("/"):
-                return match.group(0)
-
-            url = f"https://github.com/{repo}/blob/{commit}/{chosen}{frag}"
-            rewrites.append((target, url))
-            return f"{match.group('prefix')}{url}{match.group('suffix')}"
-
-        return MARKDOWN_LINK_RE.sub(_sub, text), rewrites
-
     for md_path in sorted(skill_dir.rglob("*.md")):
         original = md_path.read_text(encoding="utf-8")
-        updated, rewrites = replace_in(original)
+        local_rel = md_path.relative_to(skill_dir).as_posix()
+        repo_file_path = posixpath.join(repo_skill_path, local_rel)
+        updated, rewrites = rewrite_external_references_in_text(
+            original,
+            repo_file_path=repo_file_path,
+            copied_repo_root=repo_skill_path,
+            repo_files=repo_files,
+            repo=repo,
+            commit=commit,
+        )
         if updated != original:
             md_path.write_text(updated, encoding="utf-8")
             rel = md_path.relative_to(skill_dir.parent).as_posix()
             for old, new in rewrites:
                 log.append(f"    [{rel}] {old} -> {new}")
+
+
+def rewrite_external_references_in_text(
+    text: str,
+    *,
+    repo_file_path: str,
+    copied_repo_root: str | None,
+    repo_files: set[str],
+    repo: str,
+    commit: str,
+) -> tuple[str, list[tuple[str, str]]]:
+    """Rewrite markdown links in one file using its original repo location."""
+    rewrites: list[tuple[str, str]] = []
+    repo_file_dir = posixpath.dirname(repo_file_path)
+    copied_repo_root = copied_repo_root.strip("/") if copied_repo_root else None
+
+    def _sub(match: re.Match[str]) -> str:
+        target = match.group("target")
+        if _should_skip_target(target):
+            return match.group(0)
+        path_part, sep, anchor = target.partition("#")
+        frag = sep + anchor if sep else ""
+        if not path_part:
+            return match.group(0)
+
+        # Resolve as Markdown does first, then try repo-root-relative because
+        # many product skills intentionally cite root paths such as docs/foo.md.
+        file_rel = posixpath.normpath(posixpath.join(repo_file_dir, path_part))
+        root_rel = posixpath.normpath(path_part)
+
+        if copied_repo_root:
+            within_copy = file_rel == copied_repo_root or file_rel.startswith(
+                copied_repo_root + "/"
+            )
+            if within_copy and file_rel in repo_files:
+                return match.group(0)
+
+        chosen = file_rel if file_rel in repo_files else root_rel
+        if chosen.startswith(("..", "/")):
+            return match.group(0)
+
+        url = f"https://github.com/{repo}/blob/{commit}/{chosen}{frag}"
+        rewrites.append((target, url))
+        return f"{match.group('prefix')}{url}{match.group('suffix')}"
+
+    return MARKDOWN_LINK_RE.sub(_sub, text), rewrites
 
 
 def parse_frontmatter(text: str) -> dict:
@@ -340,6 +419,319 @@ def parse_frontmatter(text: str) -> dict:
     except yaml.YAMLError:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _frontmatter_and_body(path: Path) -> tuple[dict, str]:
+    text = path.read_text(encoding="utf-8")
+    match = FRONTMATTER_RE.match(text)
+    if not match:
+        raise ValueError(f"{path} has no valid YAML frontmatter block.")
+    frontmatter = parse_frontmatter(text)
+    if not frontmatter:
+        raise ValueError(f"{path} has invalid or empty YAML frontmatter.")
+    return frontmatter, match.group("body")
+
+
+def _repo_relative_path(clone_dir: Path, raw_path: str) -> tuple[Path, str]:
+    """Resolve and confine a wrapper target to the cloned repository."""
+    normalized = posixpath.normpath(raw_path.strip().lstrip("/"))
+    if normalized.startswith("../") or normalized in {"", ".", ".."}:
+        raise ValueError(f"Unsafe wrapper target path: {raw_path!r}")
+    target = (clone_dir / normalized).resolve()
+    try:
+        target.relative_to(clone_dir.resolve())
+    except ValueError as exc:
+        raise ValueError(f"Wrapper target escapes repository: {raw_path!r}") from exc
+    return target, normalized
+
+
+def resolve_source_skills(
+    source: Source,
+    clone_dir: Path,
+    repo_files: set[str],
+) -> list[ResolvedSkill]:
+    """Resolve configured public folders to the directories that get copied."""
+    src_root = clone_dir / source.path
+    resolved: list[ResolvedSkill] = []
+    for spec in source.skills:
+        public_dir = src_root / spec.folder
+        if not public_dir.is_dir():
+            raise FileNotFoundError(
+                f"Skill {spec.folder!r} not found under "
+                f"{source.repo}/{source.path}@{source.ref}."
+            )
+        public_md = public_dir / "SKILL.md"
+        if not public_md.exists():
+            raise FileNotFoundError(
+                f"Skill {spec.folder!r} from {source.repo} has no SKILL.md."
+            )
+        public_frontmatter, public_body = _frontmatter_and_body(public_md)
+        public_path = f"{source.path}/{spec.folder}".strip("/")
+        implementation_dir = public_dir
+        implementation_path = public_path
+
+        if source.resolve_wrappers:
+            pointer = SKILL_POINTER_RE.fullmatch(public_body)
+            if pointer is None:
+                raise ValueError(
+                    f"Skill {spec.folder!r} from {source.repo} must contain only "
+                    "a supported `Read and follow .../SKILL.md` wrapper body when "
+                    "`resolve_wrappers` is enabled."
+                )
+            implementation_md, implementation_md_path = _repo_relative_path(
+                clone_dir, pointer.group("path")
+            )
+            if (
+                implementation_md_path not in repo_files
+                or not implementation_md.is_file()
+            ):
+                raise FileNotFoundError(
+                    f"Wrapper target {implementation_md_path!r} for "
+                    f"{spec.folder!r} does not exist in {source.repo}@{source.ref}."
+                )
+            implementation_dir = implementation_md.parent
+            implementation_path = posixpath.dirname(implementation_md_path)
+
+        implementation_frontmatter, _ = _frontmatter_and_body(
+            implementation_dir / "SKILL.md"
+        )
+        implementation_name = implementation_frontmatter.get("name")
+        if not isinstance(implementation_name, str) or not implementation_name:
+            raise ValueError(
+                f"Implementation for {spec.folder!r} has no non-empty `name`."
+            )
+        resolved.append(
+            ResolvedSkill(
+                spec=spec,
+                public_dir=public_dir,
+                implementation_dir=implementation_dir,
+                public_path=public_path,
+                implementation_path=implementation_path,
+                public_frontmatter=public_frontmatter,
+                implementation_name=implementation_name,
+            )
+        )
+    return resolved
+
+
+def index_implementation_skills(source_root: Path) -> dict[str, Path]:
+    """Index non-wrapper skill implementations by frontmatter name."""
+    index: dict[str, Path] = {}
+    for skill_md in sorted(source_root.rglob("SKILL.md")):
+        try:
+            frontmatter, body = _frontmatter_and_body(skill_md)
+        except ValueError:
+            continue
+        if SKILL_POINTER_RE.fullmatch(body):
+            continue
+        name = frontmatter.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        previous = index.get(name)
+        if previous is not None and previous != skill_md:
+            raise ValueError(
+                f"More than one implementation named {name!r}: "
+                f"{previous} and {skill_md}"
+            )
+        index[name] = skill_md
+    return index
+
+
+def _replace_skill_aliases(text: str, aliases: dict[str, str]) -> str:
+    for upstream_name, public_name in sorted(
+        aliases.items(), key=lambda item: len(item[0]), reverse=True
+    ):
+        if upstream_name != public_name:
+            text = re.sub(
+                rf"(?<![a-z0-9-]){re.escape(upstream_name)}(?![a-z0-9-])",
+                public_name,
+                text,
+            )
+    return text
+
+
+def _mentioned_implementation_skills(
+    text: str, implementation_index: dict[str, Path]
+) -> set[str]:
+    return {
+        name
+        for name in implementation_index
+        if re.search(rf"(?<![a-z0-9-]){re.escape(name)}(?![a-z0-9-])", text)
+    }
+
+
+def _rewrite_standalone_runtime_paths(
+    text: str, implementation_path: str | None = None
+) -> str:
+    text = SKILL_DIR_ASSIGNMENT_RE.sub(
+        lambda match: (
+            f"{match.group('indent')}# Set SKILL_DIR to the directory containing "
+            "this installed SKILL.md."
+        ),
+        text,
+    )
+    if implementation_path:
+        text = text.replace(
+            f"`{implementation_path}/`", "the installed skill directory"
+        )
+        text = text.replace(f"`{implementation_path}`", "the installed skill directory")
+    return text.replace(
+        "Resolve `SKILL_DIR` from the repo root",
+        "Resolve `SKILL_DIR` from the loaded skill location",
+    )
+
+
+def bundle_supporting_skills(
+    skill_dir: Path,
+    *,
+    root_implementation_name: str,
+    implementation_index: dict[str, Path],
+    public_aliases: dict[str, str],
+    clone_dir: Path,
+    repo_files: set[str],
+    repo: str,
+    commit: str,
+    log: list[str],
+) -> list[str]:
+    """Bundle non-public helper procedures referenced by a public skill."""
+    root_parts: list[str] = []
+    for path in sorted(skill_dir.rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        if path == skill_dir / "SKILL.md":
+            match = FRONTMATTER_RE.match(text)
+            text = match.group("body") if match else text
+        root_parts.append(text)
+    root_text = "\n".join(root_parts)
+    public_implementations = set(public_aliases)
+    pending = sorted(
+        _mentioned_implementation_skills(root_text, implementation_index)
+        - public_implementations
+        - {root_implementation_name}
+    )
+    bundled: dict[str, str] = {}
+
+    while pending:
+        name = pending.pop(0)
+        if name in bundled:
+            continue
+        source_md = implementation_index[name]
+        text = source_md.read_text(encoding="utf-8")
+        text = _replace_skill_aliases(text, public_aliases)
+        repo_file_path = source_md.relative_to(clone_dir).as_posix()
+        text = _rewrite_standalone_runtime_paths(
+            text, posixpath.dirname(repo_file_path)
+        )
+        text, rewrites = rewrite_external_references_in_text(
+            text,
+            repo_file_path=repo_file_path,
+            copied_repo_root=None,
+            repo_files=repo_files,
+            repo=repo,
+            commit=commit,
+        )
+        bundled[name] = text
+        for old, new in rewrites:
+            log.append(f"    [references/{name}.md] {old} -> {new}")
+
+        dependencies = (
+            _mentioned_implementation_skills(text, implementation_index)
+            - public_implementations
+            - {root_implementation_name, name}
+            - set(bundled)
+        )
+        pending = sorted(set(pending) | dependencies)
+
+    if not bundled:
+        return []
+    references = skill_dir / "references"
+    references.mkdir(exist_ok=True)
+    for name, text in sorted(bundled.items()):
+        (references / f"{name}.md").write_text(text, encoding="utf-8")
+        log.append(f"    bundled internal helper {name}")
+    return sorted(bundled)
+
+
+def rewrite_frontmatter(
+    skill_dir: Path,
+    *,
+    name: str,
+    description: str,
+    log: list[str],
+) -> None:
+    """Apply the public wrapper's routing metadata to a copied implementation."""
+    skill_md = skill_dir / "SKILL.md"
+    text = skill_md.read_text(encoding="utf-8")
+    match = FRONTMATTER_RE.match(text)
+    if not match:
+        raise ValueError(f"Copied implementation {skill_md} has invalid frontmatter.")
+    description_lines = textwrap.wrap(
+        " ".join(description.split()),
+        width=96,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    serialized = "\n".join(
+        [
+            f"name: {name}",
+            "description: >-",
+            *[f"  {line}" for line in description_lines],
+        ]
+    )
+    skill_md.write_text(
+        f"---\n{serialized}\n---\n\n{match.group('body').lstrip()}",
+        encoding="utf-8",
+    )
+    log.append(f"    [SKILL.md] public routing metadata -> {name}")
+
+
+def add_catalog_portability_section(
+    skill_dir: Path,
+    *,
+    source: Source,
+    commit: str,
+    bundled_helpers: list[str],
+) -> None:
+    """Explain source-path and bundled-helper behavior in standalone installs."""
+    skill_md = skill_dir / "SKILL.md"
+    text = skill_md.read_text(encoding="utf-8")
+    match = FRONTMATTER_RE.match(text)
+    if not match:
+        return
+    body = match.group("body")
+    section = [
+        "## Catalog portability",
+        "",
+        (
+            f"This standalone skill is federated from `{source.repo}` at commit `{commit}`. "
+            "Resolve bundled files relative to this `SKILL.md`. Repository-relative paths "
+            f"such as `docs/`, `examples/`, and `quark/` refer to the [pinned Quark source]"
+            f"(https://github.com/{source.repo}/tree/{commit}); use a local Quark checkout "
+            "when available, otherwise consult that pinned source."
+        ),
+    ]
+    if bundled_helpers:
+        section.extend(
+            [
+                "",
+                (
+                    "When the workflow names one of these internal procedures, read its "
+                    "bundled reference before carrying out that step:"
+                ),
+                "",
+                *[f"- [`{name}`](references/{name}.md)" for name in bundled_helpers],
+            ]
+        )
+    section_text = "\n".join(section) + "\n\n"
+    first_heading = re.search(r"(?m)^# .+\n", body)
+    if first_heading:
+        insert_at = first_heading.end()
+        body = body[:insert_at] + "\n" + section_text + body[insert_at:].lstrip("\n")
+    else:
+        body = section_text + body
+    skill_md.write_text(
+        text[: match.start("body")] + body,
+        encoding="utf-8",
+    )
 
 
 def truncate_description(text: str, limit: int = MARKETPLACE_DESCRIPTION_MAX) -> str:
@@ -389,9 +781,7 @@ def copy_skill(src: Path, dest: Path, log: list[str] | None = None) -> None:
         for subdir, preserved_path in preserved.items():
             shutil.copytree(preserved_path, dest / subdir)
             if log is not None:
-                log.append(
-                    f"    preserved local {subdir}/ (absent in upstream import)"
-                )
+                log.append(f"    preserved local {subdir}/ (absent in upstream import)")
 
 
 def write_marker(
@@ -399,6 +789,7 @@ def write_marker(
     source: Source,
     commit: str,
     relative_path: str,
+    implementation_path: str | None = None,
 ) -> None:
     marker = {
         "source": source.name,
@@ -409,6 +800,8 @@ def write_marker(
         "license": source.license,
         "imported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    if implementation_path and implementation_path != relative_path:
+        marker["implementation_path"] = implementation_path
     (skill_dir / MARKER_FILENAME).write_text(
         json.dumps(marker, indent=2) + "\n", encoding="utf-8"
     )
@@ -426,7 +819,9 @@ def write_card(skill_dir: Path, source: Source, description: str) -> None:
     if card.exists():
         return
     owner_org = source.repo.split("/")[0]
-    license_text = source.license or f"See [{source.repo}](https://github.com/{source.repo})"
+    license_text = (
+        source.license or f"See [{source.repo}](https://github.com/{source.repo})"
+    )
     card.write_text(
         "# Skill Card\n\n"
         "## Description\n\n"
@@ -465,7 +860,9 @@ def rewrite_skill_name(skill_dir: Path, new_name: str, log: list[str]) -> None:
         new_frontmatter = f"name: {new_name}\n{frontmatter}"
     if new_frontmatter == frontmatter:
         return
-    skill_md.write_text(text[:fm_start] + new_frontmatter + text[fm_end:], encoding="utf-8")
+    skill_md.write_text(
+        text[:fm_start] + new_frontmatter + text[fm_end:], encoding="utf-8"
+    )
     log.append(f"    [SKILL.md] name -> {new_name}")
 
 
@@ -538,25 +935,30 @@ def import_source(
                 f"Path {source.path!r} not found in {source.repo}@{source.ref}."
             )
 
-        for spec in source.skills:
-            src_skill = src_root / spec.folder
-            if not src_skill.is_dir():
-                raise FileNotFoundError(
-                    f"Skill {spec.folder!r} not found under "
-                    f"{source.repo}/{source.path}@{source.ref}."
-                )
-            skill_md = src_skill / "SKILL.md"
-            if not skill_md.exists():
-                raise FileNotFoundError(
-                    f"Skill {spec.folder!r} from {source.repo} has no SKILL.md."
-                )
-            frontmatter = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
-            description = frontmatter.get("description") or ""
+        resolved_skills = resolve_source_skills(source, tmp_path, repo_files)
+        implementation_index = (
+            index_implementation_skills(src_root) if source.resolve_wrappers else {}
+        )
+        public_aliases = {
+            resolved.implementation_name: resolved.spec.dest_name
+            for resolved in resolved_skills
+        }
+        selected_names = {spec.dest_name for spec in source.import_skills}
+
+        for resolved in resolved_skills:
+            spec = resolved.spec
+            if spec.dest_name not in selected_names:
+                continue
+            skill_aliases = dict(public_aliases)
+            skill_aliases.update(source.aliases or {})
+            skill_aliases.update(spec.aliases or {})
+            description = resolved.public_frontmatter.get("description") or ""
             if not isinstance(description, str) or not description.strip():
                 raise ValueError(
                     f"Skill {spec.folder!r} from {source.repo} has no "
                     "non-empty `description` in its SKILL.md frontmatter."
                 )
+            description = _replace_skill_aliases(description, skill_aliases)
             marketplace_description = (
                 spec.marketplace_description_override
                 or truncate_description(description)
@@ -564,28 +966,81 @@ def import_source(
 
             dest_name = spec.dest_name
             dest_skill = SKILLS_DIR / dest_name
-            # The marker records the skill's *upstream* location, which keeps
-            # using the source folder name even when we vendor it locally as
-            # `dest_name`.
-            relative_path = f"{source.path}/{spec.folder}"
             action = "would import" if dry_run else "importing"
             renamed = f" (as {dest_name})" if dest_name != spec.folder else ""
             log.append(
                 f"[{source.name}] {action} {spec.folder} -> skills/{dest_name}{renamed}"
             )
             if not dry_run:
-                copy_skill(src_skill, dest_skill, log)
-                write_marker(dest_skill, source, commit, relative_path)
-                write_card(dest_skill, source, marketplace_description)
-                rewrite_skill_name(dest_skill, dest_name, log)
+                copy_skill(resolved.implementation_dir, dest_skill, log)
+
+                if source.resolve_wrappers:
+                    text_suffixes = {
+                        ".md",
+                        ".py",
+                        ".json",
+                        ".yaml",
+                        ".yml",
+                        ".rst",
+                        ".txt",
+                    }
+                    for text_path in sorted(dest_skill.rglob("*")):
+                        if (
+                            not text_path.is_file()
+                            or text_path.suffix not in text_suffixes
+                        ):
+                            continue
+                        text = text_path.read_text(encoding="utf-8")
+                        text = _replace_skill_aliases(text, skill_aliases)
+                        if text_path.suffix == ".md":
+                            text = _rewrite_standalone_runtime_paths(
+                                text, resolved.implementation_path
+                            )
+                        text_path.write_text(text, encoding="utf-8")
+
                 rewrite_external_references(
                     dest_skill,
-                    relative_path,
+                    resolved.implementation_path,
                     repo_files,
                     source.repo,
                     commit,
                     log,
                 )
+                if source.resolve_wrappers:
+                    bundled_helpers = bundle_supporting_skills(
+                        dest_skill,
+                        root_implementation_name=resolved.implementation_name,
+                        implementation_index=implementation_index,
+                        public_aliases=skill_aliases,
+                        clone_dir=tmp_path,
+                        repo_files=repo_files,
+                        repo=source.repo,
+                        commit=commit,
+                        log=log,
+                    )
+                    rewrite_frontmatter(
+                        dest_skill,
+                        name=dest_name,
+                        description=description.strip(),
+                        log=log,
+                    )
+                    add_catalog_portability_section(
+                        dest_skill,
+                        source=source,
+                        commit=commit,
+                        bundled_helpers=bundled_helpers,
+                    )
+                else:
+                    rewrite_skill_name(dest_skill, dest_name, log)
+
+                write_marker(
+                    dest_skill,
+                    source,
+                    commit,
+                    resolved.public_path,
+                    resolved.implementation_path,
+                )
+                write_card(dest_skill, source, marketplace_description)
 
             results.append(
                 ImportResult(
@@ -657,8 +1112,8 @@ def main(argv: list[str] | None = None) -> int:
                 + ", ".join(sorted(unknown))
             )
         for source in sources:
-            source.skills = [s for s in source.skills if s.dest_name in only]
-        sources = [source for source in sources if source.skills]
+            source.selected_skills = [s for s in source.skills if s.dest_name in only]
+        sources = [source for source in sources if source.import_skills]
     log: list[str] = []
     declared: set[str] = set()
     all_results: list[ImportResult] = []
@@ -667,7 +1122,7 @@ def main(argv: list[str] | None = None) -> int:
     existing_federated = find_federated_skills()
 
     for source in sources:
-        for spec in source.skills:
+        for spec in source.import_skills:
             if spec.dest_name in declared:
                 raise ValueError(
                     f"Skill name collision: {spec.dest_name!r} is listed by "
@@ -691,7 +1146,7 @@ def main(argv: list[str] | None = None) -> int:
     for line in log:
         print(line)
 
-    print("")
+    print()
     print(f"Imported: {len(all_results)} skill(s)")
     print(f"Removed orphans: {len(pruned)}")
     print(
