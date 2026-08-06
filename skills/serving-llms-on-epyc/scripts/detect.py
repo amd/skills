@@ -11,8 +11,9 @@ Usage:
 
 Output: JSON with cpu_model, is_amd_epyc, logical_cores, physical_cores,
 sockets, threads_per_core, numa_nodes, memory_gb, epyc_generation
-(Naples/Rome/Milan/Genoa/Bergamo/Siena/Turin), zen_arch, and avx512. Exits 0 on
-success, 1 if no CPU info could be read.
+(Naples/Rome/Milan/Genoa/Bergamo/Siena/Turin/Venice or EPYC 4004/4005),
+zen_arch, is_supported_epyc, and avx512. Exits 0 on success, 1 if no CPU info
+could be read.
 
 Env vars (used when --host is not given):
     ZEN_SSH_HOST, ZEN_SSH_USER, ZEN_SSH_PORT
@@ -24,6 +25,12 @@ import os
 import re
 import subprocess
 import sys
+
+
+# Only the AMD EPYC 9000 server series is supported for now: Genoa (9004),
+# Turin (9005), and Venice (9006). Other generations (Bergamo, Siena, pre-Zen4,
+# EPYC 4004/4005) are still detected/named below, but reported unsupported.
+SUPPORTED_EPYC_GENERATIONS = {"Genoa", "Turin", "Venice"}
 
 
 def _is_local(host):
@@ -52,15 +59,23 @@ def _lscpu_field(lscpu_out, label):
 def _epyc_generation(model):
     """Map an AMD EPYC model name to (generation, zen_arch).
 
-    EPYC numbering encodes the generation: 7xx1=Naples (Zen1), 7xx2=Rome (Zen2),
-    7xx3=Milan (Zen3), 8xx4=Siena (Zen4c), 97x4=Bergamo (Zen4c), 9xx4=Genoa (Zen4),
-    9xx5=Turin (Zen5). The agent should carry this through every phase (e.g. AVX-512
-    + bf16 land on Zen4+, Turin has up to 128 cores per socket -> thread binding)."""
-    m = re.search(r"EPYC\s+(\d{4})", model.upper())
+    EPYC numbering encodes the generation by its first and last digit: 7xx1=Naples
+    (Zen1), 7xx2=Rome (Zen2), 7xx3=Milan (Zen3), 8xx4=Siena (Zen4c), 97x4=Bergamo
+    (Zen4c), 9xx4=Genoa (Zen4), 9xx5=Turin (Zen5), and 9xx6=Venice (Zen6).
+    EPYC 4004/4005 are identified separately because they have the required ISA
+    but are not documented ZenDNN server targets for this recipe. Some SKUs carry
+    a letter in the middle (e.g. 9B45 -> 9__5 -> Turin), so we match 4
+    alphanumerics whose first and last chars are digits and key off those."""
+    m = re.search(r"EPYC\s+(\d[0-9A-Z]{2}\d)", model.upper())
     if not m:
         return "unknown", "unknown"
     num = m.group(1)
     first, last = num[0], num[3]
+    if first == "4":
+        return {
+            "4": ("EPYC 4004", "Zen4"),
+            "5": ("EPYC 4005", "Zen5"),
+        }.get(last, ("unknown", "unknown"))
     if first == "7":
         return {"1": ("Naples", "Zen1"), "2": ("Rome", "Zen2"),
                 "3": ("Milan", "Zen3")}.get(last, ("unknown", "unknown"))
@@ -73,6 +88,8 @@ def _epyc_generation(model):
             return "Genoa", "Zen4"
         if last == "5":
             return "Turin", "Zen5"
+        if last == "6":
+            return "Venice", "Zen6"
     return "unknown", "unknown"
 
 
@@ -129,12 +146,14 @@ def main():
 
     is_epyc = vendor == "AuthenticAMD" and "EPYC" in model.upper()
     generation, zen_arch = _epyc_generation(model)
+    is_supported_epyc = is_epyc and generation in SUPPORTED_EPYC_GENERATIONS
     avx512 = "avx512f" in _lscpu_field(lscpu_out, "Flags").split()
 
     print(json.dumps({
         "cpu_model": model,
         "vendor": vendor,
         "is_amd_epyc": is_epyc,
+        "is_supported_epyc": is_supported_epyc,
         "epyc_generation": generation,
         "zen_arch": zen_arch,
         "avx512": avx512,
