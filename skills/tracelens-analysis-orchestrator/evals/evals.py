@@ -26,7 +26,6 @@ This test is slow (TraceLens install + full orchestrator workflow). Outside CI,
 from __future__ import annotations
 
 import csv
-import json
 import os
 import subprocess
 import sys
@@ -130,8 +129,10 @@ def _extract_unit_tests(tracelens_dir: Path) -> None:
     if marker.is_dir():
         return
 
+    # Archive members are rooted at agent_evals/Analysis/analysis_tests/...
+    # under the TraceLens repo, so extract at tracelens_dir (not target_root).
     with tarfile.open(archive, "r:gz") as tar:
-        tar.extractall(path=target_root)
+        tar.extractall(path=tracelens_dir)
 
 
 def _load_first_repeatability_case(tracelens_dir: Path) -> RepeatabilityCase:
@@ -180,40 +181,22 @@ def _bootstrap_repeatability_case(workspace: Path) -> TracelensEvalCache:
     )
 
 
-def _write_env_manifest(
-    workspace: Path,
+def _repeatability_prompt(
     *,
-    cache: TracelensEvalCache,
+    trace_path: Path,
+    platform: str,
     output_dir: Path,
-) -> Path:
-    manifest = workspace / "tracelens_env.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "test_id": cache.case.test_id,
-                "trace_path": str(cache.case.trace_path),
-                "platform": cache.case.platform,
-                "output_dir": str(output_dir.resolve()),
-                "venv_path": str(cache.venv_dir),
-                "tracelens_dir": str(cache.tracelens_dir),
-                "analysis_mode": "default",
-                "environment": "local",
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    return manifest
-
-
-def _repeatability_prompt() -> str:
-    # Keep the agent prompt short. Paths and install locations live in the
-    # workspace manifest so --add-dir does not need the TraceLens git tree.
+    venv_path: Path,
+    tracelens_dir: Path,
+) -> str:
     return (
-        "Follow tracelens-analysis-orchestrator. Read tracelens_env.json in "
-        "this workspace and run the full standalone analysis workflow using "
-        "those paths. Analysis mode default, local host."
+        "Follow tracelens-analysis-orchestrator. Run the full standalone "
+        "analysis workflow locally with analysis mode default.\n"
+        f"- trace_path: {trace_path}\n"
+        f"- platform: {platform}\n"
+        f"- output_dir: {output_dir}\n"
+        f"- venv_path: {venv_path}\n"
+        f"- tracelens_dir: {tracelens_dir}\n"
     )
 
 
@@ -275,12 +258,18 @@ def test_gemm_01_repeatability_first_case(tracelens_eval_cache: TracelensEvalCac
     with claude(model, skill="tracelens-analysis-orchestrator", effort="high") as agent:
         output_dir = agent.workspace / "analysis_output"
         output_dir.mkdir(parents=True, exist_ok=True)
-        _write_env_manifest(agent.workspace, cache=cache, output_dir=output_dir)
 
-        run = agent.prompt(_repeatability_prompt())
+        run = agent.prompt(
+            _repeatability_prompt(
+                trace_path=cache.case.trace_path,
+                platform=cache.case.platform,
+                output_dir=output_dir,
+                venv_path=cache.venv_dir,
+                tracelens_dir=cache.tracelens_dir,
+            )
+        )
 
         run.logs_contains("tracelens-analysis-orchestrator")
-        run.workspace_contains("tracelens_env.json")
 
         analysis_md = output_dir / "analysis.md"
         assert analysis_md.is_file(), (

@@ -178,13 +178,15 @@ inside `## Detailed Analysis` blocks.
 ### Comparative (`comparison_scope` = `comparative`)
 
 ```markdown
-| Operation | Args (T1) | Trace 1 Time (ms) | Trace 2 Time (ms) | Count (T1/T2) | Difference (ms) | FLOPS/Byte (T1) | Bound (T1) |
-|-----------|-----------|-------------------|-------------------|---------------|-----------------|-----------------|------------|
+| Operation | Args (T1) | Kernel Path | Kernel Name | Trace 1 Time (ms) | Trace 2 Time (ms) | Count (T1/T2) | Difference (ms) | FLOPS/Byte (T1) | Bound (T1) |
+|-----------|-----------|-------------|-------------|-------------------|-------------------|---------------|-----------------|-----------------|------------|
 ```
 
 **Column mappings** (all sourced from `metrics['operations']`; do **not** re-join the CSV):
 - **Operation**: `operations[i].name`. Bare op name only.
 - **Args (T1)**: `operations[i].args`. Pre-rendered shape/dtype string, already joined with `<br>` — paste verbatim. `—` when absent.
+- **Kernel Path**: `operations[i].launcher_path`. Relative Python path that launched the kernel. **Copy the value exactly as-is — do NOT truncate, shorten, or extract just the function name.** `—` when absent.
+- **Kernel Name**: `operations[i].kernel_name_trunc`. Truncated GPU kernel name(s). For multi-kernel ops, formatted as `Kernel 1: <name><br>Kernel 2: <name>`. **Copy the value exactly as-is.** `—` when absent.
 - **Trace 1 Time (ms)**: `operations[i].time_ms`
 - **Trace 2 Time (ms)**: `operations[i].t2_time_ms`. `—` when absent.
 - **Count (T1/T2)**: T1 = `operations[i].count`; T2 = `operations[i].count_trace2`. Format `T1 / T2` (use `—` for missing T2).
