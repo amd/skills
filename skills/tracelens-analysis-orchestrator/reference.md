@@ -67,6 +67,9 @@ Use vendor-agnostic terminology throughout such as GPU kernels, collective commu
    - Options:
      1. **MI300X**
      2. **MI325X**
+     3. **MI350X**
+     4. **MI355X**
+     5. **MI455X**
    **`comparative`:** Ask: "Which platform is target trace (trace2)?" Assign `<platform2>` (`<platform2>` does not need to be one of the platform options)
 
 4. **Analysis Mode** → `<analysis_mode>`
@@ -77,95 +80,38 @@ Use vendor-agnostic terminology throughout such as GPU kernels, collective commu
    - If **Inference (vLLM/SGLang)** is selected, ask **Execution Mode** → `<inference_exec_mode>`:
      1. **Eager mode** (`<inference_exec_mode>` = `eager`) — only the trace file is needed
      2. **Graph replay + capture** (`<inference_exec_mode>` = `graph_capture`) — also requires a capture folder path
-   - If **Graph replay + capture**, ask for **Capture Folder Path** → `<capture_folder_path>`:
+   - If **Graph replay + capture**, ask for **Capture Folder Path** → `<capture_folder_path_1>`:
      - Ask: "Please provide the full path to the graph capture traces folder"
-   - **Unsupported combination:** If `<inference_exec_mode>` = `graph_capture` **and** `<comparison_scope>` = `comparative`, stop immediately. Inform the user: "Graph replay + capture mode is not yet supported for comparative analysis. Please provide eager mode traces instead." Do not misinterpret as two standalone analyses. Do **not** proceed to Step 1 or beyond.
+   - If **Graph replay + capture** and **comparative**, ask for **Trace2 Capture Folder Path** → `<capture_folder_path_2>`
 
 5. **Environment Setup**
    - Ask: "Are you running locally or on a cluster?"
-     - If **local**: No further environment questions. TraceLens will be installed into the active Python if missing, or auto-provisioned in `<output_dir>/cache/.venv` when needed.
+     - If **local**: No further environment questions — prefix is blank (commands run directly).
      - If **cluster**:
        - Ask "Which node should we use?" → `<node>`
        - Ask "Are you working in a containerized environment (e.g. Docker)?" → if yes, ask for container name → `<container>`
-       - Ask "Are you using a virtual environment?" → if yes, ask for venv path → `<venv_path>`. If no, leave `<venv_path>` empty; a venv may be auto-created during install (see below).
+       - Ask "Are you using a virtual environment?" → if yes, ask for venv path → `<venv_path>`
 
 6. **Output Directory** (Optional)
    - Ask: "Where should we save analysis results? (Press Enter for default: <trace_directory>/analysis_output)"
    - Default: Same directory as trace file, in `analysis_output/` subdirectory
-   - **Cluster note:** `<output_dir>` must be writable from the node (and container, if used) because auto-created venvs live at `<output_dir>/cache/.venv`.
 
 7. **Extension File** (Optional) → `<extension_file>`
    - Ask: "Do you have a TraceLens extension file to apply? Press Enter to skip."
    - If provided, resolve to an absolute path and assign to `<extension_file>`.
    - If skipped, set `<extension_file>` to empty (no `--extension_file` flag is added to any command).
 
-### Ensure TraceLens is installed
+### Build and Cache Command Prefix
 
-Before building the command prefix, verify TraceLens is importable in the **target execution environment** — the same machine, container, and venv where analysis commands will run.
+After collecting inputs, build a command template. Create the directory with `mkdir -p <output_dir>/cache`.
 
-Create the cache directory first: `mkdir -p <output_dir>/cache`.
+The template uses `{CMD}` as a placeholder for the actual command.
 
-Run the import check (wrap with the same local / `ssh` / `docker exec` / `source <venv_path>/bin/activate` shell you will use for analysis; do **not** include `cd <tracelens_dir>` yet):
+**Local:** When `<venv_path>` is set, use `source <venv_path>/bin/activate && cd <tracelens_dir> && {CMD}`. When `<venv_path>` is empty, use `cd <tracelens_dir> && {CMD}` if `<tracelens_dir>` is known; otherwise run `{CMD}` directly.
 
-```bash
-python3 -c "import TraceLens; print('TRACELOK')"
-```
+**Cluster:** Before building the prefix, locate the TraceLens project root on the remote environment.
 
-**If import succeeds:** skip to **Resolve `<tracelens_dir>`** below.
-
-**If import fails**, install TraceLens in this order:
-
-1. **Try the current Python environment** (or the user-provided `<venv_path>` if already set):
-
-   ```bash
-   python3 -m pip install "git+https://github.com/AMD-AGI/TraceLens.git"
-   ```
-
-2. Re-run the import check.
-
-3. **If import still fails** (permission denied, `externally-managed-environment`, missing `pip`, or other install error): create an isolated venv and install there:
-   - Set `<venv_path>` to `<output_dir>/cache/.venv`
-   - Record it: `echo '<venv_path>' > <output_dir>/cache/venv_path.txt`
-   - Create and populate the venv:
-
-   ```bash
-   python3 -m venv <venv_path>
-   source <venv_path>/bin/activate
-   python3 -m pip install --upgrade pip
-   python3 -m pip install "git+https://github.com/AMD-AGI/TraceLens.git"
-   ```
-
-4. Re-run the import check. If it still fails, stop with `[DIAG:pipeline:INSTALL_FAIL]`, show the pip stderr to the user, and do **not** proceed.
-
-All install commands must use the same execution shell as analysis. Examples:
-
-```bash
-# Local
-python3 -m pip install "git+https://github.com/AMD-AGI/TraceLens.git"
-
-# Local + user venv
-source <venv_path>/bin/activate && python3 -m pip install "git+https://github.com/AMD-AGI/TraceLens.git"
-
-# Cluster + container
-ssh <node> "docker exec <container> bash -c 'python3 -m pip install \"git+https://github.com/AMD-AGI/TraceLens.git\"'"
-
-# Cluster + container + auto-created venv
-ssh <node> "docker exec <container> bash -c 'python3 -m venv <venv_path> && source <venv_path>/bin/activate && python3 -m pip install --upgrade pip && python3 -m pip install \"git+https://github.com/AMD-AGI/TraceLens.git\"'"
-```
-
-Inform the user when TraceLens was installed or when a new venv was created at `<venv_path>`.
-
-### Resolve `<tracelens_dir>`
-
-Prefer resolving from the installed package (works for `pip install` and editable installs):
-
-```bash
-python3 -c "import os, TraceLens; print(os.path.dirname(os.path.dirname(TraceLens.__file__)))"
-```
-
-This prints the parent directory of the `TraceLens` package (the directory that contains `TraceLens/Agent/...`). Assign the output to `<tracelens_dir>`.
-
-**Fallback (cluster only):** if the import-based lookup fails, search the remote filesystem:
+Run the following command (adjust for container if applicable):
 
 ```bash
 # Without container:
@@ -175,32 +121,38 @@ ssh <node> "find / -maxdepth 5 -type d -name 'TraceLens' 2>/dev/null | head -5"
 ssh <node> "docker exec <container> bash -c 'find / -maxdepth 5 -type d -name TraceLens 2>/dev/null | head -5'"
 ```
 
-Pick the result whose path contains `Agent/` and strip the trailing `/TraceLens` to get `<tracelens_dir>`.
+Pick the result containing `Agent/` and strip the trailing `/TraceLens` to get `<tracelens_dir>`.
 
-### Build and Cache Command Prefix
+Build the cluster prefix using this lookup:
 
-After TraceLens is installed and `<tracelens_dir>` is resolved, build a command template and save it to `<output_dir>/cache/cmd_prefix.txt`.
+| Container | Venv | Template |
+|-----------|------|----------|
+| No | No | `ssh <node> "cd <tracelens_dir> && {CMD}"` |
+| Yes | No | `ssh <node> "docker exec <container> bash -c 'cd <tracelens_dir> && {CMD}'"` |
+| No | Yes | `ssh <node> "bash -c 'source <venv_path>/bin/activate && cd <tracelens_dir> && {CMD}'"` |
 
-The template uses `{CMD}` as a placeholder for the actual command.
-
-Build the prefix using this lookup:
-
-| Scope | Container | Venv | Template |
-|-------|-----------|------|----------|
-| Local | — | No | `cd <tracelens_dir> && {CMD}` |
-| Local | — | Yes | `source <venv_path>/bin/activate && cd <tracelens_dir> && {CMD}` |
-| Cluster | No | No | `ssh <node> "cd <tracelens_dir> && {CMD}"` |
-| Cluster | Yes | No | `ssh <node> "docker exec <container> bash -c 'cd <tracelens_dir> && {CMD}'"` |
-| Cluster | No | Yes | `ssh <node> "bash -c 'source <venv_path>/bin/activate && cd <tracelens_dir> && {CMD}'"` |
-| Cluster | Yes | Yes | `ssh <node> "docker exec <container> bash -c 'source <venv_path>/bin/activate && cd <tracelens_dir> && {CMD}'"` |
-
-Write the resolved template to `<output_dir>/cache/cmd_prefix.txt`. Then validate it works:
+Write the resolved template to `<output_dir>/cache/cmd_prefix.txt`. Then validate that TraceLens is importable in the target environment through the prefix:
 
 ```bash
 <prefix> python3 -c "import TraceLens; print('PREFIX_OK')"
 ```
 
-If this fails, inform the user with `[DIAG:pipeline:PREFIX_FAIL]` and check that `<tracelens_dir>` is the **parent** of the `TraceLens` package directory (not the repo root itself), verify TraceLens is installed in the target environment, verify the container/venv is accessible, rebuild the prefix, and retry. Do NOT proceed to Step 1 until validation passes.
+If this fails, the cause is either a bad prefix or a missing package:
+- Verify `<tracelens_dir>` is the parent of TraceLens (not the repo root itself) and that the container/venv is accessible; if wrong, rebuild prefix and retry once. If it still fails, inform the user with `[DIAG:pipeline:PREFIX_FAIL]`.
+- If the environment is reachable but TraceLens is not installed, ask the user where to install it and if they require a new venv <venv_path>.
+  ```bash
+  # Install into the container / bare metal directly (no prefix rebuild needed):
+  <prefix> pip install TraceLens
+
+  # Create a new Python venv (if requested)
+  <prefix> python3 -m venv <venv_path>
+
+  # Install into the python venv:
+  <prefix> <venv_path>/bin/pip install TraceLens
+  ```
+Rebuild the prefix and re-validate after installing.
+
+Do NOT proceed to Step 1 until validation passes.
 
 ### Command Execution Pattern
 
@@ -230,13 +182,22 @@ All commands below append `<suffix_1>` and `<suffix_2>`, resolved by `<compariso
 | `comparative` trace1 | `--output_xlsx_path <output_dir>/perf_report_trace1.xlsx --output_csvs_dir <output_dir>/perf_report_trace1_csvs` |
 | `comparative` trace2 | `--profile_json_path <trace2_path> --output_xlsx_path <output_dir>/perf_report_trace2.xlsx --output_csvs_dir <output_dir>/perf_report_trace2_csvs` |
 
-**`<suffix_2>`** — extension flags:
+**`<suffix_2>`** — comparison flags:
 
 | scope | value |
 |-------|-------|
 | `standalone` | none |
 | `comparative` trace1 | `--comparison_json_path <trace2_path>` |
+| `comparative` trace1 if `<capture_folder_path_2>` provided | `--comparison_json_path <trace2_path> --comparison_capture_folder <capture_folder_path_2>` |
 | `comparative` trace2 | none |
+
+**`<suffix_3>`** — graph capture flags:
+
+| scope | value |
+|-------|-------|
+| `standalone` if `<capture_folder_path_1>` provided | `--capture_folder <capture_folder_path_1>` |
+| `comparative` trace1 if `<capture_folder_path_1>` provided | `--capture_folder <capture_folder_path_1>` |
+| `comparative` trace2 if `<capture_folder_path_2>` provided | `--capture_folder <capture_folder_path_2>` |
 
 **`<suffix_ext>`** — user extension file:
 
@@ -281,7 +242,6 @@ All commands below append `<suffix_1>` and `<suffix_2>`, resolved by `<compariso
 ```bash
 <prefix> TraceLens_generate_perf_report_pytorch_inference \
   --profile_json_path <trace_path> \
-  --capture_folder <capture_folder_path> \
   --gpu_arch_json_path <platform_file> \
   --group_by_parent_module \
   --enable_pseudo_ops \
@@ -289,6 +249,7 @@ All commands below append `<suffix_1>` and `<suffix_2>`, resolved by `<compariso
   --include_call_stack \
   <suffix_1> \
   <suffix_2> \
+  <suffix_3> \
   <suffix_ext>
 ```
 

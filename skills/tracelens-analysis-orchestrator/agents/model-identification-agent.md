@@ -56,19 +56,24 @@ Execute the Python script to extract the **name**, **Input type**, and **Input D
 ```bash
 <prefix> python3 -c "
 import sys
-from TraceLens.Agent.Analysis.utils.report_utils import extract_condensed_op_info
-if not extract_condensed_op_info('<output_dir>', '<comparison_scope>'):
+from TraceLens.Agent.Analysis.utils.report_utils import prepare_model_identification_data
+if not prepare_model_identification_data('<output_dir>', '<comparison_scope>'):
     sys.exit(1)
 "
 ```
 
 The script does **not** perform any inference. It only produces the CSV for you to analyze.
 
-### Step 2: Analyze condensed_op_info.csv and write model_info.json
+### Step 2: Read nn_modules.txt for model identity
+
+If `<output_dir>/metadata/nn_modules.txt` exists and is non-empty, use it to infer **model**.
+
+If the file is absent or empty, skip this step and infer **model** from `condensed_op_info.csv` in Step 3.
+
+### Step 3: Analyze condensed_op_info.csv and write model_info.json
 
 Open `<output_dir>/metadata/condensed_op_info.csv` and analyze the **name**, **Input type**, and **Input Dims** values across the rows. Infer:
-
-- **model**
+- **model** (if not already determined in Step 2)
 - **architecture**
 - **scale**
 - **precision**
@@ -82,7 +87,7 @@ Write `<output_dir>/metadata/model_info.json` with these four keys. **Use "Canno
 - **Precision**: From **Input type** — e.g. `c10::BFloat16` → BF16, `float` → FP32, `float8`/FP8 → FP8.
 - **Architecture**: From **name** and **Input Dims** — e.g. convolution → CNN; bmm + softmax + (batch, heads, seq, seq) → Transformer.
 - **Scale**: From typical hidden/embed sizes in **Input Dims**
-- **Model**: From combination of op **name** and **Input Dims**
+- **Model**: Prefer `nn_modules.txt` (Step 2) over op-name inference.
 
 ---
 
