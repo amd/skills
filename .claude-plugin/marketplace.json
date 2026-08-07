@@ -17,9 +17,26 @@
         "./skills/local-ai-use",
         "./skills/local-ai-app-integration",
         "./skills/serving-llms-on-instinct",
-        "./skills/tracelens-analysis-orchestrator"
+        "./skills/tracelens-analysis-orchestrator",
+        "./skills/quark-env-preflight",
+        "./skills/quark-install",
+        "./skills/quark-onnx-autosearch-pro",
+        "./skills/quark-onnx-debug",
+        "./skills/quark-onnx-install",
+        "./skills/quark-onnx-model-intake",
+        "./skills/quark-onnx-ptq",
+        "./skills/quark-onnx-result-validator",
+        "./skills/quark-torch-debug",
+        "./skills/quark-torch-export",
+        "./skills/quark-torch-file2file-quantization",
+        "./skills/quark-torch-install",
+        "./skills/quark-torch-llm-eval",
+        "./skills/quark-torch-llm-ptq-eval",
+        "./skills/quark-torch-model-intake",
+        "./skills/quark-torch-ptq",
+        "./skills/quark-torch-result-validator"
       ],
-      "description": "AMD's verified Agent Skills in one plugin: route image/audio through local AI on Ryzen AI, serve LLMs on AMD Instinct GPUs with vLLM, and analyze GPU kernel and PyTorch trace performance."
+      "description": "AMD's verified Agent Skills in one plugin: quantize and validate PyTorch or ONNX models with AMD Quark, route image/audio through local AI on Ryzen AI, serve LLMs on AMD Instinct GPUs with vLLM, and analyze GPU kernel and PyTorch trace performance."
     }
   ]
 }

@@ -14,6 +14,8 @@
     "amd",
     "rocm",
     "hip",
+    "quark",
+    "quantization",
     "ryzen-ai",
     "vllm",
     "lemonade",
