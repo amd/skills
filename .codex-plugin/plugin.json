@@ -12,12 +12,14 @@
     "amd",
     "rocm",
     "hip",
+    "skill-discovery",
     "ryzen-ai",
     "vllm",
     "lemonade",
     "local-ai"
   ],
   "skills": [
+    "./skills/amd-skill-finder",
     "./skills/local-ai-use",
     "./skills/local-ai-app-integration",
     "./skills/serving-llms-on-instinct",
@@ -26,7 +28,7 @@
   "interface": {
     "displayName": "AMD Skills",
     "shortDescription": "Agent Skills for AMD-optimized workflows.",
-    "longDescription": "AMD's verified Agent Skills in one plugin: route image/audio through local AI on Ryzen AI, serve LLMs on AMD Instinct GPUs with vLLM, and analyze GPU kernel and PyTorch trace performance.",
+    "longDescription": "AMD's verified Agent Skills in one plugin: discover AMD and ROCm capabilities, route image/audio through local AI on Ryzen AI, serve LLMs on AMD Instinct GPUs with vLLM, and analyze GPU kernel and PyTorch trace performance.",
     "developerName": "AMD",
     "category": "Developer Tools",
     "capabilities": [
