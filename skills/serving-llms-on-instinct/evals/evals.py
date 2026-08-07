@@ -27,6 +27,7 @@ captured evidence.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -43,58 +44,102 @@ pytestmark = pytest.mark.skipif(
 # Small, ungated, single-GPU-friendly model keeps the serve fast.
 MODEL_ID = "Qwen/Qwen3-0.6B"
 
+# Matches the model however it shows up in a container's name, image, or
+# command: vllm-qwen3-0.6b, vllm-qwen3-0-6b, --model Qwen/Qwen3-0.6B, ...
+_MODEL_MARKER = re.compile(r"qwen3[-_./]?0[-_.]?6b")
+
+
+def _docker_rows() -> list[tuple[str, str]]:
+    """Return ``(container_id, searchable_text)`` for every container."""
+    docker = shutil.which("docker")
+    if not docker:
+        return []
+    try:
+        out = subprocess.run(
+            [docker, "ps", "-a", "--no-trunc",
+             "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Command}}"],
+            capture_output=True, text=True, timeout=30,
+        ).stdout
+    except (subprocess.SubprocessError, OSError):
+        return []
+
+    rows = []
+    for line in out.splitlines():
+        container_id, _, rest = line.partition("\t")
+        if container_id.strip():
+            rows.append((container_id.strip(), rest.lower()))
+    return rows
+
 
 def _cleanup_test_containers() -> None:
-    """Best-effort removal of vLLM containers this test may have started.
+    """Best-effort removal of vLLM containers serving the tiny test model.
 
     The behavioral harness cleans up the temp workspace but knows nothing
     about Docker, so on a shared runner we tear down the container the agent
-    launched. Scoped to names the skill derives from the tiny test model so we
-    never touch someone else's endpoint.
+    launched. Matching is scoped to the tiny test model -- by name, image, or
+    the ``--model`` argument in the container command -- so we never touch
+    someone else's endpoint, but we still catch containers the agent named
+    differently than the skill's template suggests.
+
+    This runs *before* the agent as well as after: a container left behind by
+    an earlier run is a healthy endpoint the agent will reasonably reuse
+    instead of launching its own, which makes the launch expectation fail.
     """
     docker = shutil.which("docker")
     if not docker:
         return
+    ids = [cid for cid, text in _docker_rows() if _MODEL_MARKER.search(text)]
+    if not ids:
+        return
+    print(f"  [cleanup] removing {len(ids)} stale {MODEL_ID} container(s)", flush=True)
     try:
-        ids = subprocess.run(
-            [docker, "ps", "-aq", "--filter", "name=qwen3-0.6b"],
-            capture_output=True, text=True, timeout=30,
-        ).stdout.split()
-        if ids:
-            subprocess.run([docker, "rm", "-f", *ids], capture_output=True, timeout=60)
+        subprocess.run([docker, "rm", "-f", *ids], capture_output=True, timeout=120)
     except (subprocess.SubprocessError, OSError):
         pass
 
 
-def test_serve_tiny_model_on_instinct():
+@pytest.fixture
+def clean_slate():
+    """Guarantee no pre-existing test container, before and after the run."""
+    _cleanup_test_containers()
+    leftover = [cid for cid, text in _docker_rows() if _MODEL_MARKER.search(text)]
+    if leftover:
+        pytest.fail(
+            f"could not remove pre-existing {MODEL_ID} container(s) {leftover}; "
+            "the agent would reuse the running endpoint instead of launching"
+        )
     try:
-        with claude("opus", skill="serving-llms-on-instinct") as agent:
-            run = agent.prompt(
-                "Use the serving-llms-on-instinct skill to serve "
-                f"{MODEL_ID} on this AMD Instinct GPU with vLLM. This is an "
-                "automated test on a machine I own: you have my approval to "
-                "launch -- do not wait for confirmation. Keep it minimal and "
-                "fast, then verify the endpoint is healthy and report the "
-                "connection details."
-            )
-
-            # Deterministic: the skill was actually engaged.
-            run.logs_contains("serving-llms-on-instinct")
-
-            # Positive behavioral expectations.
-            run.should("Detect the AMD Instinct GPU before configuring vLLM")
-            run.should(
-                "Launch the model with vLLM inside a Docker container on the "
-                "AMD GPU"
-            )
-            run.should("Verify the vLLM endpoint is healthy after launching")
-
-            # Negative behavioral expectations.
-            run.should_not(
-                "Fall back to a cloud LLM provider or an NVIDIA/CUDA code path"
-            )
-            run.should_not(
-                "Serve a different, larger model than the one that was requested"
-            )
+        yield
     finally:
         _cleanup_test_containers()
+
+
+def test_serve_tiny_model_on_instinct(clean_slate):
+    with claude("opus", skill="serving-llms-on-instinct") as agent:
+        run = agent.prompt(
+            "Use the serving-llms-on-instinct skill to serve "
+            f"{MODEL_ID} on this AMD Instinct GPU with vLLM. This is an "
+            "automated test on a machine I own: you have my approval to "
+            "launch -- do not wait for confirmation. Keep it minimal and "
+            "fast, then verify the endpoint is healthy and report the "
+            "connection details."
+        )
+
+        # Deterministic: the skill was actually engaged.
+        run.logs_contains("serving-llms-on-instinct")
+
+        # Positive behavioral expectations.
+        run.should("Detect the AMD Instinct GPU before configuring vLLM")
+        run.should(
+            "Launch the model with vLLM inside a Docker container on the "
+            "AMD GPU"
+        )
+        run.should("Verify the vLLM endpoint is healthy after launching")
+
+        # Negative behavioral expectations.
+        run.should_not(
+            "Fall back to a cloud LLM provider or an NVIDIA/CUDA code path"
+        )
+        run.should_not(
+            "Serve a different, larger model than the one that was requested"
+        )
