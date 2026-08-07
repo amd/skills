@@ -25,6 +25,7 @@ class RegistryTests(unittest.TestCase):
 
     def test_requested_projects_and_canonical_repositories_are_present(self):
         required = {
+            "quark": "amd/Quark",
             "mori": "ROCm/mori",
             "hyperloom": "AMD-AGI/Hyperloom",
             "pytorch": "pytorch/pytorch",
@@ -93,6 +94,17 @@ class RoutingTests(unittest.TestCase):
         self.assertTrue({"mori", "lmcache", "mooncake", "nixl"}.issubset(ids))
         self.assertNotIn("triton", ids)
         self.assertTrue(all(result["installable"] is False for result in results))
+
+    def test_quark_quantization_routes_to_official_quark_first(self):
+        self.assertTrue(finder.has_amd_signal("Quark PTQ", self.registry))
+        results = finder.route_projects(
+            "Use AMD Quark PTQ to quantize a Qwen model to FP8",
+            self.registry,
+            limit=5,
+        )
+        self.assertEqual(results[0]["id"], "quark")
+        self.assertEqual(results[0]["repositories"][0]["repo"], "amd/Quark")
+        self.assertEqual(results[0]["repositories"][0]["tier"], "amd-official")
 
     def test_post_training_routes_to_three_requested_frameworks(self):
         results = finder.route_projects(

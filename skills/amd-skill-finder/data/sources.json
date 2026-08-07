@@ -5,6 +5,8 @@
   ],
   "amd_signals": [
     "amd",
+    "amd quark",
+    "quark",
     "rocm",
     "hip",
     "instinct",

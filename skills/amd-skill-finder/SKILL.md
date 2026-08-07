@@ -6,10 +6,12 @@ description: >-
   Use whenever the user asks whether an AMD skill exists, wants to browse or
   install AMD skills, or has an AMD/ROCm task that may benefit from a specialized
   workflow. Trigger on AMD, ROCm, HIP, AMD Instinct, Ryzen AI, Radeon, MI300X,
-  MI325X, MI350X, MI355X, gfx942, gfx950, PyTorch/JAX/Triton on AMD, vLLM,
-  SGLang, AITER, ATOM, MORI, Hyperloom, LMCache, Mooncake, NIXL, TileLang,
-  TorchTitan, Miles, VERL, or VIME in an AMD context. Do not use for generic
-  non-AMD programming, deployment, optimization, AI, or infrastructure tasks.
+  MI325X, MI350X, MI355X, gfx942, gfx950, PyTorch/JAX/Triton on AMD, AMD
+  Quark, model quantization, PTQ, FP8, INT8, INT4, MXFP4, PyTorch or ONNX
+  quantization, vLLM, SGLang, AITER, ATOM, MORI, Hyperloom, LMCache, Mooncake,
+  NIXL, TileLang, TorchTitan, Miles, VERL, or VIME in an AMD context. Do not use
+  for generic non-AMD programming, deployment, optimization, AI, or
+  infrastructure tasks.
 ---
 
 # AMD Skill Finder
