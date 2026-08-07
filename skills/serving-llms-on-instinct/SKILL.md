@@ -101,6 +101,31 @@ This shallow-clones vllm-project/recipes from GitHub and fetches the latest
 Docker tag from Docker Hub. Takes ~10 seconds. If it fails, the existing
 cache still works.
 
+## Step 3b: Check model-specific overrides (MANDATORY)
+
+Run this script before constructing any Docker command. It reads
+`data/gpu_overrides.json` and prints the env vars and arg changes that MUST
+be applied for this model+GPU combination. Some overrides prevent silent data
+corruption — the model will start and appear healthy but produce wrong output
+without them.
+
+```bash
+python3 scripts/check_overrides.py --model <HF_MODEL_ID> --gfx <gfx_version>
+# Remote:
+python3 scripts/check_overrides.py --model <HF_MODEL_ID> --gfx <gfx_version>
+```
+
+Returns JSON with `env_set` (add these as `--env KEY=VALUE` in docker run),
+`args_remove` (remove these from vLLM args if present), and `summary`
+(explain to the user what changed and why).
+
+Do not skip this step even if you believe you already know the correct
+configuration. Known critical case:
+
+| Model prefix | GPU | Override | Why |
+|---|---|---|---|
+| `openai/gpt-oss` | gfx950 | `VLLM_ROCM_USE_AITER_MOE=0` | AITER MoE kernels corrupt the final answer (word-salad, repetition, unicode junk) at any temperature. The model loads, runs, and returns HTTP 200 without this flag — but the output is wrong. |
+
 ## Step 4: Construct the Docker command
 
 Read `data/recipes_cache.json` and `data/gpu_overrides.json` directly.
@@ -128,6 +153,11 @@ Build the Docker command by combining:
    For multi-GPU, add `--tensor-parallel-size N` (see VRAM estimation below).
    For MoE models on multi-GPU, also add `--distributed-executor-backend mp`.
 8. **Port arg**: `--port <port>`
+
+**Apply model-specific overrides (final, highest precedence):** Apply the
+`env_set` and `args_remove` values collected in Step 3b. These win over all
+recipe and GPU defaults. If Step 3b found no matching override, skip this
+sub-step (but confirm to the user that no override was needed).
 
 If the exact model ID is not in `recipes_cache.json`, check for a base model
 match by stripping date/version suffixes (e.g., `Kimi-K2-Instruct` matches
@@ -314,6 +344,16 @@ into Docker -- that also hides all GPUs inside the container.
 with a segfault or illegal instruction: `VLLM_ROCM_USE_AITER_FP4BMM` must be
 `0` on gfx942. This is set correctly in `gpu_overrides.json` for gfx942.
 See vLLM issue #34641.
+
+**AITER MoE kernels corrupt gpt-oss output on gfx950 (MI350X/MI355X)** -- With
+the default AITER MoE path active, `openai/gpt-oss-*` produces coherent
+reasoning but a corrupted final answer: word-salad, repetition loops, stray
+unicode junk -- at any temperature, on both 20b and 120b. The AITER attention
+backend is fine and stays on. Fix: `VLLM_ROCM_USE_AITER_MOE=0`. Note:
+`AITER_MHA=0` and `AITER_FUSED_MOE_A16W4=1` do NOT fix it -- the whole MoE
+AITER path must be disabled. Handled automatically by the `model_overrides`
+entry for `openai/gpt-oss` in `gpu_overrides.json` (gfx950), applied as the
+final, highest-precedence step in Step 4. Observed on ROCm 7.2 / vLLM 0.23.0.
 
 **`HIP error: no kernel image`** -- The Docker image has no compiled kernel
 for your GPU's gfx version. Use `vllm/vllm-openai-rocm:latest`; it includes
