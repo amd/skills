@@ -1,18 +1,17 @@
 {
-  "vllm_version": "0.22.0",
+  "vllm_version": "0.25.1",
   "container": {
-    "image": "amdih/zendnn_zentorch:vllm_v0.22.0_zentorch_v2.11.0.1_ubuntu22.04_2026_ww23",
+    "image": "amdih/zendnn_zentorch:vllm_v0.25.1_zentorch_v2.11.0.3_ubuntu22.04_2026_ww30",
     "runtimes": ["docker", "podman"],
-    "comment": "Public vLLM + zentorch CPU image on Docker Hub (amdih/zendnn_zentorch) -- no internal-registry access needed. Tags are vllm_v<ver>_zentorch_v<ver>_<os>_<build>; prefer the newest ubuntu22.04 stable. Both docker and podman are supported; the skill prefers docker and falls back to podman.",
+    "comment": "Pinned public vLLM + zentorch CPU image on Docker Hub (amdih/zendnn_zentorch) -- no internal-registry access needed. Update this image and vllm_version together so model-registry checks match the served runtime. Both docker and podman are supported; the skill prefers docker and falls back to podman.",
     "run_flags": [
       "--ipc=host",
-      "--shm-size=16g",
       "--network=host"
     ],
     "hf_cache_mount": "-v ~/.cache/huggingface:/root/.cache/huggingface",
     "flag_notes": {
-      "--ipc=host": "vLLM workers use host IPC/shared memory.",
-      "--shm-size=16g": "vLLM needs a large /dev/shm; default 64MB is not enough.",
+      "--ipc=host": "vLLM workers need a large /dev/shm; --ipc=host shares the host's (large) shared memory, which covers it. Do NOT also pass --shm-size: podman rejects '--shm-size' together with '--ipc=host' (cannot set shmsize in host IPC namespace), and it is redundant on docker too.",
+      "shm_alternative": "If you must isolate IPC (drop --ipc=host), then add --shm-size=16g instead (the 64MB container default is too small for vLLM). Use one or the other, never both.",
       "--network=host": "Expose the served port directly. Alternative: -p <port>:<port>.",
       "numa": "A single instance is pinned to ONE socket plus its memory. cpu_tune.py picks a free socket by CPU load on dual-socket hosts (warns if both busy; --socket N forces), sizes KV from that socket's local RAM, and emits --cpuset-cpus + --cpuset-mems (container) or numactl --cpunodebind/--membind (conda). True multi-socket scaling = multiple instances (one per socket), out of scope here."
     }
@@ -34,7 +33,7 @@
   "default_model": "Qwen/Qwen3-0.6B",
   "default_model_notes": "Ungated (Apache-2.0), tiny, fast first success on CPU. For a real workload pick a larger Qwen3 / Llama once the flow is verified.",
   "smoke_model": "Qwen/Qwen3-0.6B",
-  "smoke_model_notes": "Current small Qwen, chat-capable (ships a chat template, so /v1/chat/completions works -- unlike base models such as opt-125m).",
+  "smoke_model_notes": "Current small Qwen, chat-capable (ships a chat template, so /v1/chat/completions works -- unlike base models such as allenai/OLMo-2-0425-1B, which have no chat template and serve /v1/completions).",
   "env_defaults": {
     "VLLM_CPU_OMP_THREADS_BIND": "set by cpu_tune.py (physical cores of the chosen socket)",
     "VLLM_CPU_KVCACHE_SPACE": "set by cpu_tune.py (GB)",
