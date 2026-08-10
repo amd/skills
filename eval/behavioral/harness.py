@@ -212,8 +212,17 @@ def _list_workspace_files(workspace: Path) -> list[str]:
     return files
 
 
-def _grade_with_llm(statement: str, run: "Run", judge_model: str | None) -> tuple[bool, str]:
-    """Ask a grader LLM whether ``statement`` is TRUE given the run's evidence.
+def _grade_with_llm(
+    statement: str, run: "Run", judge_model: str | None, *, must_happen: bool
+) -> tuple[bool, str]:
+    """Ask a grader LLM whether the run satisfied a requirement.
+
+    ``must_happen`` selects the polarity: ``True`` means the agent was required
+    to do ``statement``, ``False`` means it was required *not* to. The judge
+    grades the requirement itself and returns ``True`` when it is satisfied, so
+    callers must never negate this verdict -- a judge shown a "must not"
+    expectation reports the desired behavior as a pass, and negating that turns
+    a correct run into a failure.
 
     The grader may read files in the workspace (e.g. open out.png), so the
     workspace is added and tool permissions are bypassed for the grader too.
@@ -231,15 +240,30 @@ def _grade_with_llm(statement: str, run: "Run", judge_model: str | None) -> tupl
         f"--- Agent final message ---\n{run.result_text[:1500]}\n"
         f"--- Transcript commands/outputs (truncated) ---\n{cmd_text}\n"
     )
+    if must_happen:
+        requirement = f"The agent MUST have done this:\n{statement}"
+        pass_means = (
+            'Set "pass" to true if the agent did it, false if it did not.'
+        )
+    else:
+        requirement = f"The agent MUST NOT have done this:\n{statement}"
+        pass_means = (
+            'Set "pass" to true if the agent avoided it, false if the agent '
+            "did it anyway. Absence of evidence that the agent did it counts "
+            "as avoiding it, so the default verdict is true."
+        )
+
     prompt_text = (
-        "You are grading whether a coding agent's run satisfied a specific "
-        "expectation. Decide if the following statement is TRUE based on the "
-        "evidence and (if needed) by reading files in the provided workspace "
-        f"directory: {run.workspace}\n\n"
-        f"STATEMENT TO EVALUATE:\n{statement}\n\n"
+        "You are grading whether a coding agent's run satisfied one "
+        "requirement. Judge only from the evidence below and (if needed) by "
+        "reading files in the provided workspace directory: "
+        f"{run.workspace}\n\n"
+        f"REQUIREMENT:\n{requirement}\n\n"
         f"EVIDENCE:\n{evidence}\n\n"
+        f'"pass" reports whether the requirement is satisfied. {pass_means} '
+        "Do not invert the verdict for any reason.\n"
         "Respond with ONLY a single-line JSON object and nothing else: "
-        '{"pass": true|false, "reason": "<one short sentence>"}'
+        '{"pass": true|false, "reason": "<one short sentence, no braces>"}'
     )
     cmd = [
         claude_bin, "-p",
@@ -264,17 +288,26 @@ def _grade_with_llm(statement: str, run: "Run", judge_model: str | None) -> tupl
     except json.JSONDecodeError:
         verdict_text = (proc.stdout or "").strip()
 
-    match = re.search(r"\{.*\}", verdict_text, re.DOTALL)
-    if not match:
+    # A chatty judge may wrap the verdict in prose, so prefer the last flat
+    # `{...}` object; one greedy match spanning several objects parses as nothing.
+    candidates = re.findall(r"\{[^{}]*\}", verdict_text, re.DOTALL)
+    if not candidates:
+        candidates = re.findall(r"\{.*\}", verdict_text, re.DOTALL)
+    verdict = None
+    for candidate in reversed(candidates):
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and "pass" in parsed:
+            verdict = parsed
+            break
+    if verdict is None:
         return False, f"llm_judge gave no JSON verdict: {verdict_text[:200]!r}"
-    try:
-        verdict = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return False, f"llm_judge verdict not valid JSON: {match.group(0)[:200]!r}"
 
-    passed = bool(verdict.get("pass"))
+    satisfied = bool(verdict.get("pass"))
     reason = str(verdict.get("reason", "")).strip() or "(no reason given)"
-    return passed, f"llm_judge: {reason}"
+    return satisfied, f"llm_judge: {reason}"
 
 
 class Run:
@@ -324,13 +357,17 @@ class Run:
         return self
 
     def should(self, statement: str) -> "Run":
-        observed, reason = _grade_with_llm(statement, self, self.judge_model)
-        self._report(observed, "should", f"{statement} -- {reason}")
+        satisfied, reason = _grade_with_llm(
+            statement, self, self.judge_model, must_happen=True
+        )
+        self._report(satisfied, "should", f"{statement} -- {reason}")
         return self
 
     def should_not(self, statement: str) -> "Run":
-        observed, reason = _grade_with_llm(statement, self, self.judge_model)
-        self._report(not observed, "should_not", f"{statement} -- {reason}")
+        satisfied, reason = _grade_with_llm(
+            statement, self, self.judge_model, must_happen=False
+        )
+        self._report(satisfied, "should_not", f"{statement} -- {reason}")
         return self
 
     def _report(self, passed: bool, kind: str, detail: str) -> None:
