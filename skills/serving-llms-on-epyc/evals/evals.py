@@ -16,6 +16,11 @@ import pytest
 
 from harness import claude
 
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="serving-llms-on-epyc is Linux-only (lscpu, numactl, container runtime)",
+)
+
 MODEL_ID = "Qwen/Qwen3-0.6B"
 
 
@@ -27,10 +32,6 @@ can report `avx512: true` alongside `is_amd_epyc: false`, and still exits 0 --
 so stopping is the agent honoring the skill rather than a script's exit code.
 Nothing is downloaded.
 """
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="detect.py reads lscpu, so the on-host guard check needs Linux",
-)
 def test_non_epyc_host_is_rejected_before_anything_launches():
     with claude("opus", skill="serving-llms-on-epyc") as agent:
         run = agent.prompt(
