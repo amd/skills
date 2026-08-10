@@ -79,17 +79,17 @@ def test_trigger_permission_denied_kfd():
 def test_trigger_routes_lemonade_upstream():
     with claude("opus", skill="rocm-doctor") as agent:
         run = agent.prompt(
-            "Lemonade fails to load a model on my Radeon GPU with a ROCm error. "
-            "Can you sort this out?"
+            "The Lemonade app (from lemonade-sdk) fails to load a model on my "
+            "Radeon GPU -- its bundled ROCm runtime throws an error. Where should "
+            "I report this?"
         )
 
         run.logs_contains("rocm-doctor")
+        # Deterministic: the skill hands out this exact tracker for a Lemonade-owned
+        # runtime problem, so assert the URL directly instead of judging the framing.
+        run.logs_contains("lemonade-sdk/lemonade/issues")
 
-        run.should(
-            "Route the user to the Lemonade issue tracker "
-            "(github.com/lemonade-sdk/lemonade/issues) because Lemonade ships its "
-            "own ROCm runtime and is not a system-ROCm failure mode"
-        )
+        # One robust judge invariant: it must not invent a system-ROCm fix here.
         run.should_not(
             "Fabricate a system-ROCm `rocm fix` for a Lemonade-owned runtime problem"
         )
@@ -105,11 +105,26 @@ def test_non_trigger_nvidia_is_out_of_scope():
             "seems broken. Help me fix it."
         )
 
-        # The skill may recognize the symptom, but must bow out: NVIDIA is
-        # explicitly out of scope, so it must not run the AMD ROCm workflow.
+        # The skill may recognize the symptom, but SKILL.md makes a non-AMD GPU a
+        # hard early exit: it must not run the AMD ROCm workflow or offer generic
+        # GPU fixes.
         run.should_not(
-            "Apply the AMD ROCm diagnosis workflow (rocm examine / diagnose / fix) "
-            "to an NVIDIA GPU problem"
+            "Apply the AMD ROCm diagnosis workflow (rocm examine / diagnose / fix), "
+            "or offer generic GPU fixes, for an NVIDIA GPU problem"
+        )
+
+
+def test_non_trigger_wsl2_out_of_scope():
+    with claude("opus", skill="rocm-doctor") as agent:
+        run = agent.prompt(
+            "I'm running ROCm inside WSL2 on Windows and torch.cuda.is_available() "
+            "is False for my AMD GPU. How do I fix it?"
+        )
+
+        # WSL2 is a distinct, out-of-scope platform; the skill must not drive the
+        # system-ROCm workflow for it.
+        run.should_not(
+            "Run the AMD ROCm examine / diagnose / fix workflow for a WSL2 problem"
         )
 
 

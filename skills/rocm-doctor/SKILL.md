@@ -43,6 +43,13 @@ doesn't match a known mode, route the user upstream instead of guessing.
 
 ## Workflow
 
+**First, confirm this is an AMD GPU on a supported platform.** If the symptom is
+about an **NVIDIA / Intel / Apple** GPU, or is running under **WSL2**, stop
+immediately: say it is out of scope and do **not** run `rocm examine` /
+`diagnose` / `fix` or offer generic GPU fixes. See
+[Out of scope](#out-of-scope). Only continue when the GPU is AMD and the
+platform is native Linux or Windows.
+
 0. **Ensure the `rocm` CLI is present.** Everything below shells out to it, so
    check first and install it if missing:
 
@@ -145,6 +152,8 @@ symptom, do the routing yourself using the list below.)
 
 ## Rules
 
+- Never run the workflow — or offer generic GPU fixes — for a non-AMD GPU or a
+  WSL2 setup. State it is out of scope and stop.
 - Never invent a fix. If `rocm diagnose` returns no match, route upstream.
 - Never run a mutating fix without the user's explicit OK; prefer `--dry-run`
   first. New failure modes are added to the CLI catalog, not improvised here.
