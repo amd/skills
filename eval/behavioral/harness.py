@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -288,20 +287,21 @@ def _grade_with_llm(
     except json.JSONDecodeError:
         verdict_text = (proc.stdout or "").strip()
 
-    # A chatty judge may wrap the verdict in prose, so prefer the last flat
-    # `{...}` object; one greedy match spanning several objects parses as nothing.
-    candidates = re.findall(r"\{[^{}]*\}", verdict_text, re.DOTALL)
-    if not candidates:
-        candidates = re.findall(r"\{.*\}", verdict_text, re.DOTALL)
+    # A chatty judge may wrap the verdict in prose, and its reason may itself
+    # contain braces (a regex quantifier, a quoted JSON snippet), so let the
+    # decoder find object boundaries rather than matching braces textually.
+    # Keep scanning so the last verdict-shaped object wins.
+    decoder = json.JSONDecoder()
     verdict = None
-    for candidate in reversed(candidates):
+    for i, ch in enumerate(verdict_text):
+        if ch != "{":
+            continue
         try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError:
+            parsed, _ = decoder.raw_decode(verdict_text[i:])
+        except ValueError:
             continue
         if isinstance(parsed, dict) and "pass" in parsed:
             verdict = parsed
-            break
     if verdict is None:
         return False, f"llm_judge gave no JSON verdict: {verdict_text[:200]!r}"
 
