@@ -119,7 +119,7 @@ input/output lengths, warmup, and profiler state.
 
 ### Review TraceLens post-processing
 
-After the profiled workload completes, Magpie post-processes its torch traces.
+After the profiled workload completes, Magpie invokes TraceLens functions to post-process the captured PyTorch traces.
 For inference mode it splits representative stage windows and writes full
 reports for available `prefilldecode`, `decode`, and `prefill` stages. Confirm
 that `benchmark_report.json` contains a successful `tracelens_analysis` section,
