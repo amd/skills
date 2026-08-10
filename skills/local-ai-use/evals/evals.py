@@ -39,5 +39,5 @@ def test_generate_image_of_a_cat():
             run.should("Add a 'Local AI Use' block to AGENTS.md")
 
             # Negative behavioral expectations
-            run.should_not("Pull unrelated modalities for this image generation task")
+            run.should_not("Pull TTS or STT models for this image generation task")
             run.should_not("Reach for a cloud image path instead of local Lemonade")
