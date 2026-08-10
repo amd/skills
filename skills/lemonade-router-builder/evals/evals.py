@@ -47,12 +47,6 @@ def test_keyword_router_generation():
 
 def test_pii_regex_router_generation():
     """Trigger: user asks to keep PII local using regex patterns."""
-    # A quoted SSN/email pattern puts `{n}` quantifiers in the judge's reason,
-    # which breaks the harness's verdict parsing and fails a passing run.
-    prose_only = (
-        " (grading note: describe the pattern in words in your reason -- do not "
-        "quote the pattern itself and do not use curly braces)"
-    )
     agent_configs = [(claude, "opus")]
     for agent, model in agent_configs:
         with agent(model, skill="lemonade-router-builder") as run:
@@ -65,8 +59,8 @@ def test_pii_regex_router_generation():
             run.logs_contains("lemonade-router-builder")
             run.workspace_contains("router.json")
 
-            run.should(f"Include a regex condition matching SSN patterns{prose_only}")
-            run.should(f"Include a regex condition matching email addresses{prose_only}")
+            run.should("Include a regex condition matching SSN patterns")
+            run.should("Include a regex condition matching email addresses")
             run.should("Place the PII rule before any other rules")
             run.should("Run the offline validator and confirm the JSON is ready")
 
