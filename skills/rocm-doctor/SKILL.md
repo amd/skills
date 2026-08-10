@@ -27,6 +27,27 @@ probe, the closed failure-mode catalog, and the fixes; the skill just drives it
 and relays the results. The catalog is a **closed list** — if the symptom
 doesn't match a known mode, route the user upstream instead of guessing.
 
+## Scope gate — check before anything else
+
+Read the user's symptom and answer one question first: **is this an AMD GPU on
+native Linux or Windows?**
+
+If it is **not** — an **NVIDIA / Intel / Apple** GPU, or anything running under
+**WSL2** — then **stop and decline**:
+
+- Say plainly that it is **out of scope** for this skill and why (not an AMD GPU
+  / WSL2 is a separate platform).
+- Give **no** troubleshooting for it: no commands to run, no driver or CUDA
+  advice, no diagnostic checklist, no "try this first" — not even generic GPU
+  suggestions. Point at the vendor's own docs (or AMD's ROCm-on-WSL guide) and
+  stop there.
+- Do **not** run `rocm examine` / `rocm diagnose` / `rocm fix`.
+
+Being helpful here means being honest about the boundary — confidently-wrong
+advice for a stack this skill does not cover is worse than no advice. Only
+continue past this gate when the GPU is AMD and the platform is native Linux or
+Windows. See [Out of scope](#out-of-scope).
+
 ## Prerequisites
 
 - **The `rocm` CLI.** This skill is only a driver over it; Phase 0 below installs
@@ -43,12 +64,8 @@ doesn't match a known mode, route the user upstream instead of guessing.
 
 ## Workflow
 
-**First, confirm this is an AMD GPU on a supported platform.** If the symptom is
-about an **NVIDIA / Intel / Apple** GPU, or is running under **WSL2**, stop
-immediately: say it is out of scope and do **not** run `rocm examine` /
-`diagnose` / `fix` or offer generic GPU fixes. See
-[Out of scope](#out-of-scope). Only continue when the GPU is AMD and the
-platform is native Linux or Windows.
+Only start here once the [Scope gate](#scope-gate--check-before-anything-else)
+passes — the GPU is AMD and the platform is native Linux or Windows.
 
 0. **Ensure the `rocm` CLI is present.** Everything below shells out to it, so
    check first and install it if missing:
@@ -152,8 +169,9 @@ symptom, do the routing yourself using the list below.)
 
 ## Rules
 
-- Never run the workflow — or offer generic GPU fixes — for a non-AMD GPU or a
-  WSL2 setup. State it is out of scope and stop.
+- Never run the workflow — or offer *any* troubleshooting, generic GPU fixes
+  included — for a non-AMD GPU or a WSL2 setup. State it is out of scope and
+  stop.
 - Never invent a fix. If `rocm diagnose` returns no match, route upstream.
 - Never run a mutating fix without the user's explicit OK; prefer `--dry-run`
   first. New failure modes are added to the CLI catalog, not improvised here.
