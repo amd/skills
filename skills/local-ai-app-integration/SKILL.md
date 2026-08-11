@@ -6,7 +6,7 @@ description: >-
   a local LLM, local chat, embeddings, image generation, speech-to-text, or
   text-to-speech to an existing app; replace or supplement OpenAI, Anthropic, Ollama, or
   other cloud AI APIs with a local backend; only use to convert user apps; Do not use if
-  the goal is to simply run local ai tasks instead of converting an app to use local ai.
+  the goal is to simply run local ai tasks on a workspace instead of converting an app to use local ai.
 ---
 
 # Local AI App Integration (Embeddable Lemonade)

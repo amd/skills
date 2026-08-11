@@ -25,8 +25,8 @@
     {
       "id": "tts-offline",
       "category": "positive",
-      "expect": "local-ai-use",
-      "prompt": "Stop sending text to a paid speech vendor for this project. I want anything you read aloud synthesized offline on this laptop."
+      "expect": "local-ai-app-integration",
+      "prompt": "Stop sending text to a paid speech vendor for this app. I want anything you read aloud synthesized offline on this laptop."
     },
     {
       "id": "transcribe-private",
@@ -38,7 +38,7 @@
       "id": "split-routing",
       "category": "positive",
       "expect": "local-ai-use",
-      "prompt": "From now on in this repo, use local models for pictures and audio but keep using the cloud for chat."
+      "prompt": "From now on on Claude, use local models for generating pictures and audio but keep using the cloud for chat."
     },
     {
       "id": "electron-offline-mode",
