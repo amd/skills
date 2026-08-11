@@ -4,7 +4,12 @@
 
 """Behavioral tests for the `rocm-doctor` skill.
 
-Run locally (needs the `claude` CLI authenticated; otherwise the suite skips):
+Dormant while the skill sits in `staging/`: the behavioral tooling resolves
+skills from `skills/` only (`SKILLS_DIR` in `eval/claude_eval.py`, and the CI
+matrix in `.github/scripts/select_behavioral.py`), so these tests are neither
+scheduled by CI nor runnable locally from here. They are kept beside the skill
+so they come back with it. Once the skill is promoted to `skills/rocm-doctor/`,
+they run again -- in CI automatically, and locally with:
 
     cd eval/behavioral
     python -m pytest -c pytest.ini -p conftest ../../skills/rocm-doctor/evals/evals.py

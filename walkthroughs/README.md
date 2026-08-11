@@ -13,4 +13,3 @@ Please choose a skill to get started.
 * [local-ai-app-integration](./local-ai-app-integration.md): Add a local AI mode to a cloud-only app.
 * [serving-llms-on-epyc](./serving-llms-on-epyc.md): Bring up a vLLM + zentorch LLM endpoint on an AMD EPYC™ CPU.
 * [tracelens-analysis-orchestrator](./tracelens-analysis-orchestrator.md): Run agentic PyTorch profiler trace analysis and produce a prioritized performance report.
-* [rocm-doctor](./rocm-doctor.md): Diagnose and fix ROCm / PyTorch / llama.cpp failures on an AMD GPU.
