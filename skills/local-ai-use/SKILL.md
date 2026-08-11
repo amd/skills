@@ -1,17 +1,19 @@
 ---
 name: local-ai-use
 description: >-
-  Use image generation, text-to-speech, and speech-to-text through a local
-  Lemonade Server on the current workspace so the agent stops paying for cloud calls.
-  Use when the user wants to save tokens, save cost, or save money using local
-  AI; default to local, offline, on-device, or private image generation,
-  transcription, or text-to-speech in this workspace; stop using DALL-E,
-  Whisper-as-a-service, ElevenLabs, or other paid multimodal APIs; route the
-  agent's image, TTS, or STT tool calls to a local model; or mentions Lemonade
-  Server, OmniRouter, SD-Turbo, kokoro, Whisper, Ryzen AI, NPU/iGPU/dGPU
-  inference, or "use local for images but cloud for chat". Run once per
-  workspace; the rule it installs handles every later request; use to setup local
-  use on claude, cursor, codex and other agentic harnesses.
+  Generates images, transcribes audio, and synthesizes speech on the user's own
+  machine through a local Lemonade Server instead of a paid cloud API, for work
+  the agent itself does in the current workspace. Use for a one-off request —
+  transcribe this recording, make this picture, read this text aloud — whenever
+  the user wants it done locally, offline, on-device, or kept private, and also
+  when the user wants that routing to stick from now on. Use when the user wants
+  to save money, cost, or tokens on image, audio, or voice API calls; wants to
+  stop using DALL-E, Whisper-as-a-service, ElevenLabs, or other paid multimodal
+  APIs; says "use local models for pictures but keep the cloud for chat" in
+  Claude, Cursor, Codex, or another agent harness; or
+  mentions Lemonade Server, OmniRouter, SD-Turbo, kokoro, Whisper, Ryzen AI, or
+  NPU/iGPU/dGPU inference. Changes no application source code; do not use this 
+  skill if the user is instead adding local AI to an app they ship.
 ---
 
 # Local AI Use (route image, TTS, STT through Lemonade)

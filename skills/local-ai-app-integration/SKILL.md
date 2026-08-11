@@ -5,8 +5,9 @@ description: >-
   Use when the user wants to add local AI, offline AI, private AI, on-device AI,
   a local LLM, local chat, embeddings, image generation, speech-to-text, or
   text-to-speech to an existing app; replace or supplement OpenAI, Anthropic, Ollama, or
-  other cloud AI APIs with a local backend; only use to convert user apps; Do not use if
-  the goal is to simply run local ai tasks on a workspace instead of converting an app to use local ai.
+  other cloud AI APIs with a local backend; only use to convert user apps. Do not use when
+  the user just wants the agent itself to generate images, transcribe, or speak locally in
+  the current workspace, even to cut their own API bill — that is local-ai-use.
 ---
 
 # Local AI App Integration (Embeddable Lemonade)

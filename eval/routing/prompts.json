@@ -92,13 +92,13 @@
       "id": "analyze-torch-trace",
       "category": "positive",
       "expect": "tracelens-analysis-orchestrator",
-      "prompt": "Analyze the PyTorch profiler trace at traces/step5.json and tell me where the time is going."
+      "prompt": "I profiled a training step with the PyTorch profiler. Analyze the trace at traces/step5.json end to end and write up where the time is going."
     },
     {
       "id": "compare-two-traces",
       "category": "positive",
       "expect": "tracelens-analysis-orchestrator",
-      "prompt": "Compare these two torch traces, baseline.json and tuned.json, and write up what regressed between them."
+      "prompt": "I have PyTorch profiler traces from before and after a tuning change, baseline.json and tuned.json. Run the full comparison and write up which kernels regressed."
     },
     {
       "id": "agentic-analysis-workflow",
