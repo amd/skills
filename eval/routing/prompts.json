@@ -38,7 +38,7 @@
       "id": "split-routing",
       "category": "positive",
       "expect": "local-ai-use",
-      "prompt": "From now on on Claude, use local models for generating pictures and audio but keep using the cloud for chat."
+      "prompt": "From now on, when using Claude, use local models for generating pictures but keep using the cloud for chat."
     },
     {
       "id": "electron-offline-mode",

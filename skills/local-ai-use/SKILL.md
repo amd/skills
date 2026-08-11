@@ -1,7 +1,7 @@
 ---
 name: local-ai-use
 description: >-
-  Routes image generation, text-to-speech, and speech-to-text through a local
+  Use image generation, text-to-speech, and speech-to-text through a local
   Lemonade Server so the agent stops paying for cloud calls on those modalities.
   Use when the user wants to save tokens, save cost, or save money using local
   AI; default to local, offline, on-device, or private image generation,
@@ -10,7 +10,8 @@ description: >-
   agent's image, TTS, or STT tool calls to a local model; or mentions Lemonade
   Server, OmniRouter, SD-Turbo, kokoro, Whisper, Ryzen AI, NPU/iGPU/dGPU
   inference, or "use local for images but cloud for chat". Run once per
-  workspace; the rule it installs handles every later request.
+  workspace; the rule it installs handles every later request; use to setup local
+  use on claude, cursor, codex and other agentic harnesses.
 ---
 
 # Local AI Use (route image, TTS, STT through Lemonade)
