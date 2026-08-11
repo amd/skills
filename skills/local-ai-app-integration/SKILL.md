@@ -4,10 +4,9 @@ description: >-
   Integrates local AI capabilities into applications using Embeddable Lemonade.
   Use when the user wants to add local AI, offline AI, private AI, on-device AI,
   a local LLM, local chat, embeddings, image generation, speech-to-text, or
-  text-to-speech to an app; replace or supplement OpenAI, Anthropic, Ollama, or
-  other cloud AI APIs with a local backend; bundle AI inference into an app
-  installer; or mentions Lemonade, `lemond`, embeddable lemonade, Ryzen AI,
-  NPU/iGPU/dGPU inference, or auto-optimizing local AI.
+  text-to-speech to an existing app; replace or supplement OpenAI, Anthropic, Ollama, or
+  other cloud AI APIs with a local backend; only use to convert user apps; Do not use if
+  the goal is to simply run local ai tasks instead of converting an app to use local ai.
 ---
 
 # Local AI App Integration (Embeddable Lemonade)
