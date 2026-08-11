@@ -21,7 +21,8 @@
     "./skills/local-ai-use",
     "./skills/local-ai-app-integration",
     "./skills/serving-llms-on-instinct",
-    "./skills/tracelens-analysis-orchestrator"
+    "./skills/tracelens-analysis-orchestrator",
+    "./skills/magpie-kernel-evaluator"
   ],
   "interface": {
     "displayName": "AMD Skills",
