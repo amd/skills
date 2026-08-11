@@ -2,7 +2,7 @@
 name: local-ai-use
 description: >-
   Use image generation, text-to-speech, and speech-to-text through a local
-  Lemonade Server so the agent stops paying for cloud calls on those modalities.
+  Lemonade Server on the current workspace so the agent stops paying for cloud calls.
   Use when the user wants to save tokens, save cost, or save money using local
   AI; default to local, offline, on-device, or private image generation,
   transcription, or text-to-speech in this workspace; stop using DALL-E,
