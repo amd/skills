@@ -53,9 +53,11 @@ jobs:
     outputs:
       strix_skills: ${{ steps.select.outputs.strix_skills }}
       strix_any: ${{ steps.select.outputs.strix_any }}
-      # Whether the change touches the Instinct skill at all...
+      # Which Instinct skills the change touches, and whether it touches any
+      # of them at all...
+      instinct_skills: ${{ steps.select.outputs.instinct_skills }}
       instinct: ${{ steps.select.outputs.instinct }}
-      # ...versus whether it should actually run, which also needs the label.
+      # ...versus whether they should actually run, which also needs the label.
       instinct_run: ${{ steps.select.outputs.instinct_run }}
     steps:
       - name: Check out repository
@@ -85,20 +87,25 @@ jobs:
           fi
           echo "Selected skills: $skills"
 
-          # serving-llms-on-instinct serves models on AMD Instinct GPUs, so it
-          # must run on the MI300X runner rather than the strix_halo ones.
-          # Split it out into its own list/flag; everything else stays on the
-          # existing strix_halo matrix.
-          instinct_name="serving-llms-on-instinct"
-          strix=$(printf '%s' "$skills" | python3 -c \
-            "import sys,json;n='$instinct_name';print(json.dumps([s for s in json.load(sys.stdin) if s!=n]))")
-          has_instinct=$(printf '%s' "$skills" | python3 -c \
-            "import sys,json;n='$instinct_name';print('true' if n in json.load(sys.stdin) else 'false')")
+          # These skills exercise AMD Instinct GPUs, so they must run on the
+          # MI300X runner rather than the strix_halo ones. Split them out into
+          # their own list/flag; everything else stays on the existing
+          # strix_halo matrix. Space-separated, one name per skill.
+          instinct_names="serving-llms-on-instinct hyperloom-workload-optimizer"
+          strix=$(printf '%s' "$skills" | INSTINCT="$instinct_names" python3 -c \
+            "import sys,os,json;mi=os.environ['INSTINCT'].split();print(json.dumps([s for s in json.load(sys.stdin) if s not in mi]))")
+          instinct_skills=$(printf '%s' "$skills" | INSTINCT="$instinct_names" python3 -c \
+            "import sys,os,json;mi=os.environ['INSTINCT'].split();sel=json.load(sys.stdin);print(json.dumps([s for s in mi if s in sel]))")
+          if [ "$instinct_skills" = "[]" ]; then
+            has_instinct=false
+          else
+            has_instinct=true
+          fi
 
-          # The MI300X runner is a scarce shared resource, so touching the
-          # skill is necessary but not sufficient: a maintainer has to opt the
-          # PR in with the `enable_mi_ci` label. A manual dispatch is already
-          # explicit human intent, so it does not need the label.
+          # The MI300X runner is a scarce shared resource, so touching one of
+          # those skills is necessary but not sufficient: a maintainer has to
+          # opt the PR in with the `enable_mi_ci` label. A manual dispatch is
+          # already explicit human intent, so it does not need the label.
           mi_label="${{ contains(github.event.pull_request.labels.*.name, 'enable_mi_ci') }}"
           instinct_run=false
           if [ "$has_instinct" = "true" ]; then
@@ -108,8 +115,9 @@ jobs:
           fi
 
           echo "strix_skills=$strix"
-          echo "instinct=$has_instinct (enable_mi_ci label: $mi_label -> run: $instinct_run)"
+          echo "instinct_skills=$instinct_skills (enable_mi_ci label: $mi_label -> run: $instinct_run)"
           echo "strix_skills=$strix" >> "$GITHUB_OUTPUT"
+          echo "instinct_skills=$instinct_skills" >> "$GITHUB_OUTPUT"
           echo "instinct=$has_instinct" >> "$GITHUB_OUTPUT"
           echo "instinct_run=$instinct_run" >> "$GITHUB_OUTPUT"
           if [ "$strix" = "[]" ]; then
@@ -186,14 +194,15 @@ jobs:
           Write-Host "Running $test_file"
           python -m pytest -c pytest.ini -p conftest $test_file
 
-  # serving-llms-on-instinct actually serves a model on an AMD Instinct GPU, so
-  # it can't run on the strix_halo runners above. It gets its own job on the
-  # self-hosted MI300X runner. Linux-only (ROCm + Docker); no Windows leg.
+  # These skills drive real work on an AMD Instinct GPU, so they can't run on
+  # the strix_halo runners above. They get their own job on the self-hosted
+  # MI300X runner. Linux-only (ROCm + Docker); no Windows leg.
   #
-  # Opt-in: `instinct_run` is true only when the change touches the skill AND
-  # the PR carries the `enable_mi_ci` label (or the run was dispatched by hand).
+  # Opt-in: `instinct_run` is true only when the change touches one of the
+  # skills AND the PR carries the `enable_mi_ci` label (or the run was
+  # dispatched by hand).
   behavioral-instinct:
-    name: Behavioral (serving-llms-on-instinct on MI300X)
+    name: Behavioral (${{ matrix.skill }} on MI300X)
     needs: discover
     if: needs.discover.outputs.instinct_run == 'true'
     runs-on: [self-hosted, Linux, X64, mi300x, gpu, rocm]
@@ -201,12 +210,17 @@ jobs:
     # Scopes the Anthropic key to this job alone: only jobs that name this
     # environment can read its secrets, unlike a repo-level secret.
     environment: behavioral-instinct
+    strategy:
+      # One skill failing should not hide the others' results.
+      fail-fast: false
+      matrix:
+        skill: ${{ fromJson(needs.discover.outputs.instinct_skills) }}
     env:
       # The MI300X runner lives outside the AMD network, so it can't reach the
       # internal gateway the strix_halo jobs use. It calls api.anthropic.com
       # directly with its own budgeted key, hence no BASE_URL / CUSTOM_HEADERS.
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      BEHAVIORAL_SKILL: serving-llms-on-instinct
+      BEHAVIORAL_SKILL: ${{ matrix.skill }}
       # Model pin: opus only. The harness also enforces this under CI.
       BEHAVIORAL_MODEL: opus
     steps:
@@ -239,12 +253,12 @@ jobs:
       - name: Install behavioral test dependencies
         run: pip install -r eval/behavioral/requirements.txt
 
-      - name: Run behavioral test for serving-llms-on-instinct
+      - name: Run behavioral test for ${{ matrix.skill }}
         working-directory: eval/behavioral
         shell: bash
         run: |
           set -euo pipefail
-          test_file="../../skills/serving-llms-on-instinct/evals/evals.py"
+          test_file="../../skills/${{ matrix.skill }}/evals/evals.py"
           echo "Running $test_file"
           python -m pytest -c pytest.ini -p conftest "$test_file"
 
@@ -254,8 +268,8 @@ jobs:
   #   * testable change          -> pass iff the behavioral job passed.
   #
   # The Instinct leg is only gated on when it was actually requested, so a PR
-  # that touches the skill without the `enable_mi_ci` label is not blocked by a
-  # test it deliberately skipped.
+  # that touches one of those skills without the `enable_mi_ci` label is not
+  # blocked by a test it deliberately skipped.
   behavioral-gate:
     name: behavioral
     needs: [discover, behavioral, behavioral-instinct]
@@ -269,6 +283,7 @@ jobs:
       INSTINCT_AFFECTED: ${{ needs.discover.outputs.instinct }}
       INSTINCT_REQUESTED: ${{ needs.discover.outputs.instinct_run }}
       STRIX_SKILLS: ${{ needs.discover.outputs.strix_skills }}
+      INSTINCT_SKILLS: ${{ needs.discover.outputs.instinct_skills }}
     steps:
       - name: Verify behavioral results
         run: |
@@ -276,7 +291,7 @@ jobs:
           echo "behavioral (strix):  $BEHAVIORAL_RESULT"
           echo "behavioral-instinct: $INSTINCT_RESULT"
           echo "strix affected:      $STRIX_ANY ($STRIX_SKILLS)"
-          echo "instinct affected:   $INSTINCT_AFFECTED"
+          echo "instinct affected:   $INSTINCT_AFFECTED ($INSTINCT_SKILLS)"
           echo "instinct requested:  $INSTINCT_REQUESTED"
 
           # If discovery itself failed, surface that rather than guessing.
@@ -285,11 +300,11 @@ jobs:
             exit 1
           fi
 
-          # Touching the Instinct skill without opting in is allowed, but say so
+          # Touching an Instinct skill without opting in is allowed, but say so
           # loudly: the change went out without ever running on real hardware.
           if [ "$INSTINCT_AFFECTED" = "true" ] && [ "$INSTINCT_REQUESTED" != "true" ]; then
-            echo "::warning::This PR changes serving-llms-on-instinct but has no" \
-                 "'enable_mi_ci' label, so the MI300X behavioral test did not run."
+            echo "::warning::This PR changes $INSTINCT_SKILLS but has no" \
+                 "'enable_mi_ci' label, so the MI300X behavioral tests did not run."
           fi
 
           # No skill or behavioral test changed: nothing to gate on.
