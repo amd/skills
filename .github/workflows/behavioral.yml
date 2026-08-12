@@ -14,11 +14,9 @@ name: behavioral
 #   * opt-in for Instinct -- the MI300X leg is scarce and expensive, so it only
 #     runs on PRs carrying the `enable_mi_ci` label (see behavioral-instinct).
 #
-# This workflow also hosts the *routing* eval (see the `routing` job and
-# eval/routing/): where a behavioral test asks "once this skill runs, does it
-# work?", the routing eval asks "with the whole published catalog installed,
-# does the agent pick the right skill at all?". It is dispatch-only -- pick
-# `routing` from the `mode` dropdown when you run this workflow by hand.
+# The companion question -- "with the whole published catalog installed, does
+# the agent pick the right skill at all?" -- is the routing eval, which lives in
+# its own dispatch-only workflow (routing.yml, eval/routing/).
 #
 # Shape mirrors validate.yml: discover -> matrix -> single aggregate gate, so
 # branch protection can require just the `behavioral` check.
@@ -37,17 +35,8 @@ on:
       - ".github/scripts/select_behavioral.py"
   workflow_dispatch:
     inputs:
-      mode:
-        description: "behavioral = per-skill behavioral tests. routing = the skill-routing eval over eval/routing/prompts.json. both = run each."
-        type: choice
-        required: false
-        default: behavioral
-        options:
-          - behavioral
-          - routing
-          - both
       skills:
-        description: "Comma-separated skill names to test (blank = every skill that has a behavioral test). Ignored when mode is routing."
+        description: "Comma-separated skill names to test (blank = every skill that has a behavioral test)."
         required: false
         default: ""
 
@@ -74,8 +63,6 @@ jobs:
       instinct: ${{ steps.select.outputs.instinct }}
       # ...versus whether they should actually run, which also needs the label.
       instinct_run: ${{ steps.select.outputs.instinct_run }}
-      # Which of the two evals this run is for (see the `mode` dispatch input).
-      run_routing: ${{ steps.select.outputs.run_routing }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -90,18 +77,6 @@ jobs:
         id: select
         run: |
           set -euo pipefail
-          # The routing eval is dispatch-only: it costs tokens on every prompt
-          # and answers a catalog-wide question, so it is never worth running
-          # automatically on a PR that touches one skill.
-          run_behavioral=true
-          run_routing=false
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            case "${{ github.event.inputs.mode }}" in
-              routing) run_behavioral=false; run_routing=true ;;
-              both)    run_routing=true ;;
-            esac
-          fi
-
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             if [ -n "${{ github.event.inputs.skills }}" ]; then
               skills=$(uv run .github/scripts/select_behavioral.py --names "${{ github.event.inputs.skills }}")
@@ -115,13 +90,6 @@ jobs:
               | uv run .github/scripts/select_behavioral.py --changed)
           fi
 
-          # Routing-only run: empty the behavioral matrix. Every downstream
-          # flag is derived from this list, so the strix and Instinct legs skip
-          # and the gate correctly has nothing to enforce for them.
-          if [ "$run_behavioral" != "true" ]; then
-            skills="[]"
-          fi
-          echo "Mode: ${{ github.event.inputs.mode }} (behavioral: $run_behavioral, routing: $run_routing)"
           echo "Selected skills: $skills"
 
           # These skills exercise AMD Instinct GPUs, so they must run on the
@@ -157,7 +125,6 @@ jobs:
           echo "instinct_skills=$instinct_skills" >> "$GITHUB_OUTPUT"
           echo "instinct=$has_instinct" >> "$GITHUB_OUTPUT"
           echo "instinct_run=$instinct_run" >> "$GITHUB_OUTPUT"
-          echo "run_routing=$run_routing" >> "$GITHUB_OUTPUT"
           if [ "$strix" = "[]" ]; then
             echo "strix_any=false" >> "$GITHUB_OUTPUT"
           else
@@ -300,74 +267,6 @@ jobs:
           echo "Running $test_file"
           python -m pytest -c pytest.ini -p conftest "$test_file"
 
-  # Routing eval: install every skill published in
-  # .claude-plugin/marketplace.json at once and check that each prompt in
-  # eval/routing/prompts.json activates the skill it should -- and that the
-  # prompts which should activate nothing don't. Reports statistics
-  # (accuracy, per-skill recall/precision, a confusion matrix) to the job
-  # summary; see eval/routing/routing_eval.py.
-  #
-  # Dispatch-only, and deliberately a single job rather than an OS matrix: a
-  # routing decision is made from skill descriptions alone, so it needs no GPU
-  # and no second platform. It stays on a self-hosted Linux runner only because
-  # that is what can reach the internal LLM gateway.
-  routing:
-    name: Skill routing (all marketplace skills)
-    needs: discover
-    if: needs.discover.outputs.run_routing == 'true'
-    runs-on: [self-hosted, strix_halo, Linux]
-    # Each of the 23 cases is killed as soon as its routing decision is
-    # observable, so the run is far shorter than a behavioral one; the cap is
-    # here to catch a hung agent.
-    timeout-minutes: 30
-    env:
-      ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
-      ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
-      ANTHROPIC_CUSTOM_HEADERS: |
-        Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
-        user: a1_ucicd
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install the claude CLI
-        run: npm install -g @anthropic-ai/claude-code
-
-      # No pip install: the routing runner and the harness it borrows from use
-      # only the standard library (pytest is a behavioral-test dependency).
-      #
-      # The eval reports rather than gates, so a low score shows up as
-      # statistics instead of a red run. Add `--min-accuracy 0.9` here to turn
-      # it into a hard bar. It still fails on infrastructure problems (no case
-      # produced a decision, or no skill activated anywhere).
-      - name: Run the skill-routing eval
-        shell: bash
-        run: |
-          set -euo pipefail
-          python eval/routing/routing_eval.py \
-            --output routing-report.json \
-            --keep-logs routing-logs
-
-      - name: Upload routing report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: routing-report
-          path: |
-            routing-report.json
-            routing-logs/
-          if-no-files-found: warn
-
   # Single aggregate gate. Mark THIS check required in branch protection.
   #
   #   * nothing testable changed -> pass (neutral).
@@ -375,22 +274,19 @@ jobs:
   #
   # The Instinct leg is only gated on when it was actually requested, so a PR
   # that touches one of those skills without the `enable_mi_ci` label is not
-  # blocked by a test it deliberately skipped. The routing leg is gated the
-  # same way: it only ever runs on a manual dispatch, so PRs are unaffected.
+  # blocked by a test it deliberately skipped.
   behavioral-gate:
     name: behavioral
-    needs: [discover, behavioral, behavioral-instinct, routing]
+    needs: [discover, behavioral, behavioral-instinct]
     if: always()
     runs-on: ubuntu-latest
     env:
       DISCOVER_RESULT: ${{ needs.discover.result }}
       BEHAVIORAL_RESULT: ${{ needs.behavioral.result }}
       INSTINCT_RESULT: ${{ needs.behavioral-instinct.result }}
-      ROUTING_RESULT: ${{ needs.routing.result }}
       STRIX_ANY: ${{ needs.discover.outputs.strix_any }}
       INSTINCT_AFFECTED: ${{ needs.discover.outputs.instinct }}
       INSTINCT_REQUESTED: ${{ needs.discover.outputs.instinct_run }}
-      ROUTING_REQUESTED: ${{ needs.discover.outputs.run_routing }}
       STRIX_SKILLS: ${{ needs.discover.outputs.strix_skills }}
       INSTINCT_SKILLS: ${{ needs.discover.outputs.instinct_skills }}
     steps:
@@ -399,11 +295,9 @@ jobs:
           echo "discover:            $DISCOVER_RESULT"
           echo "behavioral (strix):  $BEHAVIORAL_RESULT"
           echo "behavioral-instinct: $INSTINCT_RESULT"
-          echo "routing:             $ROUTING_RESULT"
           echo "strix affected:      $STRIX_ANY ($STRIX_SKILLS)"
           echo "instinct affected:   $INSTINCT_AFFECTED ($INSTINCT_SKILLS)"
           echo "instinct requested:  $INSTINCT_REQUESTED"
-          echo "routing requested:   $ROUTING_REQUESTED"
 
           # If discovery itself failed, surface that rather than guessing.
           if [ "$DISCOVER_RESULT" != "success" ]; then
@@ -418,10 +312,8 @@ jobs:
                  "'enable_mi_ci' label, so the MI300X behavioral tests did not run."
           fi
 
-          # No skill or behavioral test changed, and no routing run requested:
-          # nothing to gate on.
-          if [ "$STRIX_ANY" != "true" ] && [ "$INSTINCT_REQUESTED" != "true" ] \
-             && [ "$ROUTING_REQUESTED" != "true" ]; then
+          # No skill or behavioral test changed: nothing to gate on.
+          if [ "$STRIX_ANY" != "true" ] && [ "$INSTINCT_REQUESTED" != "true" ]; then
             echo "No behavioral tests affected by this change."
             exit 0
           fi
@@ -435,10 +327,6 @@ jobs:
           fi
           if [ "$INSTINCT_REQUESTED" = "true" ] && [ "$INSTINCT_RESULT" != "success" ]; then
             echo "Instinct behavioral test did not pass ($INSTINCT_RESULT)." >&2
-            failed=1
-          fi
-          if [ "$ROUTING_REQUESTED" = "true" ] && [ "$ROUTING_RESULT" != "success" ]; then
-            echo "Skill routing eval did not pass ($ROUTING_RESULT)." >&2
             failed=1
           fi
           if [ "$failed" -ne 0 ]; then
