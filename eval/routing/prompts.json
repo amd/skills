@@ -8,7 +8,12 @@
     "  id       -- stable slug, used to filter runs (--only) and to name log files.",
     "  prompt   -- what the user says. Deliberately phrased the way a user would,",
     "              not lifted from the skill description: copying description text",
-    "              measures string matching rather than routing.",
+    "              measures string matching rather than routing. Prompts that hand",
+    "              over a profiler trace link a real one from the TraceLens test",
+    "              fixtures, because the staged workspace holds nothing but the",
+    "              skills tree: a prompt that claims a trace is on disk when none",
+    "              is sends the agent hunting for a file that cannot exist, and it",
+    "              can end the turn asking where the trace is without ever routing.",
     "  expect   -- the skill that must activate, or null when no skill should fire.",
     "  category -- positive  = a skill is expected.",
     "              near_miss = no skill expected, but the prompt sits close to one",
@@ -25,8 +30,8 @@
     {
       "id": "tts-offline",
       "category": "positive",
-      "expect": "local-ai-app-integration",
-      "prompt": "Stop sending text to a paid speech vendor for this app. I want anything you read aloud synthesized offline on this laptop."
+      "expect": "local-ai-use",
+      "prompt": "Stop sending text to a paid cloud TTS service. From now on, I want anything you read aloud synthesized offline on this laptop."
     },
     {
       "id": "transcribe-private",
@@ -92,25 +97,25 @@
       "id": "analyze-torch-trace",
       "category": "positive",
       "expect": "tracelens-analysis-orchestrator",
-      "prompt": "My training step is way slower than I expected. I ran it under the PyTorch profiler and have the output sitting on disk. Work out where the time is actually going and write it up so I know what to fix first."
+      "prompt": "My training step is way slower than I expected. I ran it under the PyTorch profiler and the output is at https://github.com/AMD-AGI/TraceLens/raw/main/tests/traces/mi300/resnet_act_checkpoint.json.gz. Work out where the time is actually going and write it up so I know what to fix first."
     },
     {
       "id": "compare-two-traces",
       "category": "positive",
       "expect": "tracelens-analysis-orchestrator",
-      "prompt": "I tuned a training config and captured PyTorch profiler runs on either side of the change. One is clearly slower and I can't tell why. Tell me which GPU kernels regressed between the two runs, worst first, and write it up."
+      "prompt": "I profiled the same model on two different machines and one is clearly slower, but I can't tell why. The captures are at https://github.com/AMD-AGI/TraceLens/raw/main/tests/traces/mi300/facebook_timesformer-base-finetuned-k400__1016002.json.gz and https://github.com/AMD-AGI/TraceLens/raw/main/tests/traces/h100/facebook_timesformer-base-finetuned-k400__1016002.json.gz. Tell me which GPU kernels are worse on the slow one, worst first, and write it up."
     },
     {
       "id": "agentic-analysis-workflow",
       "category": "positive",
       "expect": "tracelens-analysis-orchestrator",
-      "prompt": "Run the agentic analysis workflow on my trace and produce analysis.md."
+      "prompt": "Run the agentic analysis workflow on the trace at https://github.com/AMD-AGI/TraceLens/raw/main/tests/traces/mi300/gaunernst_bert-small-uncased__1016001.json.gz and produce analysis.md."
     },
     {
       "id": "kernel-perf-report",
       "category": "positive",
       "expect": "tracelens-analysis-orchestrator",
-      "prompt": "I captured a GPU kernel trace from a training run. I need a prioritized report of the worst performance offenders that I can show stakeholders."
+      "prompt": "I captured a GPU kernel trace from a distributed training run: https://github.com/AMD-AGI/TraceLens/raw/main/tests/traces/mi300/llama_70b_fsdp/rank0_trace_no_pyfn.json.gz. I need a prioritized report of the worst performance offenders that I can show stakeholders."
     },
     {
       "id": "vllm-on-nvidia",
