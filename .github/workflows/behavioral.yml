@@ -85,6 +85,7 @@ jobs:
             skills=$(git diff --name-only "$base" "$head" \
               | uv run .github/scripts/select_behavioral.py --changed)
           fi
+
           echo "Selected skills: $skills"
 
           # These skills exercise AMD Instinct GPUs, so they must run on the
