@@ -24,8 +24,9 @@ neighbor.
 
 Cost control: each run is killed the moment the routing decision is observable
 -- the first skill activation, the final result event, or a small budget of
-non-skill tool calls -- so no case pays for the work the skill would have gone
-on to do. ``--max-budget-usd`` is a second, independent backstop.
+tool calls that are neither bookkeeping nor a survey of the installed catalog
+-- so no case pays for the work the skill would have gone on to do.
+``--max-budget-usd`` is a second, independent backstop.
 
 Usage::
 
@@ -82,6 +83,9 @@ BOOKKEEPING_TOOLS = {"todowrite", "todoread", "exitplanmode"}
 # builds routed skills through the slash-command tool.
 SKILL_TOOLS = {"skill", "slashcommand"}
 
+# Where the staged catalog lives, as it appears in a tool argument.
+CATALOG_DIR = ".claude/skills"
+
 VERDICTS = ("correct_trigger", "true_negative", "missed_trigger", "wrong_skill", "false_trigger", "error")
 PASSING_VERDICTS = {"correct_trigger", "true_negative"}
 
@@ -109,7 +113,9 @@ class Outcome:
     stop_reason: str
     elapsed_s: float
     tool_calls: int
+    inspection_calls: int = 0
     visible_skills: list[str] = field(default_factory=list)
+    extra_skills: list[str] = field(default_factory=list)
     error: str | None = None
 
 
@@ -209,11 +215,25 @@ def supported_flags(flags: list[str]) -> set[str]:
     return {flag for flag in flags if flag in text}
 
 
-def claude_env() -> dict[str, str]:
+def claude_env(config_dir: Path | None = None) -> dict[str, str]:
     """Environment for `claude` subprocesses (fail fast instead of retrying)."""
     env = dict(os.environ)
     env.setdefault("CLAUDE_CODE_MAX_RETRIES", "0")
+    if config_dir is not None:
+        env["CLAUDE_CONFIG_DIR"] = str(config_dir)
     return env
+
+
+def can_isolate_config() -> bool:
+    """Whether the runner's own ``~/.claude`` can be kept out of the session.
+
+    User-level skills are registered next to the staged ones and change every
+    routing decision, so the catalog has to be exactly what the marketplace
+    ships. Pointing the CLI at a throwaway config dir achieves that, but only
+    when auth comes from the environment -- if the login lives in the real
+    config dir, hiding it means no case even starts.
+    """
+    return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
 
 
 def _iter_tool_uses(obj) -> list[tuple[str, str]]:
@@ -261,13 +281,31 @@ def _skill_from_body_path(text: str, skills: list[str]) -> str | None:
     body was loaded" from "this text happens to mention the skill". Two or
     more matches mean the text enumerates the catalog, which is a listing
     rather than a decision, so that is not an activation either.
+
+    Reading one ``SKILL.md`` is only evidence of activation on a build that
+    has no way to activate a skill except by reading it; see
+    ``detect_activation``.
     """
     haystack = text.lower().replace("\\\\", "/").replace("\\", "/")
     hits = [skill for skill in skills if f"skills/{skill.lower()}/skill.md" in haystack]
     return hits[0] if len(hits) == 1 else None
 
 
-def detect_activation(event: dict, skills: list[str]) -> str | None:
+def _is_catalog_inspection(tool_input: str, skills: list[str]) -> bool:
+    """True when a tool call is only looking at the installed skills tree.
+
+    Surveying the catalog is part of making the routing decision, not the
+    agent starting the work itself, so these calls must not spend the
+    non-skill tool budget: ending a run mid-survey scored deliberation as a
+    missed trigger.
+    """
+    haystack = tool_input.lower().replace("\\\\", "/").replace("\\", "/")
+    if CATALOG_DIR in haystack:
+        return True
+    return any(f"skills/{skill.lower()}/" in haystack for skill in skills)
+
+
+def detect_activation(event: dict, skills: list[str], allow_body_path: bool = True) -> str | None:
     """The skill this event activates, or None.
 
     Only the agent's own tool calls count. Tool *results* and assistant prose
@@ -278,6 +316,13 @@ def detect_activation(event: dict, skills: list[str]) -> str | None:
     a false trigger on unrelated prompts, and -- worse -- scored a correct
     trigger whenever an expected skill's prompt named a path that did not
     exist, hiding real misses behind the file hunt.
+
+    ``allow_body_path`` carries the same distinction for tool *inputs*. On a
+    build that exposes the ``Skill`` tool, an agent that opens a ``SKILL.md``
+    is reading the catalog to choose from it, so treating that read as an
+    activation just credits whichever skill the directory listing happened to
+    put first. The path fallback therefore stays off unless the session has no
+    skill tool at all, which is the only case it was written for.
 
     Returns ``"other:<name>"`` when a skill outside the marketplace fires --
     that is a contaminated runner, not a routing result, and the report should
@@ -305,14 +350,15 @@ def detect_activation(event: dict, skills: list[str]) -> str | None:
         # instead of going through the Skill tool. The call itself has to
         # target that skill's own SKILL.md; merely touching the skills
         # directory (`ls .claude/skills`) is not a routing decision.
-        hit = _skill_from_body_path(tool_input, skills)
-        if hit:
-            return hit
+        if allow_body_path:
+            hit = _skill_from_body_path(tool_input, skills)
+            if hit:
+                return hit
 
     # Some builds announce an activation as a system event instead of a tool
     # call. Same joined-path rule, and init is excluded because it enumerates
     # the whole catalog by design.
-    if event.get("type") == "system" and event.get("subtype") != "init":
+    if allow_body_path and event.get("type") == "system" and event.get("subtype") != "init":
         return _skill_from_body_path(json.dumps(event, ensure_ascii=False), skills)
     return None
 
@@ -336,6 +382,49 @@ def _init_skills(event: dict, skills: list[str]) -> list[str] | None:
             if hit and hit not in seen:
                 seen.append(hit)
     return seen
+
+
+def _init_tools(event: dict) -> set[str] | None:
+    """Tool names the CLI reported at session init, if this is that event.
+
+    Used to decide whether the SKILL.md-path fallback in ``detect_activation``
+    applies to this build. An init event without a tool list leaves the
+    fallback on, which is how older builds behaved.
+    """
+    if event.get("type") != "system" or event.get("subtype") != "init":
+        return None
+    tools = event.get("tools")
+    if not isinstance(tools, list):
+        return set()
+    return {str(tool).lower() for tool in tools}
+
+
+def _init_extra_skills(event: dict, skills: list[str]) -> list[str] | None:
+    """Skills the CLI reported at init that this eval did not install.
+
+    A user-level skill on the runner is registered alongside the staged
+    catalog and competes for every prompt, so the routing numbers describe a
+    catalog nobody ships. The ``other:`` check only notices such a skill when
+    it actually fires; this notices it being installed at all.
+    """
+    if event.get("type") != "system" or event.get("subtype") != "init":
+        return None
+    entries = event.get("skills")
+    if not isinstance(entries, list):
+        return []
+    known = {skill.lower() for skill in skills}
+    extra: list[str] = []
+    for entry in entries:
+        if isinstance(entry, str):
+            name = entry
+        elif isinstance(entry, dict):
+            name = str(entry.get("name") or "")
+        else:
+            continue
+        name = name.strip().lstrip("/")
+        if name and name.lower() not in known and name not in extra:
+            extra.append(name)
+    return extra
 
 
 def _pump(stream, sink: queue.Queue) -> None:
@@ -383,6 +472,11 @@ def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome
         raise SystemExit("error: 'claude' CLI not found on PATH")
 
     workspace = stage_workspace(skills)
+    # Outside the workspace: the agent can list its own cwd, and a config dir
+    # sitting in there would be one more thing for it to find.
+    config_dir = (
+        Path(tempfile.mkdtemp(prefix="routing-config-")) if args.isolate_config else None
+    )
     cmd = [
         claude_bin,
         "-p",
@@ -412,8 +506,11 @@ def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome
     events: list[dict] = []
     observed: str | None = None
     visible: list[str] = []
+    extra: list[str] = []
     stop_reason = "completed"
     tool_calls = 0
+    inspection_calls = 0
+    allow_body_path = True
     error: str | None = None
     stderr_lines: list[str] = []
 
@@ -428,7 +525,7 @@ def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome
         encoding="utf-8",
         errors="replace",
         bufsize=1,
-        env=claude_env(),
+        env=claude_env(config_dir),
         **spawn,
     )
     try:
@@ -466,8 +563,14 @@ def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome
             reported = _init_skills(event, skills)
             if reported is not None:
                 visible = reported
+            uninstalled = _init_extra_skills(event, skills)
+            if uninstalled is not None:
+                extra = uninstalled
+            tools = _init_tools(event)
+            if tools is not None:
+                allow_body_path = not (tools & SKILL_TOOLS)
 
-            hit = detect_activation(event, skills)
+            hit = detect_activation(event, skills, allow_body_path=allow_body_path)
             if hit:
                 observed = hit
                 stop_reason = "skill_activated"
@@ -479,12 +582,17 @@ def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome
                     error = str(event.get("result") or "result event reported an error")[:400]
                 break
 
-            tool_calls += sum(
-                1
-                for name, _ in _iter_tool_uses(event)
-                if name.lower() not in BOOKKEEPING_TOOLS
-            )
-            if tool_calls >= args.max_tool_calls:
+            for name, tool_input in _iter_tool_uses(event):
+                if name.lower() in BOOKKEEPING_TOOLS:
+                    continue
+                if _is_catalog_inspection(tool_input, skills):
+                    inspection_calls += 1
+                else:
+                    tool_calls += 1
+            # Inspection is exempt from the tool budget but not unbounded: an
+            # agent that has read the whole catalog and still called no skill
+            # has made its decision, and the run should not idle to timeout.
+            if tool_calls >= args.max_tool_calls or inspection_calls >= args.max_inspection_calls:
                 stop_reason = "tool_budget"
                 break
     finally:
@@ -498,6 +606,8 @@ def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome
                 encoding="utf-8",
             )
         shutil.rmtree(workspace, ignore_errors=True)
+        if config_dir is not None:
+            shutil.rmtree(config_dir, ignore_errors=True)
 
     if not events:
         error = ("".join(stderr_lines).strip() or "claude produced no stream-json output")[:400]
@@ -530,7 +640,9 @@ def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome
         stop_reason=stop_reason,
         elapsed_s=round(elapsed, 2),
         tool_calls=tool_calls,
+        inspection_calls=inspection_calls,
         visible_skills=visible,
+        extra_skills=extra,
         error=error,
     )
     print(
@@ -600,6 +712,7 @@ def summarize(outcomes: list[Outcome], skills: list[str], meta: dict) -> dict:
             if skill not in o.visible_skills
         }
     )
+    catalog_extras = sorted({skill for o in outcomes for skill in o.extra_skills})
 
     return {
         "meta": meta,
@@ -622,6 +735,7 @@ def summarize(outcomes: list[Outcome], skills: list[str], meta: dict) -> dict:
         "confusion": {k: dict(v) for k, v in confusion.items()},
         "unexpected_skills": contaminated,
         "skills_missing_from_session": catalog_gaps,
+        "extra_skills_in_session": catalog_extras,
         "cases": [asdict(o) for o in outcomes],
     }
 
@@ -748,6 +862,20 @@ def render_markdown(summary: dict) -> str:
             f"session init: {', '.join(summary['skills_missing_from_session'])}. "
             f"They may not have been installed for the run.",
         ]
+    if summary["extra_skills_in_session"]:
+        extras = summary["extra_skills_in_session"]
+        shown = ", ".join(f"`{name}`" for name in extras[:12])
+        if len(extras) > 12:
+            shown += f", and {len(extras) - 12} more"
+        lines += [
+            "",
+            f"> **Warning:** {len(extras)} skill(s) beyond the marketplace catalog "
+            f"were registered for these sessions ({shown}). They come from the "
+            f"runner's own config (usually `~/.claude/skills`) and compete for "
+            f"every prompt, so the catalog measured here is not the one users "
+            f"install. Set `ANTHROPIC_API_KEY` so the run can use an isolated "
+            f"config dir, or remove them from the runner.",
+        ]
     return "\n".join(lines) + "\n"
 
 
@@ -779,6 +907,17 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--max-inspection-calls",
+        type=int,
+        default=8,
+        help=(
+            "Separate allowance for tool calls that only read the installed "
+            "skills tree. Surveying the catalog is part of the routing "
+            "decision, so it does not spend --max-tool-calls, but it is capped "
+            "so a run cannot idle to timeout. Default: 8."
+        ),
+    )
+    parser.add_argument(
         "--max-budget-usd",
         type=float,
         default=0.75,
@@ -802,6 +941,13 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"error: --only '{args.only}' matched no cases")
 
     args.available_flags = supported_flags(["--no-session-persistence", "--max-budget-usd"])
+    args.isolate_config = can_isolate_config()
+    if not args.isolate_config:
+        print(
+            "[routing] warning: ANTHROPIC_API_KEY is not set, so the runner's "
+            "own config dir is used and any user-level skill in it joins the "
+            "catalog for every case. The report flags what was registered.",
+        )
 
     if not args.skip_preflight:
         ok, detail = check_api_reachable(args.model)
@@ -825,6 +971,8 @@ def main(argv: list[str] | None = None) -> int:
         "prompts": str(Path(args.prompts).name),
         "wall_time_s": round(time.time() - started, 1),
         "max_tool_calls": args.max_tool_calls,
+        "max_inspection_calls": args.max_inspection_calls,
+        "isolated_config_dir": args.isolate_config,
         "max_budget_usd": args.max_budget_usd,
         "optional_cli_flags_used": sorted(args.available_flags),
         "github_run_id": os.environ.get("GITHUB_RUN_ID"),
