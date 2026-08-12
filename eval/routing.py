@@ -686,10 +686,9 @@ def render_markdown(summary: dict) -> str:
         "",
         "### By prompt category",
         "",
-        "Categories are derived, not declared: a case under `expected_matches` "
-        "is `positive`, a case under a skill's own `expected_no_matches` is "
-        "that skill's `near_miss`, and a case from the shared pool is "
-        "`unrelated`.",
+        "Categories are derived, not declared: `skill_should_trigger: true` is "
+        "`positive`, `false` in a skill's own dataset is that skill's "
+        "`near_miss`, and a prompt from the shared pool is `unrelated`.",
         "",
         "| Category | Graded | Correct | Accuracy |",
         "| --- | --- | --- | --- |",

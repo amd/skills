@@ -6,34 +6,40 @@
     "skill's dataset.",
     "",
     "Only add a prompt here when nothing in the catalog is close to it. A prompt",
-    "that sits near one skill in particular belongs in THAT skill's",
-    "`expected_no_matches`, where it is reported as that skill's near-miss and",
-    "its owner is the one who maintains it.",
+    "that sits near one skill in particular belongs in THAT skill's dataset,",
+    "where it is reported as that skill's near-miss and its owner is the one who",
+    "maintains it.",
     "",
-    "There is no `expected_matches` here, because this file belongs to no skill.",
+    "Every evaluation here is `skill_should_trigger: false`, and true is an",
+    "error: this file belongs to no skill, so there is nothing for it to name.",
     "",
     "A false trigger here is much more serious than a near-miss failure. It means",
     "a description is broad enough to capture ordinary programming work."
   ],
-  "expected_no_matches": [
+  "evaluations": [
     {
       "id": "merge-sorted-lists",
+      "skill_should_trigger": false,
       "prompt": "Write a Python function that merges two sorted lists, and add unit tests for it."
     },
     {
       "id": "reverse-linked-list",
+      "skill_should_trigger": false,
       "prompt": "Write a Python function to reverse a linked list."
     },
     {
       "id": "windows-path-bug",
+      "skill_should_trigger": false,
       "prompt": "My pytest run fails with a Windows path error in test_utils.py. Track down the bug and fix it."
     },
     {
       "id": "ruff-ci-job",
+      "skill_should_trigger": false,
       "prompt": "Add a GitHub Actions job that runs ruff on every pull request."
     },
     {
       "id": "capital-of-france",
+      "skill_should_trigger": false,
       "prompt": "What is the capital of France?"
     }
   ]

@@ -13,14 +13,14 @@ completion, and the result is graded against a case's expectations::
         run = agent.prompt("Use local AI, then generate a cat to out.png.")
         checks = run.evaluate(
             files_exist=["out.png"],
-            should=["Download the SD-Turbo model"],
-            should_not=["Use the GenerateImage tool"],
+            expected_behavior=["Download the SD-Turbo model"],
+            unexpected_behavior=["Use the GenerateImage tool"],
         )
 
 ``evaluate`` reports every expectation instead of raising at the first
 failure, because a run that took minutes and real tokens should not have to
 be repeated to discover the second thing wrong with it. The asserting
-variants (``logs_contains``, ``should``, ...) are still here for skills whose
+variants (``logs_contains``, ``expects``, ...) are still here for skills whose
 ``evals/hooks.py`` needs to express a check the dataset format cannot.
 
 Two things are deliberately *not* graded here. Routing is not: behavior mode
@@ -362,8 +362,8 @@ class Run:
         *,
         logs_contain: list[str] | tuple[str, ...] = (),
         files_exist: list[str] | tuple[str, ...] = (),
-        should: list[str] | tuple[str, ...] = (),
-        should_not: list[str] | tuple[str, ...] = (),
+        expected_behavior: list[str] | tuple[str, ...] = (),
+        unexpected_behavior: list[str] | tuple[str, ...] = (),
     ) -> list[Check]:
         """Grade every expectation and return all results, raising nothing.
 
@@ -381,13 +381,13 @@ class Run:
             detail = "" if ok else f"workspace holds: {self.files or 'nothing'}"
             checks.append(Check("files_exist", path, ok, detail))
 
-        for statement in should:
+        for statement in expected_behavior:
             ok, reason = _grade_with_llm(statement, self, self.judge_model, must_happen=True)
-            checks.append(Check("should", statement, ok, reason))
+            checks.append(Check("expected_behavior", statement, ok, reason))
 
-        for statement in should_not:
+        for statement in unexpected_behavior:
             ok, reason = _grade_with_llm(statement, self, self.judge_model, must_happen=False)
-            checks.append(Check("should_not", statement, ok, reason))
+            checks.append(Check("unexpected_behavior", statement, ok, reason))
 
         for check in checks:
             suffix = f" -- {check.detail}" if check.detail else ""
@@ -413,14 +413,14 @@ class Run:
         self._report(ok, "workspace_contains", detail)
         return self
 
-    def should(self, statement: str) -> "Run":
+    def expects(self, statement: str) -> "Run":
         satisfied, reason = _grade_with_llm(statement, self, self.judge_model, must_happen=True)
-        self._report(satisfied, "should", f"{statement} -- {reason}")
+        self._report(satisfied, "expected_behavior", f"{statement} -- {reason}")
         return self
 
-    def should_not(self, statement: str) -> "Run":
+    def expects_not(self, statement: str) -> "Run":
         satisfied, reason = _grade_with_llm(statement, self, self.judge_model, must_happen=False)
-        self._report(satisfied, "should_not", f"{statement} -- {reason}")
+        self._report(satisfied, "unexpected_behavior", f"{statement} -- {reason}")
         return self
 
     def _report(self, passed: bool, kind: str, detail: str) -> None:

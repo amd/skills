@@ -4,51 +4,51 @@
 
 """Per-skill eval datasets: discovery, parsing, and structural validation.
 
-Every skill owns one dataset at ``skills/<name>/evals/evals.json``, holding
-two arrays of prompts:
+Every skill owns one dataset at ``skills/<name>/evals/evals.json``, holding an
+``evaluations`` array. Each evaluation is a user prompt, a yes/no answer to
+"should this skill fire?", and -- when the answer is yes -- what should be
+true once it has::
 
-  * ``expected_matches``    -- this skill should trigger.
-  * ``expected_no_matches`` -- no skill should trigger.
+    {
+      "id": "epyc-vllm-zentorch",
+      "skill_should_trigger": true,
+      "prompt": "Serve Llama 3.1 8B with zentorch."
+    }
 
-A case is a user prompt plus what should be true after the agent sees it, and
-there are two run modes to satisfy:
+There are two run modes to satisfy:
 
   * **routing** -- the whole catalog is installed and only the trigger
     decision is graded ("did the right skill fire, and only then?"). Every
-    case in both arrays runs here.
+    evaluation runs here.
   * **behavior** -- just this skill is installed, the run goes to completion,
-    and ``should`` / ``should_not`` / ``logs_contain`` / ``files_exist`` are
-    graded ("once it fired, did it do the job?"). Only ``expected_matches``
-    cases can run here, and only the ones that assert something.
+    and ``expected_behavior`` / ``unexpected_behavior`` / ``logs_contain`` /
+    ``files_exist`` are graded ("once it fired, did it do the job?"). Only a
+    triggering evaluation can run here, and only if it asserts something.
 
-An ``expected_matches`` prompt written once and graded by both is the point: a
-routing prompt that nothing grades is a prompt nobody maintains, and a
-behavioral test that re-asserts routing with a substring match is a worse
-version of a check this module already models as a field.
+One prompt graded by both is the point: a routing prompt that nothing grades
+is a prompt nobody maintains, and a behavioral test that re-asserts routing
+with a substring match is a worse version of a check this module already
+models as a field.
 
-An ``expected_no_matches`` prompt is a routing prompt and nothing else. No
-skill loads for it, so there is no behavior phase to hang an assertion or a
-staged workspace off, and those fields are rejected rather than silently
-ignored. Such a case is an ``id``, a ``prompt``, and an optional ``note``.
+``skill_should_trigger: false`` makes the evaluation routing-only. No skill
+loads for it, so there is no behavior phase to hang an assertion or a staged
+workspace off, and those fields are rejected rather than silently ignored:
+such an evaluation is an ``id``, a ``prompt``, the flag, and maybe a ``note``.
 
-The folder is the identity and the array is the expectation, so no case names
-a skill. ``skills/serving-llms-on-epyc/evals/evals.json`` is a dataset about
-``serving-llms-on-epyc``, and a case under its ``expected_matches`` is::
+The folder is the identity, so no evaluation names a skill;
+``skills/serving-llms-on-epyc/evals/evals.json`` is about
+``serving-llms-on-epyc`` and ``skill_should_trigger`` refers to it. A prompt
+that should trigger a *different* skill belongs in that skill's dataset:
+routing installs the whole catalog at once, so it is the same assertion either
+way, and filing it under the neighbour keeps ``false`` meaning "nothing fires".
 
-    {"id": "epyc-vllm-zentorch", "prompt": "Serve Llama 3.1 8B with zentorch."}
+Prompt categories are derived rather than declared, because the flag and the
+file a prompt lives in already carry the distinction:
 
-A prompt that should trigger a *different* skill belongs in that skill's
-``expected_matches``, not here: routing installs the whole catalog at once, so
-it is the same assertion either way, and filing it under the neighbour keeps
-"no skill should fire" meaning exactly that.
-
-Prompt categories are derived rather than declared, because the array a case
-lives in and the file it lives in already carry the distinction:
-
-  * ``expected_matches``                        -> ``positive``
-  * ``expected_no_matches`` in a skill's dataset -> ``near_miss`` (its owner
+  * ``skill_should_trigger: true``               -> ``positive``
+  * ``false`` in a skill's own dataset           -> ``near_miss`` (its owner
     wrote it precisely because it sits close to that skill)
-  * a case in the shared pool                    -> ``unrelated`` (belongs to
+  * an evaluation in the shared pool             -> ``unrelated`` (belongs to
     no skill's domain)
 
 Stdlib only, so the runner needs no ``pip install``. ``load_machine`` is the
@@ -82,36 +82,37 @@ SHARED_NEGATIVES = EVAL_DIR / "negatives.json"
 MIN_POSITIVE_CASES = 3
 MIN_NEGATIVE_CASES = 2
 
-# The two arrays a dataset is made of. The name of the array a case sits in is
-# the whole expectation, which is why no case carries a field naming a skill.
-MATCH_KEY = "expected_matches"
-NO_MATCH_KEY = "expected_no_matches"
+# A dataset is one array of evaluations, and every evaluation answers the
+# routing question outright rather than leaving it to be inferred.
+EVALUATIONS_KEY = "evaluations"
+TRIGGER_KEY = "skill_should_trigger"
 
 # `additionalProperties: false`, by hand. A mistyped key would otherwise be
 # silently dropped, quietly turning an expectation into no expectation at all.
 #
-# The two arrays take different fields, and the difference is not a style
-# choice. An `expected_no_matches` prompt is graded on exactly one thing --
-# that nothing fired -- and no skill is ever loaded for it, so there is no
-# behavior phase to hang an assertion or a staged workspace off. Those cases
-# are a prompt and nothing more.
-MATCH_CASE_KEYS = {
+# The two shapes take different fields, and the difference is not a style
+# choice. An evaluation with `skill_should_trigger: false` is graded on exactly
+# one thing -- that nothing fired -- and no skill is ever loaded for it, so
+# there is no behavior phase to hang an assertion or a staged workspace off.
+# Those are a prompt and nothing more.
+TRIGGER_CASE_KEYS = {
     "id",
     "prompt",
-    "should",
-    "should_not",
+    TRIGGER_KEY,
+    "expected_behavior",
+    "unexpected_behavior",
     "logs_contain",
     "files_exist",
     "workspace",
     "note",
 }
-NO_MATCH_CASE_KEYS = {"id", "prompt", "note"}
+NO_TRIGGER_CASE_KEYS = {"id", "prompt", TRIGGER_KEY, "note"}
 
-DATASET_KEYS = {MATCH_KEY, NO_MATCH_KEY, "comment"}
+DATASET_KEYS = {EVALUATIONS_KEY, "comment"}
 
 # JSON has no comments, so `note` is the sanctioned place for one. The runner
 # ignores it; without it owners annotate fields that are not free text.
-_STRING_LISTS = ("should", "should_not", "logs_contain", "files_exist")
+_STRING_LISTS = ("expected_behavior", "unexpected_behavior", "logs_contain", "files_exist")
 
 
 @dataclass
@@ -122,10 +123,9 @@ class Case:
     prompt: str
     # The skill whose dataset this came from; None for the shared pool.
     skill: str | None
-    # Which array this came from: expected_matches, or expected_no_matches.
-    expects_match: bool
-    should: list[str] = field(default_factory=list)
-    should_not: list[str] = field(default_factory=list)
+    skill_should_trigger: bool
+    expected_behavior: list[str] = field(default_factory=list)
+    unexpected_behavior: list[str] = field(default_factory=list)
     logs_contain: list[str] = field(default_factory=list)
     files_exist: list[str] = field(default_factory=list)
     # Directory (relative to the skill root) whose contents seed the workspace.
@@ -136,27 +136,32 @@ class Case:
     def expect_skill(self) -> str | None:
         """The skill that must activate, or None when nothing should.
 
-        Derived, never written down: the owning folder names the skill and the
-        array says whether it should fire.
+        Derived, never written down: the owning folder names the skill and
+        `skill_should_trigger` says whether it should fire.
         """
-        return self.skill if self.expects_match else None
+        return self.skill if self.skill_should_trigger else None
 
     @property
     def category(self) -> str:
-        """Reporting bucket, derived from the array and the source file.
+        """Reporting bucket, derived from the flag and the source file.
 
         Kept out of the file format on purpose: an owner who has to classify a
         prompt will eventually classify one wrong, and every input needed to
         do it correctly is already here.
         """
-        if self.expects_match:
+        if self.skill_should_trigger:
             return "positive"
         return "near_miss" if self.skill else "unrelated"
 
     @property
     def has_behavior(self) -> bool:
         """Whether this case grades anything beyond the routing decision."""
-        return bool(self.should or self.should_not or self.logs_contain or self.files_exist)
+        return bool(
+            self.expected_behavior
+            or self.unexpected_behavior
+            or self.logs_contain
+            or self.files_exist
+        )
 
 
 def dataset_path(skill: str) -> Path:
@@ -194,33 +199,45 @@ def skills_with_datasets() -> list[str]:
     return [skill for skill in catalog_skills() if dataset_path(skill).is_file()]
 
 
-def _parse_case(
-    entry: object, skill: str | None, expects_match: bool, label: str, errors: list[str]
-) -> Case | None:
+def _parse_case(entry: object, skill: str | None, label: str, errors: list[str]) -> Case | None:
     """Turn one array element into a Case, appending any problems found."""
-    allowed = MATCH_CASE_KEYS if expects_match else NO_MATCH_CASE_KEYS
-
     if not isinstance(entry, dict):
         errors.append(f"{label} must be an object.")
         return None
 
+    should_trigger = entry.get(TRIGGER_KEY)
+    if not isinstance(should_trigger, bool):
+        errors.append(
+            f"{label} needs `{TRIGGER_KEY}`: true if this prompt should activate "
+            "the skill that owns this file, false if no skill should fire at all."
+        )
+        return None
+
+    if skill is None and should_trigger:
+        errors.append(
+            f"{label}: the shared pool belongs to no skill, so every evaluation "
+            f"in it needs `{TRIGGER_KEY}: false`. A prompt that should trigger a "
+            "skill belongs in that skill's dataset."
+        )
+        return None
+
+    allowed = TRIGGER_CASE_KEYS if should_trigger else NO_TRIGGER_CASE_KEYS
     unknown = set(entry) - allowed
-    # Called out separately from a plain typo: these are real fields, used in
-    # the wrong array, and the reason they are rejected is worth saying.
-    misplaced = sorted(unknown & (MATCH_CASE_KEYS - NO_MATCH_CASE_KEYS))
+    # Called out separately from a plain typo: these are real fields on the
+    # wrong kind of evaluation, and the reason they are rejected is worth saying.
+    misplaced = sorted(unknown & (TRIGGER_CASE_KEYS - NO_TRIGGER_CASE_KEYS))
     if misplaced:
         errors.append(
             f"{label} uses {', '.join(f'`{k}`' for k in misplaced)}, which only "
-            f"apply under `{MATCH_KEY}`. A prompt in `{NO_MATCH_KEY}` is graded "
-            "on one thing -- that no skill fired -- so no skill is ever loaded "
-            "for it and there is no behavior phase to assert anything about."
+            f"apply when `{TRIGGER_KEY}` is true. An evaluation expecting nothing "
+            "to fire is graded on that alone -- no skill is ever loaded for it, "
+            "so there is no behavior phase to assert anything about."
         )
     unknown = sorted(unknown - set(misplaced))
     if unknown:
-        array = MATCH_KEY if expects_match else NO_MATCH_KEY
         errors.append(
             f"{label} has unknown key(s): {', '.join(unknown)}. "
-            f"A case in `{array}` allows: {', '.join(sorted(allowed))}."
+            f"Allowed here: {', '.join(sorted(allowed))}."
         )
 
     case_id = entry.get("id")
@@ -260,9 +277,9 @@ def _parse_case(
         id=case_id,
         prompt=prompt.strip(),
         skill=skill,
-        expects_match=expects_match,
-        should=lists["should"],
-        should_not=lists["should_not"],
+        skill_should_trigger=should_trigger,
+        expected_behavior=lists["expected_behavior"],
+        unexpected_behavior=lists["unexpected_behavior"],
         logs_contain=lists["logs_contain"],
         files_exist=lists["files_exist"],
         workspace=workspace.strip() if isinstance(workspace, str) else None,
@@ -275,41 +292,23 @@ def _parse_cases(payload: object, skill: str | None, source: Path, errors: list[
     where = source.name
 
     if not isinstance(payload, dict):
-        errors.append(
-            f"{where}: top level must be an object with `{MATCH_KEY}` and "
-            f"`{NO_MATCH_KEY}` arrays."
-        )
+        errors.append(f"{where}: top level must be an object with an `{EVALUATIONS_KEY}` array.")
         return []
 
     unknown = sorted(set(payload) - DATASET_KEYS)
     if unknown:
         errors.append(f"{where}: unknown top-level key(s): {', '.join(unknown)}.")
 
-    # The shared pool describes no skill, so it has nothing to match.
-    if skill is None and payload.get(MATCH_KEY):
-        errors.append(
-            f"{where}: the shared pool holds prompts no skill should answer, so "
-            f"it cannot have `{MATCH_KEY}`. A prompt that should trigger a skill "
-            "belongs in that skill's dataset."
-        )
+    raw = payload.get(EVALUATIONS_KEY)
+    if not isinstance(raw, list) or not raw:
+        errors.append(f"{where}: `{EVALUATIONS_KEY}` must be a non-empty array.")
+        return []
 
     cases: list[Case] = []
-    empty = True
-    for key, expects_match in ((MATCH_KEY, True), (NO_MATCH_KEY, False)):
-        raw = payload.get(key, [])
-        if not isinstance(raw, list):
-            errors.append(f"{where}: `{key}` must be an array.")
-            continue
-        empty = empty and not raw
-        if skill is None and expects_match:
-            continue  # already reported above; parsing it would only add noise
-        for index, entry in enumerate(raw):
-            case = _parse_case(entry, skill, expects_match, f"{where}: {key}[{index}]", errors)
-            if case is not None:
-                cases.append(case)
-
-    if empty:
-        errors.append(f"{where}: needs at least one case in `{MATCH_KEY}` or `{NO_MATCH_KEY}`.")
+    for index, entry in enumerate(raw):
+        case = _parse_case(entry, skill, f"{where}: {EVALUATIONS_KEY}[{index}]", errors)
+        if case is not None:
+            cases.append(case)
     return cases
 
 
@@ -398,7 +397,7 @@ def validate_all() -> list[str]:
         )
 
     for case in cases:
-        # Only reachable for an `expected_matches` case, which is the only kind
+        # Only reachable for a triggering evaluation, which is the only kind
         # that owns a skill and the only kind allowed to stage anything.
         if case.workspace and case.skill:
             if not (SKILLS_DIR / case.skill / case.workspace).is_dir():
@@ -418,24 +417,25 @@ def tier0_errors(skill: str, cases: list[Case]) -> list[str]:
         return [
             f"{skill}: no eval dataset. Every skill needs "
             f"`skills/{skill}/{DATASET_RELPATH.as_posix()}` with at least "
-            f"{MIN_POSITIVE_CASES} prompts under `{MATCH_KEY}` and "
-            f"{MIN_NEGATIVE_CASES} under `{NO_MATCH_KEY}`. "
+            f"{MIN_POSITIVE_CASES} evaluations where `{TRIGGER_KEY}` is true "
+            f"and {MIN_NEGATIVE_CASES} where it is false. "
             "Copy eval/TEMPLATE.json to start."
         ]
 
     errors: list[str] = []
-    positive = sum(1 for c in cases if c.expects_match)
+    positive = sum(1 for c in cases if c.skill_should_trigger)
     negative = len(cases) - positive
     if positive < MIN_POSITIVE_CASES:
         errors.append(
-            f"{skill}: {positive} case(s) in `{MATCH_KEY}`; Tier 0 needs at "
-            f"least {MIN_POSITIVE_CASES}. Add prompts a real user would type."
+            f"{skill}: {positive} evaluation(s) with `{TRIGGER_KEY}: true`; "
+            f"Tier 0 needs at least {MIN_POSITIVE_CASES}. Add prompts a real "
+            "user would type."
         )
     if negative < MIN_NEGATIVE_CASES:
         errors.append(
-            f"{skill}: {negative} case(s) in `{NO_MATCH_KEY}`; Tier 0 needs at "
-            f"least {MIN_NEGATIVE_CASES}. Add prompts close to this skill's "
-            "domain that should NOT trigger it."
+            f"{skill}: {negative} evaluation(s) with `{TRIGGER_KEY}: false`; "
+            f"Tier 0 needs at least {MIN_NEGATIVE_CASES}. Add prompts close to "
+            "this skill's domain that should NOT trigger it."
         )
     return errors
 

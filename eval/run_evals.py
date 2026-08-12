@@ -11,8 +11,9 @@ runner reads those datasets and grades them in two modes:
     fires (and that nothing fires when nothing should). Cheap, no hardware,
     runs every case in the repo including every other skill's.
   * ``behavior`` -- installs one skill, runs the prompt to completion, and
-    grades ``should`` / ``should_not`` / ``logs_contain`` / ``files_exist``.
-    Only runs cases that assert something beyond the routing decision.
+    grades ``expected_behavior`` / ``unexpected_behavior`` / ``logs_contain``
+    / ``files_exist``. Only runs evaluations that assert something beyond the
+    routing decision.
 
 The prompt is written once and both modes read it, which is the whole point:
 the old split had a central routing prompt set and a separate per-skill pytest
@@ -150,8 +151,8 @@ def run_behavior_case(
                 checks = run.evaluate(
                     logs_contain=[_expand(t, case_ctx) for t in case.logs_contain],
                     files_exist=[_expand(p, case_ctx) for p in case.files_exist],
-                    should=case.should,
-                    should_not=case.should_not,
+                    expected_behavior=case.expected_behavior,
+                    unexpected_behavior=case.unexpected_behavior,
                 )
                 if hooks is not None and hasattr(hooks, "check"):
                     try:
@@ -514,9 +515,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if not gradable:
             print(
-                "[behavior] no case in the selected skill(s) asserts anything "
-                "beyond routing, so there is nothing to grade. Add `should` / "
-                "`should_not` / `logs_contain` / `files_exist` to a case."
+                "[behavior] no evaluation in the selected skill(s) asserts "
+                "anything beyond routing, so there is nothing to grade. Add "
+                "`expected_behavior` / `unexpected_behavior` / `logs_contain` / "
+                "`files_exist` to a triggering evaluation."
             )
         else:
             outcomes = run_behavior(skills, gradable, args.model, args.effort)

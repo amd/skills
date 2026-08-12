@@ -1,8 +1,8 @@
 {
   "comment": [
     "Tier 0 only. Magpie drives real benchmarks and kernel builds on GPU",
-    "hardware, so no case grades behavior yet; add one with `should` /",
-    "`should_not` plus an evals/machine.yml when a runner is available.",
+    "hardware, so nothing grades behavior yet; add an `expected_behavior` /",
+    "`unexpected_behavior` plus an evals/machine.yml when a runner is available.",
     "",
     "The boundary that matters here is against tracelens-analysis-orchestrator:",
     "both mention TraceLens and trace analysis, so 'benchmark and optimize",
@@ -10,37 +10,42 @@
     "likely to route wrong. `benchmark-then-optimize-kernel` is that line, in the",
     "words someone would use when they mean this skill."
   ],
-  "expected_matches": [
+  "evaluations": [
     {
       "id": "benchmark-vllm-ttft",
+      "skill_should_trigger": true,
       "prompt": "Benchmark vLLM throughput and time-to-first-token for Llama 3 on this box, and capture torch traces while it runs."
     },
     {
       "id": "compare-hip-softmax-kernels",
+      "skill_should_trigger": true,
       "prompt": "I have two HIP implementations of a softmax kernel. Which one is faster, and is the optimized one still numerically correct?"
     },
     {
       "id": "bottleneck-kernel-to-source",
+      "skill_should_trigger": true,
       "prompt": "Find the top bottleneck kernels in my inference workload and map the profiler names back to the source that generates them."
     },
     {
       "id": "rank-triton-attention-variants",
+      "skill_should_trigger": true,
       "prompt": "Rank these three Triton attention kernel variants against each other and validate the winner end to end."
     },
     {
       "id": "benchmark-then-optimize-kernel",
+      "skill_should_trigger": true,
       "note": "Trace-analysis vocabulary shared with tracelens-analysis-orchestrator, but the work is benchmarking and kernel ranking.",
       "prompt": "Benchmark SGLang on this node, then rank two candidate HIP kernels for the biggest bottleneck and validate the winner."
-    }
-  ],
-  "expected_no_matches": [
+    },
     {
       "id": "write-a-cuda-transpose",
+      "skill_should_trigger": false,
       "note": "Kernel authoring, not kernel evaluation. Shares all the vocabulary and none of the workflow.",
       "prompt": "Write a CUDA kernel that transposes a matrix, and explain the shared-memory tiling."
     },
     {
       "id": "mi300x-spec-question",
+      "skill_should_trigger": false,
       "note": "A datasheet question, not a measurement to run.",
       "prompt": "What is the theoretical peak FP16 throughput of an MI300X on paper?"
     }

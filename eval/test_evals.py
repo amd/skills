@@ -28,7 +28,10 @@ import agent  # noqa: E402
 import datasets  # noqa: E402
 import routing  # noqa: E402
 import run_evals  # noqa: E402
-from datasets import MATCH_KEY, NO_MATCH_KEY  # noqa: E402
+from datasets import EVALUATIONS_KEY, TRIGGER_KEY  # noqa: E402
+
+TRIGGERING = "triggeringEvaluation"
+NON_TRIGGERING = "nonTriggeringEvaluation"
 
 
 def parse(payload: dict, skill: str | None = "demo-skill") -> tuple[list, list[str]]:
@@ -41,14 +44,14 @@ def parse(payload: dict, skill: str | None = "demo-skill") -> tuple[list, list[s
     return cases, errors
 
 
-def match(**case) -> dict:
-    """A dataset holding one `expected_matches` case."""
-    return {"expected_matches": [case]}
+def triggers(**case) -> dict:
+    """A dataset holding one evaluation that should fire the skill."""
+    return {EVALUATIONS_KEY: [{TRIGGER_KEY: True, **case}]}
 
 
-def no_match(**case) -> dict:
-    """A dataset holding one `expected_no_matches` case."""
-    return {"expected_no_matches": [case]}
+def triggers_nothing(**case) -> dict:
+    """A dataset holding one evaluation where nothing should fire."""
+    return {EVALUATIONS_KEY: [{TRIGGER_KEY: False, **case}]}
 
 
 class TestSchemaStaysInSyncWithParser(unittest.TestCase):
@@ -65,28 +68,27 @@ class TestSchemaStaysInSyncWithParser(unittest.TestCase):
     def test_top_level_properties_match_parser(self) -> None:
         self.assertEqual(set(self.schema["properties"]), datasets.DATASET_KEYS)
 
-    def test_expected_match_properties_match_parser(self) -> None:
+    def test_triggering_properties_match_parser(self) -> None:
         self.assertEqual(
-            set(self.defs("expectedMatch")["properties"]), datasets.MATCH_CASE_KEYS
+            set(self.defs(TRIGGERING)["properties"]), datasets.TRIGGER_CASE_KEYS
         )
 
-    def test_expected_no_match_properties_match_parser(self) -> None:
+    def test_non_triggering_properties_match_parser(self) -> None:
         self.assertEqual(
-            set(self.defs("expectedNoMatch")["properties"]), datasets.NO_MATCH_CASE_KEYS
+            set(self.defs(NON_TRIGGERING)["properties"]), datasets.NO_TRIGGER_CASE_KEYS
         )
 
-    def test_only_id_and_prompt_are_required(self) -> None:
-        # The whole point of the format: the folder names the skill and the
-        # array carries the expectation, so a case needs nothing else.
-        for name in ("expectedMatch", "expectedNoMatch"):
+    def test_the_flag_is_required_and_discriminates_the_two_shapes(self) -> None:
+        for name, value in ((TRIGGERING, True), (NON_TRIGGERING, False)):
             with self.subTest(name):
-                self.assertEqual(self.defs(name)["required"], ["id", "prompt"])
+                self.assertEqual(self.defs(name)["required"], ["id", "prompt", TRIGGER_KEY])
+                self.assertEqual(self.defs(name)["properties"][TRIGGER_KEY]["const"], value)
 
     def test_unknown_keys_are_rejected_by_both(self) -> None:
-        for name in ("expectedMatch", "expectedNoMatch"):
+        for name in (TRIGGERING, NON_TRIGGERING):
             with self.subTest(name):
                 self.assertFalse(self.defs(name)["additionalProperties"])
-        _, errors = parse(match(id="a", prompt="p", expect_skill="demo-skill"))
+        _, errors = parse(triggers(id="a", prompt="p", expect_skill="demo-skill"))
         self.assertTrue(any("unknown key" in e for e in errors), errors)
 
 
@@ -104,42 +106,49 @@ class TestMachineSchema(unittest.TestCase):
 
 
 class TestCaseExpectations(unittest.TestCase):
-    """The array a case sits in is the whole expectation."""
+    """`skill_should_trigger` is the whole expectation."""
 
-    def test_expected_match_targets_the_owning_skill(self) -> None:
-        cases, errors = parse(match(id="a", prompt="p"))
+    def test_a_triggering_evaluation_targets_the_owning_skill(self) -> None:
+        cases, errors = parse(triggers(id="a", prompt="p"))
         self.assertEqual(errors, [])
         self.assertEqual(cases[0].expect_skill, "demo-skill")
         self.assertEqual(cases[0].category, "positive")
 
-    def test_expected_no_match_is_a_near_miss_for_the_owning_skill(self) -> None:
-        cases, errors = parse(no_match(id="a", prompt="p"))
+    def test_a_non_triggering_evaluation_is_a_near_miss_for_the_owning_skill(self) -> None:
+        cases, errors = parse(triggers_nothing(id="a", prompt="p"))
         self.assertEqual(errors, [])
         self.assertIsNone(cases[0].expect_skill)
         self.assertEqual(cases[0].category, "near_miss")
 
     def test_shared_pool_cases_are_unrelated(self) -> None:
-        cases, errors = parse(no_match(id="a", prompt="p"), skill=None)
+        cases, errors = parse(triggers_nothing(id="a", prompt="p"), skill=None)
         self.assertEqual(errors, [])
         self.assertIsNone(cases[0].expect_skill)
         self.assertEqual(cases[0].category, "unrelated")
 
-    def test_both_arrays_load_from_one_file(self) -> None:
+    def test_both_kinds_live_in_one_array(self) -> None:
         cases, errors = parse(
             {
-                "expected_matches": [{"id": "a", "prompt": "p"}],
-                "expected_no_matches": [{"id": "b", "prompt": "q"}],
+                EVALUATIONS_KEY: [
+                    {"id": "a", TRIGGER_KEY: True, "prompt": "p"},
+                    {"id": "b", TRIGGER_KEY: False, "prompt": "q"},
+                ]
             }
         )
         self.assertEqual(errors, [])
-        self.assertEqual([c.expects_match for c in cases], [True, False])
+        self.assertEqual([c.skill_should_trigger for c in cases], [True, False])
 
     def test_has_behavior_only_when_something_is_asserted(self) -> None:
         cases, _ = parse(
             {
-                "expected_matches": [
-                    {"id": "a", "prompt": "p"},
-                    {"id": "b", "prompt": "p", "should": ["do the thing"]},
+                EVALUATIONS_KEY: [
+                    {"id": "a", TRIGGER_KEY: True, "prompt": "p"},
+                    {
+                        "id": "b",
+                        TRIGGER_KEY: True,
+                        "prompt": "p",
+                        "expected_behavior": ["do the thing"],
+                    },
                 ]
             }
         )
@@ -149,56 +158,70 @@ class TestCaseExpectations(unittest.TestCase):
 
 class TestDatasetRejections(unittest.TestCase):
     def test_missing_id(self) -> None:
-        _, errors = parse(match(prompt="p"))
+        _, errors = parse(triggers(prompt="p"))
         self.assertTrue(any("`id`" in e for e in errors), errors)
 
     def test_missing_prompt(self) -> None:
-        _, errors = parse(match(id="a"))
+        _, errors = parse(triggers(id="a"))
         self.assertTrue(any("`prompt`" in e for e in errors), errors)
 
-    def test_a_dataset_with_no_cases_at_all(self) -> None:
-        _, errors = parse({"expected_matches": [], "expected_no_matches": []})
-        self.assertTrue(any("at least one case" in e for e in errors), errors)
+    def test_the_trigger_flag_is_required(self) -> None:
+        # Defaulting it would recreate the hazard the flag exists to remove:
+        # an omitted field silently deciding the routing expectation.
+        _, errors = parse({EVALUATIONS_KEY: [{"id": "a", "prompt": "p"}]})
+        self.assertTrue(any(TRIGGER_KEY in e for e in errors), errors)
 
-    def test_an_array_must_be_an_array(self) -> None:
-        _, errors = parse({"expected_matches": {"id": "a", "prompt": "p"}})
-        self.assertTrue(any("must be an array" in e for e in errors), errors)
+    def test_the_trigger_flag_must_be_a_boolean(self) -> None:
+        for value in ("yes", "true", 1, None):
+            with self.subTest(value=value):
+                _, errors = parse({EVALUATIONS_KEY: [{"id": "a", "prompt": "p", TRIGGER_KEY: value}]})
+                self.assertTrue(any(TRIGGER_KEY in e for e in errors), errors)
 
-    def test_expected_no_matches_takes_a_prompt_and_nothing_else(self) -> None:
+    def test_an_empty_dataset(self) -> None:
+        _, errors = parse({EVALUATIONS_KEY: []})
+        self.assertTrue(any("non-empty array" in e for e in errors), errors)
+
+    def test_evaluations_must_be_an_array(self) -> None:
+        _, errors = parse({EVALUATIONS_KEY: {"id": "a", "prompt": "p"}})
+        self.assertTrue(any("non-empty array" in e for e in errors), errors)
+
+    def test_a_non_triggering_evaluation_takes_a_prompt_and_nothing_else(self) -> None:
         # No skill is ever loaded for these, so there is no behavior phase for
         # an assertion to be graded in or a workspace to be staged into.
         for key, value in (
-            ("should", ["x"]),
-            ("should_not", ["x"]),
+            ("expected_behavior", ["x"]),
+            ("unexpected_behavior", ["x"]),
             ("logs_contain", ["x"]),
             ("files_exist", ["x"]),
             ("workspace", "evals/files/thing"),
         ):
             with self.subTest(key):
-                _, errors = parse(no_match(id="a", prompt="p", **{key: value}))
+                _, errors = parse(triggers_nothing(id="a", prompt="p", **{key: value}))
                 self.assertTrue(
-                    any(f"`{key}`" in e and MATCH_KEY in e for e in errors), errors
+                    any(f"`{key}`" in e and TRIGGER_KEY in e for e in errors), errors
                 )
 
-    def test_an_expected_no_match_case_never_reaches_behavior_mode(self) -> None:
-        cases, errors = parse(no_match(id="a", prompt="p", note="why"))
+    def test_a_non_triggering_evaluation_never_reaches_behavior_mode(self) -> None:
+        cases, errors = parse(triggers_nothing(id="a", prompt="p", note="why"))
         self.assertEqual(errors, [])
         self.assertFalse(cases[0].has_behavior)
 
-    def test_the_shared_pool_cannot_expect_a_match(self) -> None:
-        _, errors = parse(match(id="a", prompt="p"), skill=None)
+    def test_the_shared_pool_cannot_expect_a_trigger(self) -> None:
+        _, errors = parse(triggers(id="a", prompt="p"), skill=None)
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("cannot have `expected_matches`", errors[0])
+        self.assertIn("belongs to no skill", errors[0])
 
     def test_string_lists_reject_a_bare_string(self) -> None:
-        _, errors = parse(match(id="a", prompt="p", should="do the thing"))
+        _, errors = parse(triggers(id="a", prompt="p", expected_behavior="do the thing"))
         self.assertTrue(any("array of non-empty strings" in e for e in errors), errors)
 
-    def test_duplicate_ids_are_found_across_arrays(self) -> None:
+    def test_duplicate_ids_are_found(self) -> None:
         cases, _ = parse(
             {
-                "expected_matches": [{"id": "a", "prompt": "p"}],
-                "expected_no_matches": [{"id": "a", "prompt": "q"}],
+                EVALUATIONS_KEY: [
+                    {"id": "a", TRIGGER_KEY: True, "prompt": "p"},
+                    {"id": "a", TRIGGER_KEY: False, "prompt": "q"},
+                ]
             }
         )
         self.assertEqual(datasets.duplicate_ids(cases), ["a"])
@@ -206,16 +229,18 @@ class TestDatasetRejections(unittest.TestCase):
 
 class TestTier0(unittest.TestCase):
     def test_thin_dataset_is_rejected(self) -> None:
-        cases, _ = parse(match(id="a", prompt="p"))
+        cases, _ = parse(triggers(id="a", prompt="p"))
         errors = datasets.tier0_errors("local-ai-use", cases)
-        self.assertTrue(any(MATCH_KEY in e for e in errors), errors)
-        self.assertTrue(any(NO_MATCH_KEY in e for e in errors), errors)
+        self.assertTrue(any(f"{TRIGGER_KEY}: true" in e for e in errors), errors)
+        self.assertTrue(any(f"{TRIGGER_KEY}: false" in e for e in errors), errors)
 
     def test_the_minimum_dataset_passes(self) -> None:
         cases, errors = parse(
             {
-                "expected_matches": [{"id": c, "prompt": "p"} for c in "abc"],
-                "expected_no_matches": [{"id": c, "prompt": "p"} for c in "de"],
+                EVALUATIONS_KEY: [
+                    {"id": c, TRIGGER_KEY: True, "prompt": "p"} for c in "abc"
+                ]
+                + [{"id": c, TRIGGER_KEY: False, "prompt": "p"} for c in "de"]
             },
             skill="local-ai-use",
         )
@@ -382,7 +407,7 @@ def stream(*tool_calls: tuple[str, dict], result: str = "done") -> list[dict]:
 
 
 class TestRunGrading(unittest.TestCase):
-    """Deterministic grading only; `should` / `should_not` need a live judge."""
+    """Deterministic grading only; the judged fields need a live judge."""
 
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -462,7 +487,7 @@ class TestBehaviorCaseFlow(unittest.TestCase):
     """The hook contract and prompt templating, without spending tokens."""
 
     def run_case(self, case_payload: dict, hooks=None, events=None, skill="local-ai-use"):
-        cases, errors = parse({"expected_matches": [case_payload]}, skill=skill)
+        cases, errors = parse(triggers(**case_payload), skill=skill)
         self.assertEqual(errors, [])
         made: list[FakeAgent] = []
 
@@ -538,7 +563,7 @@ class TestBehaviorCaseFlow(unittest.TestCase):
             def prompt(self, text):
                 raise RuntimeError("claude produced no output")
 
-        cases, _ = parse(match(id="a", prompt="p", should_not=["x"]))
+        cases, _ = parse(triggers(id="a", prompt="p", unexpected_behavior=["x"]))
         original = run_evals.claude
         run_evals.claude = lambda model, *, skill, effort, seed=None: Exploding(stream(), seed)
         try:
@@ -571,7 +596,14 @@ class TestBehaviorReporting(unittest.TestCase):
             ),
             run_evals.BehaviorOutcome(
                 id="b", skill="s", prompt="p", passed=False, elapsed_s=1.0,
-                checks=[{"kind": "should", "expectation": "y", "passed": False, "detail": "no"}],
+                checks=[
+                    {
+                        "kind": "expected_behavior",
+                        "expectation": "y",
+                        "passed": False,
+                        "detail": "no",
+                    }
+                ],
             ),
         ]
         summary = run_evals.summarize_behavior(outcomes, {"model": "opus", "effort": "high"})
@@ -586,7 +618,12 @@ class TestBehaviorReporting(unittest.TestCase):
 class TestCaseFiltering(unittest.TestCase):
     def setUp(self) -> None:
         self.cases, _ = parse(
-            {"expected_matches": [{"id": "a", "prompt": "p"}, {"id": "b", "prompt": "q"}]},
+            {
+                EVALUATIONS_KEY: [
+                    {"id": "a", TRIGGER_KEY: True, "prompt": "p"},
+                    {"id": "b", TRIGGER_KEY: True, "prompt": "q"},
+                ]
+            },
             skill="local-ai-use",
         )
 

@@ -10,70 +10,90 @@
     "(\"Use the local-ai-app-integration skill\"), which made them useless as",
     "routing cases -- and every case here is now also a routing case."
   ],
-  "expected_matches": [
+  "evaluations": [
     {
       "id": "electron-offline-mode",
+      "skill_should_trigger": true,
       "prompt": "My Electron app calls the OpenAI chat completions endpoint. I want to ship an offline mode that bundles the inference engine into the installer so it still works with no internet."
     },
     {
       "id": "swap-anthropic-backend",
+      "skill_should_trigger": true,
       "prompt": "My Python desktop tool talks to the Anthropic Messages API today. Give it a mode where the model runs on the customer's own PC so their data never leaves the machine."
     },
     {
       "id": "vendor-binary",
+      "skill_should_trigger": true,
       "prompt": "Can you vendor an inference binary into my app and repoint my existing HTTP client at it instead of the Ollama server I'm hitting now?"
     },
     {
       "id": "in-app-embeddings",
+      "skill_should_trigger": true,
       "prompt": "I want my app to compute embeddings on the end user's hardware rather than calling a hosted embeddings API. How do I wire that up?"
     },
     {
       "id": "vendor-lemonade-launcher",
+      "skill_should_trigger": true,
       "note": "The launcher is the core artifact: a random API key, a dynamically bound port, and lemond spawned as a subprocess.",
       "prompt": "Help me add local AI to this Python app so it replaces the OpenAI API with a local backend. Do not download or install anything, just write the launcher module.",
       "workspace": "evals/files/openai-stub",
-      "logs_contain": ["secrets", "socket", "subprocess"],
-      "should_not": [
+      "unexpected_behavior": [
         "Hardcode a fixed port instead of binding one dynamically"
+      ],
+      "logs_contain": [
+        "secrets",
+        "socket",
+        "subprocess"
       ]
     },
     {
       "id": "lemond-health-check",
+      "skill_should_trigger": true,
       "note": "Readiness has two documented failure modes: scraping stdout, and pre-loading the model at startup.",
       "prompt": "Write a health-check helper for this Python app that waits until the local inference server is ready to serve. Do not download or install anything, just write the code.",
       "workspace": "evals/files/openai-stub",
-      "logs_contain": ["/api/v1/health"],
-      "should_not": [
+      "unexpected_behavior": [
         "Read or parse the local server's stdout or stderr to detect readiness",
         "Call POST /api/v1/load to pre-load the model at startup"
+      ],
+      "logs_contain": [
+        "/api/v1/health"
       ]
     },
     {
       "id": "repoint-openai-client",
+      "skill_should_trigger": true,
       "note": "The 120-second timeout is the one the skill exists to get right: first-token latency on a cold local model blows past the OpenAI SDK default.",
       "prompt": "Update main.py to point the OpenAI client at a local inference server running on this machine. Do not download or install anything, just edit the file.",
       "workspace": "evals/files/openai-stub",
-      "files_exist": ["main.py"],
-      "logs_contain": ["120"]
+      "logs_contain": [
+        "120"
+      ],
+      "files_exist": [
+        "main.py"
+      ]
     },
     {
       "id": "local-mode-without-api-key",
+      "skill_should_trigger": true,
       "prompt": "Edit main.py so the app starts in local mode without an OPENAI_API_KEY. Do not download or install anything, just edit the file.",
       "workspace": "evals/files/apikey-guard",
-      "files_exist": ["main.py"],
-      "should": [
+      "expected_behavior": [
         "Remove or bypass the API-key guard so the app starts in local mode without requiring OPENAI_API_KEY to be set"
+      ],
+      "files_exist": [
+        "main.py"
       ]
-    }
-  ],
-  "expected_no_matches": [
+    },
     {
       "id": "rate-limit-openai-calls",
+      "skill_should_trigger": false,
       "note": "Touches an app's OpenAI integration, but wants it to stay in the cloud.",
       "prompt": "Add rate limiting and retry-with-backoff to the OpenAI API calls in my Express server."
     },
     {
       "id": "pyinstaller-packaging",
+      "skill_should_trigger": false,
       "note": "Bundling and shipping an app, with no local inference anywhere in it.",
       "prompt": "Package my Python app as a standalone Windows installer with PyInstaller so users don't need Python."
     }
