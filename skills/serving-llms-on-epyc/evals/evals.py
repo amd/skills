@@ -50,7 +50,7 @@ def test_non_epyc_host_is_rejected_before_anything_launches():
             "configuring anything"
         )
         run.should(
-            "Report that this host's CPU is not an AMD EPYC and stop there, "
+            "Report that this host's CPU is not an AMD EPYC 9000 series and stop there, "
             "naming the CPU it actually found"
         )
         run.should_not(
