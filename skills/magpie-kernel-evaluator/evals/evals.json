@@ -5,12 +5,13 @@
     "hardware, so no case grades behavior yet; add one with `should` /",
     "`should_not` plus an evals/machine.yml when a runner is available.",
     "",
-    "The near misses matter more than usual here: this skill and",
-    "tracelens-analysis-orchestrator both mention TraceLens and trace analysis,",
-    "so the boundary between 'benchmark and optimize kernels' and 'orchestrate",
-    "a trace analysis report' is the thing most likely to route wrong."
+    "The boundary that matters here is against tracelens-analysis-orchestrator:",
+    "both mention TraceLens and trace analysis, so 'benchmark and optimize",
+    "kernels' versus 'orchestrate a trace analysis report' is the thing most",
+    "likely to route wrong. `benchmark-then-optimize-kernel` is that line, in the",
+    "words someone would use when they mean this skill."
   ],
-  "cases": [
+  "expected_matches": [
     {
       "id": "benchmark-vllm-ttft",
       "prompt": "Benchmark vLLM throughput and time-to-first-token for Llama 3 on this box, and capture torch traces while it runs."
@@ -28,21 +29,21 @@
       "prompt": "Rank these three Triton attention kernel variants against each other and validate the winner end to end."
     },
     {
+      "id": "benchmark-then-optimize-kernel",
+      "note": "Trace-analysis vocabulary shared with tracelens-analysis-orchestrator, but the work is benchmarking and kernel ranking.",
+      "prompt": "Benchmark SGLang on this node, then rank two candidate HIP kernels for the biggest bottleneck and validate the winner."
+    }
+  ],
+  "expected_no_matches": [
+    {
       "id": "write-a-cuda-transpose",
       "note": "Kernel authoring, not kernel evaluation. Shares all the vocabulary and none of the workflow.",
-      "prompt": "Write a CUDA kernel that transposes a matrix, and explain the shared-memory tiling.",
-      "expect_skill": null
+      "prompt": "Write a CUDA kernel that transposes a matrix, and explain the shared-memory tiling."
     },
     {
       "id": "mi300x-spec-question",
-      "prompt": "What is the theoretical peak FP16 throughput of an MI300X on paper?",
-      "expect_skill": null
-    },
-    {
-      "id": "orchestrate-trace-report",
-      "note": "Near miss the other way: this is the analysis orchestrator's job even though Magpie also post-processes traces.",
-      "prompt": "Run the agentic analysis workflow on this PyTorch profiler trace and write me a prioritized analysis.md.",
-      "expect_skill": "tracelens-analysis-orchestrator"
+      "note": "A datasheet question, not a measurement to run.",
+      "prompt": "What is the theoretical peak FP16 throughput of an MI300X on paper?"
     }
   ]
 }

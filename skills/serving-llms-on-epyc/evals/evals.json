@@ -7,9 +7,12 @@
     "",
     "`non-epyc-host-is-rejected` is the sharp one: detect.py can report",
     "avx512: true alongside is_amd_epyc: false and still exit 0, so an agent",
-    "that stops has honored the skill rather than a failing exit code."
+    "that stops has honored the skill rather than a failing exit code.",
+    "",
+    "The confusable neighbour is serving-llms-on-instinct; the GPU-side prompts",
+    "that must reach it instead of this skill live in its dataset."
   ],
-  "cases": [
+  "expected_matches": [
     {
       "id": "epyc-cpu-inference-setup",
       "prompt": "Set up CPU inference for Llama 3.1 8B on my dual-socket EPYC server. No GPU in the box."
@@ -49,24 +52,18 @@
         "Include --device cpu in the proposed vllm serve command",
         "Propose a GPU, CUDA, or ROCm image for this CPU launch"
       ]
-    },
+    }
+  ],
+  "expected_no_matches": [
     {
       "id": "xeon-avx512-benchmark",
       "note": "CPU inference vocabulary, wrong vendor.",
-      "prompt": "Benchmark my Intel Xeon server's AVX-512 throughput for matrix multiplication and tell me if it's worth upgrading.",
-      "expect_skill": null
+      "prompt": "Benchmark my Intel Xeon server's AVX-512 throughput for matrix multiplication and tell me if it's worth upgrading."
     },
     {
       "id": "epyc-postgres-sizing",
       "note": "Right hardware, unrelated workload.",
-      "prompt": "How many cores should I allocate on my EPYC server for a Postgres workload with 500 concurrent connections?",
-      "expect_skill": null
-    },
-    {
-      "id": "serve-on-mi300x-not-cpu",
-      "note": "The skill's own description sends GPU work to its neighbour; this asserts that it does.",
-      "prompt": "Serve Qwen3 on the MI300X cards in my server with vLLM.",
-      "expect_skill": "serving-llms-on-instinct"
+      "prompt": "How many cores should I allocate on my EPYC server for a Postgres workload with 500 concurrent connections?"
     }
   ]
 }

@@ -1,6 +1,11 @@
 {
   "$schema": "../../../eval/schema/evals.schema.json",
-  "cases": [
+  "_comment": [
+    "The boundary worth guarding is against local-ai-app-integration: this skill",
+    "makes the *agent* use local models, that one makes the *user's app* do it.",
+    "`agent-generates-image-locally` is that line from this side."
+  ],
+  "expected_matches": [
     {
       "id": "images-cost",
       "prompt": "I'm burning way too much money on image generation API calls. Can you make this workspace generate images on my own machine instead?"
@@ -18,6 +23,11 @@
       "prompt": "From now on, when using Claude, use local models for generating pictures but keep using the cloud for chat."
     },
     {
+      "id": "agent-generates-image-locally",
+      "note": "Names a cloud image API and an app-shaped complaint, but the thing going local is the agent, not the user's app.",
+      "prompt": "Stop calling DALL-E when I ask you for a picture. Generate images on this machine instead so I stop paying per image."
+    },
+    {
       "id": "generate-cat-image",
       "note": "Tier 2. The end-to-end case: needs a reachable Lemonade Server, which the default runners provide.",
       "prompt": "Learn how to generate images locally, then generate an image of a cat and save it to out.png.",
@@ -31,22 +41,17 @@
         "Pull TTS or STT models for this image generation task",
         "Reach for a cloud image path instead of local Lemonade"
       ]
-    },
-    {
-      "id": "convert-app-to-local",
-      "note": "Near miss against local-ai-app-integration: converting someone else's app is that skill's job, not this one's.",
-      "prompt": "My Electron chat app calls the OpenAI API. Add a local mode so it keeps working with no internet.",
-      "expect_skill": "local-ai-app-integration"
-    },
+    }
+  ],
+  "expected_no_matches": [
     {
       "id": "finetune-on-laptop",
-      "prompt": "Fine-tune a small language model on my own dataset using the GPU in my laptop.",
-      "expect_skill": null
+      "note": "Local, on-device, and model-shaped, but training is nobody's job here.",
+      "prompt": "Fine-tune a small language model on my own dataset using the GPU in my laptop."
     },
     {
       "id": "compare-cloud-image-models",
-      "prompt": "Compare the output quality of DALL-E 3 and Midjourney for product photography and tell me which to buy.",
-      "expect_skill": null
+      "prompt": "Compare the output quality of DALL-E 3 and Midjourney for product photography and tell me which to buy."
     }
   ]
 }

@@ -8,9 +8,12 @@
     "'confirm before launching' step.",
     "",
     "Container teardown lives in evals/hooks.py, and the MI300X runner is",
-    "declared in evals/machine.yml."
+    "declared in evals/machine.yml.",
+    "",
+    "`vllm-on-nvidia` and `consumer-radeon` are the two hardware lines this skill",
+    "draws; serving-llms-on-epyc draws the third, from its own dataset."
   ],
-  "cases": [
+  "expected_matches": [
     {
       "id": "qwen-on-mi300x",
       "prompt": "Get Qwen3 serving on my MI300X box."
@@ -40,28 +43,23 @@
         "Fall back to a cloud LLM provider or an NVIDIA/CUDA code path",
         "Serve a different, larger model than the one that was requested"
       ]
-    },
+    }
+  ],
+  "expected_no_matches": [
     {
       "id": "vllm-on-nvidia",
       "note": "Same request, same tool, excluded hardware.",
-      "prompt": "Serve Llama 3.1 70B with vLLM on my NVIDIA H100 cluster.",
-      "expect_skill": null
+      "prompt": "Serve Llama 3.1 70B with vLLM on my NVIDIA H100 cluster."
     },
     {
       "id": "consumer-radeon",
       "note": "AMD GPU, but the description rules out the RX/Radeon consumer line.",
-      "prompt": "Which quantization should I pick to fit a 13B model into the 16 GB on my Radeon RX 7800 XT?",
-      "expect_skill": null
+      "prompt": "Which quantization should I pick to fit a 13B model into the 16 GB on my Radeon RX 7800 XT?"
     },
     {
       "id": "hbm-vs-gddr",
-      "prompt": "Explain the practical difference between HBM3 and GDDR6 memory bandwidth for inference workloads.",
-      "expect_skill": null
-    },
-    {
-      "id": "serve-on-epyc-cpu-only",
-      "prompt": "I have no GPUs at all, just a big EPYC server. Serve Llama 3.1 8B on it.",
-      "expect_skill": "serving-llms-on-epyc"
+      "note": "Inference hardware trivia with nothing to deploy.",
+      "prompt": "Explain the practical difference between HBM3 and GDDR6 memory bandwidth for inference workloads."
     }
   ]
 }

@@ -4,14 +4,21 @@
     "Copy this to skills/<your-skill>/evals/evals.json and replace the cases.",
     "Delete this _comment block and the `note` fields once you are done.",
     "",
-    "The folder names the skill, so a case that should trigger it needs nothing",
-    "but an `id` and a `prompt`. Write the prompt the way a user would actually",
-    "type it -- copying phrases out of your SKILL.md description measures string",
-    "matching, not routing.",
+    "A dataset is two lists of prompts. `expected_matches` are the ones that",
+    "should wake your skill up; `expected_no_matches` are the ones where no",
+    "skill should fire at all. Nothing names a skill: the folder says which",
+    "skill this is, and the list a prompt sits in says whether it triggers.",
     "",
-    "Tier 0 (required for every skill): at least 3 cases that should trigger",
-    "your skill and 2 that should not. Add `\"expect_skill\": null` for the ones",
-    "that should not.",
+    "Write prompts the way a user would actually type them -- copying phrases",
+    "out of your SKILL.md description measures string matching, not routing.",
+    "",
+    "If a prompt should trigger a DIFFERENT skill, put it in that skill's",
+    "`expected_matches`, not in your `expected_no_matches`. Routing installs",
+    "the whole catalog at once, so it is the same assertion either way, and",
+    "your list keeps meaning 'nothing should fire'.",
+    "",
+    "Tier 0 (required for every skill): at least 3 `expected_matches` and 2",
+    "`expected_no_matches`.",
     "",
     "Tier 1 (required if your skill can be exercised on a generic runner): give",
     "at least one case a `should` / `should_not` / `logs_contain` / `files_exist`",
@@ -26,10 +33,9 @@
     "Then run it for real:",
     "    python eval/run_evals.py --skill <your-skill>"
   ],
-  "cases": [
+  "expected_matches": [
     {
       "id": "REPLACE-unique-slug",
-      "note": "Positive. `expect_skill` is omitted because it defaults to this folder's skill.",
       "prompt": "Something a user would say that should make this skill fire."
     },
     {
@@ -38,7 +44,7 @@
     },
     {
       "id": "REPLACE-positive-with-expectations",
-      "note": "Tier 1. Same prompt grades routing AND what the agent then did.",
+      "note": "Tier 1. The same prompt grades routing AND what the agent then did.",
       "prompt": "A task this skill should carry out end to end.",
       "should": [
         "A thing the agent must do, in plain language, graded by an LLM judge"
@@ -50,17 +56,17 @@
         "a-literal-that-must-appear.py"
       ],
       "files_exist": ["expected-output.txt"]
-    },
+    }
+  ],
+  "expected_no_matches": [
     {
       "id": "REPLACE-near-miss",
-      "note": "Negative. Close to this skill's vocabulary but out of its scope: the wrong hardware, an adjacent domain, or a neighbouring skill's job.",
-      "prompt": "Something that sounds like this skill's territory but is not.",
-      "expect_skill": null
+      "note": "Close to this skill's vocabulary but out of its scope: the wrong hardware, an adjacent domain, a question rather than a task.",
+      "prompt": "Something that sounds like this skill's territory but is not."
     },
     {
       "id": "REPLACE-second-near-miss",
-      "prompt": "Another prompt that must not wake this skill up.",
-      "expect_skill": null
+      "prompt": "Another prompt that must not wake this skill up."
     }
   ]
 }

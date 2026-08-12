@@ -78,7 +78,7 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
-      # Structure, Tier 0 coverage, unique ids, resolvable expect_skill.
+      # Structure, Tier 0 coverage, repo-wide unique ids, staged workspaces.
       - name: Validate datasets
         run: python eval/run_evals.py --validate
 

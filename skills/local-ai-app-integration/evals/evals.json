@@ -11,7 +11,7 @@
     "(\"Use the local-ai-app-integration skill\"), which made them useless as",
     "routing cases -- and every case here is now also a routing case."
   ],
-  "cases": [
+  "expected_matches": [
     {
       "id": "electron-offline-mode",
       "prompt": "My Electron app calls the OpenAI chat completions endpoint. I want to ship an offline mode that bundles the inference engine into the installer so it still works with no internet."
@@ -65,23 +65,18 @@
       "should": [
         "Remove or bypass the API-key guard so the app starts in local mode without requiring OPENAI_API_KEY to be set"
       ]
-    },
+    }
+  ],
+  "expected_no_matches": [
     {
       "id": "rate-limit-openai-calls",
       "note": "Touches an app's OpenAI integration, but wants it to stay in the cloud.",
-      "prompt": "Add rate limiting and retry-with-backoff to the OpenAI API calls in my Express server.",
-      "expect_skill": null
+      "prompt": "Add rate limiting and retry-with-backoff to the OpenAI API calls in my Express server."
     },
     {
       "id": "pyinstaller-packaging",
-      "prompt": "Package my Python app as a standalone Windows installer with PyInstaller so users don't need Python.",
-      "expect_skill": null
-    },
-    {
-      "id": "agent-generates-image-locally",
-      "note": "Near miss against local-ai-use: the user wants the agent itself to go local, not their app.",
-      "prompt": "Stop calling DALL-E when I ask you for a picture. Generate images on this machine instead so I stop paying per image.",
-      "expect_skill": "local-ai-use"
+      "note": "Bundling and shipping an app, with no local inference anywhere in it.",
+      "prompt": "Package my Python app as a standalone Windows installer with PyInstaller so users don't need Python."
     }
   ]
 }

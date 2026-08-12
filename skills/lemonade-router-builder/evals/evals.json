@@ -1,13 +1,13 @@
 {
   "$schema": "../../../eval/schema/evals.schema.json",
   "_comment": [
-    "The three positives cover the skill's three shapes: keyword rules, regex",
-    "rules, and LLM-as-router. The near misses carry `should_not` as well as an",
-    "`expect_skill: null`, so they are graded twice -- routing mode proves no",
-    "skill fires with the whole catalog installed, and behavior mode proves this",
-    "skill stays quiet even when it is the only one available."
+    "The three matches cover the skill's three shapes: keyword rules, regex",
+    "rules, and LLM-as-router. Both no-match cases carry `should_not`, so they",
+    "are graded twice -- routing mode proves no skill fires with the whole",
+    "catalog installed, and behavior mode proves this skill stays quiet even",
+    "when it is the only one available."
   ],
-  "cases": [
+  "expected_matches": [
     {
       "id": "keyword-router",
       "prompt": "Route coding questions - anything mentioning functions, bugs, or stack traces - to Qwen3.5-9B-GGUF. Everything else goes to Qwen3.5-2B-GGUF.",
@@ -51,12 +51,13 @@
         "Contain only routing.router with no routing.rules key present in router.json",
         "Write a routing.router prompt that describes only when to pick each model, with no instruction about reply format or output format"
       ]
-    },
+    }
+  ],
+  "expected_no_matches": [
     {
       "id": "nginx-load-balance",
       "note": "The word 'routing' with none of the meaning.",
       "prompt": "Set up nginx to load-balance incoming requests across three backend servers.",
-      "expect_skill": null,
       "should_not": [
         "Produce a collection.router policy JSON",
         "Run scripts/validate.py"
@@ -66,7 +67,6 @@
       "id": "which-lemonade-model",
       "note": "Lemonade, models, and a choice between them, but no policy to author.",
       "prompt": "Which Lemonade model should I download for summarizing long documents on my laptop?",
-      "expect_skill": null,
       "should_not": [
         "Generate a collection.router policy",
         "Mention routing.rules or routing.candidates"

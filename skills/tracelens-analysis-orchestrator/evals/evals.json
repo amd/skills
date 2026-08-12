@@ -9,9 +9,12 @@
     "",
     "The behavior case is the first standalone repeatability case from TraceLens",
     "(gemm_01_compute_few_tiles). Its prompt is templated: evals/hooks.py clones",
-    "and installs TraceLens once per run and fills in the {placeholders}."
+    "and installs TraceLens once per run and fills in the {placeholders}.",
+    "",
+    "The confusable neighbour is magpie-kernel-evaluator, which shares the",
+    "TraceLens vocabulary; the prompts that belong to it live in its dataset."
   ],
-  "cases": [
+  "expected_matches": [
     {
       "id": "analyze-torch-trace",
       "prompt": "My training step is way slower than I expected. I ran it under the PyTorch profiler and the output is at https://github.com/AMD-AGI/TraceLens/raw/main/tests/traces/mi300/resnet_act_checkpoint.json.gz. Work out where the time is actually going and write it up so I know what to fix first."
@@ -33,23 +36,18 @@
       "note": "Tier 2. Clones and pip-installs TraceLens, then scores the agent's analysis.md with TraceLens's own workflow_scripted_evals.py. See evals/hooks.py.",
       "prompt": "Run the full standalone TraceLens analysis workflow locally with analysis mode default.\n- trace_path: {trace_path}\n- platform: {platform}\n- output_dir: {output_dir}\n- venv_path: {venv_path}\n- tracelens_dir: {tracelens_dir}\n",
       "files_exist": ["analysis_output/analysis.md"]
-    },
+    }
+  ],
+  "expected_no_matches": [
     {
       "id": "node-event-loop",
       "note": "Profiling vocabulary, no GPU and no PyTorch trace.",
-      "prompt": "My Node.js server shows high event loop latency under load. Help me profile it and find the blocking call.",
-      "expect_skill": null
+      "prompt": "My Node.js server shows high event loop latency under load. Help me profile it and find the blocking call."
     },
     {
       "id": "cprofile-python-script",
-      "prompt": "Profile my Python script with cProfile and tell me which function is eating the most time.",
-      "expect_skill": null
-    },
-    {
-      "id": "benchmark-then-optimize-kernel",
-      "note": "Near miss against magpie-kernel-evaluator, which shares the TraceLens vocabulary. Benchmarking and kernel ranking are its job, not this skill's.",
-      "prompt": "Benchmark SGLang on this node, then rank two candidate HIP kernels for the biggest bottleneck and validate the winner.",
-      "expect_skill": "magpie-kernel-evaluator"
+      "note": "A profiler and a hotspot question, on the wrong side of the CPU/GPU line.",
+      "prompt": "Profile my Python script with cProfile and tell me which function is eating the most time."
     }
   ]
 }

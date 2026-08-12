@@ -1,4 +1,5 @@
 {
+  "$schema": "schema/evals.schema.json",
   "_comment": [
     "Prompts that belong to no skill's domain. Routing runs them against the",
     "whole catalog, so they are the `unrelated` control group for every skill at",
@@ -6,17 +7,18 @@
     "skill's dataset.",
     "",
     "Only add a prompt here when nothing in the catalog is close to it. A prompt",
-    "that sits near one skill in particular belongs in THAT skill's dataset with",
-    "`\"expect_skill\": null`, where it is reported as that skill's near-miss and",
+    "that sits near one skill in particular belongs in THAT skill's",
+    "`expected_no_matches`, where it is reported as that skill's near-miss and",
     "its owner is the one who maintains it.",
     "",
-    "These are routing-only: behavior mode stages exactly one skill and these",
-    "belong to none, so they carry no `should` / `should_not` assertions.",
+    "There is no `expected_matches` here, because this file belongs to no skill.",
+    "For the same reason these are routing-only: behavior mode stages exactly one",
+    "skill, so any assertion written here would never run.",
     "",
     "A false trigger here is much more serious than a near-miss failure. It means",
     "a description is broad enough to capture ordinary programming work."
   ],
-  "cases": [
+  "expected_no_matches": [
     {
       "id": "merge-sorted-lists",
       "prompt": "Write a Python function that merges two sorted lists, and add unit tests for it."

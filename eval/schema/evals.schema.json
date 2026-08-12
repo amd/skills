@@ -2,10 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/amd/skills/eval/schema/evals.schema.json",
   "title": "AMD skill eval dataset",
-  "description": "One dataset per skill at skills/<name>/evals/evals.json. Each case is a user prompt plus what should be true after the agent sees it. The same case is graded twice: routing mode installs the whole catalog and checks expect_skill, behavior mode installs only this skill and checks should / should_not / logs_contain / files_exist. Reference the schema from your file with \"$schema\": \"../../../eval/schema/evals.schema.json\" for editor autocomplete. eval/datasets.py is the enforcing implementation; this file exists so editors can help.",
+  "description": "One dataset per skill at skills/<name>/evals/evals.json, holding two arrays of prompts: expected_matches (this skill should trigger) and expected_no_matches (no skill should trigger). No case names a skill; the folder says which skill, the array says whether it fires. The same case is graded twice: routing mode installs the whole catalog and checks the trigger decision, behavior mode installs only this skill and checks should / should_not / logs_contain / files_exist. Reference the schema from your file with \"$schema\": \"../../../eval/schema/evals.schema.json\" for editor autocomplete. eval/datasets.py is the enforcing implementation; this file exists so editors can help.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["cases"],
+  "anyOf": [
+    { "required": ["expected_matches"] },
+    { "required": ["expected_no_matches"] }
+  ],
   "properties": {
     "$schema": {
       "type": "string",
@@ -18,44 +21,55 @@
         { "type": "array", "items": { "type": "string" } }
       ]
     },
-    "cases": {
+    "expected_matches": {
       "type": "array",
-      "minItems": 1,
-      "description": "Tier 0 requires at least 3 cases that should trigger this skill and 2 that should not.",
-      "items": { "$ref": "#/$defs/case" }
+      "description": "Prompts that must trigger the skill that owns this file. Tier 0 requires at least 3. A prompt that should trigger a DIFFERENT skill belongs in that skill's expected_matches: routing installs the whole catalog at once, so it is the same assertion either way.",
+      "items": { "$ref": "#/$defs/expectedMatch" }
+    },
+    "expected_no_matches": {
+      "type": "array",
+      "description": "Prompts where no skill should trigger. Tier 0 requires at least 2. These are the near misses only this skill's owner knows to write: close enough to the domain to be tempting, wrong enough that firing would be a bug.",
+      "items": { "$ref": "#/$defs/expectedNoMatch" }
     }
   },
   "$defs": {
-    "case": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable slug, unique across the whole repo because routing pools every skill's cases into one run. Used by --only and to name transcript files."
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What the user says, phrased the way a user would. Do not copy the skill description: that measures string matching rather than routing. A prompt that references a file must either stage it via `workspace` or link a real URL, because the routing workspace holds nothing but the skills tree."
+    },
+    "should_not": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Natural-language things the agent must not do, graded by an LLM judge over the transcript and workspace. This is where a skill's guard rails get pinned down."
+    },
+    "workspace": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Directory relative to the skill root (conventionally evals/files/<name>) whose contents are copied into the agent's workspace before the prompt runs. Use it to hand the agent a starting file to edit instead of describing one in prose."
+    },
+    "note": {
+      "type": "string",
+      "description": "Why this case exists. JSON has no comments, so this is the sanctioned place for one. Ignored by the runner."
+    },
+    "expectedMatch": {
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "prompt"],
       "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Stable slug, unique across the whole repo because routing pools every skill's cases into one run. Used by --only and to name transcript files."
-        },
-        "prompt": {
-          "type": "string",
-          "minLength": 1,
-          "description": "What the user says, phrased the way a user would. Do not copy the skill description: that measures string matching rather than routing. A prompt that references a file must either stage it via `workspace` or link a real URL, because the routing workspace holds nothing but the skills tree."
-        },
-        "expect_skill": {
-          "description": "Which skill must activate. OMIT for the normal case: it defaults to the skill that owns this file. Use null when no skill should fire (a near-miss for this skill). Use another skill's name to assert a handoff to a confusable neighbor.",
-          "type": ["string", "null"],
-          "minLength": 1
-        },
+        "id": { "$ref": "#/$defs/id" },
+        "prompt": { "$ref": "#/$defs/prompt" },
         "should": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 },
-          "description": "Natural-language things the agent must do, graded by an LLM judge over the transcript and workspace. Not allowed on a case expecting no skill, where there is no skill to grade."
+          "description": "Natural-language things the agent must do, graded by an LLM judge over the transcript and workspace."
         },
-        "should_not": {
-          "type": "array",
-          "items": { "type": "string", "minLength": 1 },
-          "description": "Natural-language things the agent must not do, graded by an LLM judge. This is where a skill's guard rails get pinned down."
-        },
+        "should_not": { "$ref": "#/$defs/should_not" },
         "logs_contain": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 },
@@ -66,15 +80,21 @@
           "items": { "type": "string", "minLength": 1 },
           "description": "Workspace-relative paths that must exist as files when the run ends."
         },
-        "workspace": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Directory relative to the skill root (conventionally evals/files/<name>) whose contents are copied into the agent's workspace before the prompt runs. Use it to hand the agent a starting file to edit instead of describing one in prose."
-        },
-        "note": {
-          "type": "string",
-          "description": "Why this case exists. JSON has no comments, so this is the sanctioned place for one. Ignored by the runner."
-        }
+        "workspace": { "$ref": "#/$defs/workspace" },
+        "note": { "$ref": "#/$defs/note" }
+      }
+    },
+    "expectedNoMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "prompt"],
+      "description": "No skill loads, so there is nothing to grade beyond silence. `should`, `logs_contain`, and `files_exist` all ask whether something happened, which here would grade the base model rather than the skill, and are rejected.",
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "prompt": { "$ref": "#/$defs/prompt" },
+        "should_not": { "$ref": "#/$defs/should_not" },
+        "workspace": { "$ref": "#/$defs/workspace" },
+        "note": { "$ref": "#/$defs/note" }
       }
     }
   }

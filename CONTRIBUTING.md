@@ -18,7 +18,7 @@ Best for cross-cutting skills that do not have a natural product home.
 2. Update the `SKILL.md` frontmatter so the `name` and `description` clearly explain *what* the skill does and *when* an agent should reach for it.
 3. Add the supporting scripts, templates, and reference docs your instructions point to. Keep skills focused: one well-scoped task per skill is better than one mega-skill.
 4. Add a `skill-card.md` at the skill root with `## Description`, `## Owner`, and `## License` sections. This is the skill's governance card; see [Skill cards](#skill-cards) and [docs/skill-cards.md](docs/skill-cards.md).
-5. Add an eval dataset at `skills/<name>/evals/evals.json` — copy [`eval/TEMPLATE.json`](eval/TEMPLATE.json). Every skill needs at least three prompts that should trigger it and two that should not; CI rejects a skill without them. See [Evals](#evals).
+5. Add an eval dataset at `skills/<name>/evals/evals.json` — copy [`eval/TEMPLATE.json`](eval/TEMPLATE.json). Every skill needs at least three prompts under `expected_matches` and two under `expected_no_matches`; CI rejects a skill without them. See [Evals](#evals).
 6. Publish the skill by adding a `./skills/<name>` entry to the `skills` array of the single `amd-skills` plugin in [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json). All published skills ship together in that one plugin; a skill left out of the array stays unpublished. (The `SKILL.md` description is what the agent uses for routing; the plugin's catalog description is a bundle-level blurb for humans.)
 7. Regenerate the derived manifests so they track the marketplace:
    ```bash
@@ -218,28 +218,33 @@ You write **one file** and both questions are graded from it:
 
 ### The file
 
-The folder names the skill, so a prompt that should trigger yours needs
-nothing but an id and the prompt:
+Two lists of prompts: the ones that should wake your skill up, and the ones
+where nothing should fire.
 
 ```json
 {
-  "cases": [
+  "expected_matches": [
     {
       "id": "epyc-vllm-zentorch",
       "prompt": "Serve Llama 3.1 8B on this box with vLLM and zentorch."
-    },
+    }
+  ],
+  "expected_no_matches": [
     {
       "id": "vllm-on-nvidia",
-      "prompt": "Serve Llama 3.1 70B with vLLM on my NVIDIA H100 cluster.",
-      "expect_skill": null
+      "prompt": "Serve Llama 3.1 70B with vLLM on my NVIDIA H100 cluster."
     }
   ]
 }
 ```
 
-Set `expect_skill` only to say something *other* than the default: `null` when
-no skill should fire, or another skill's name to assert a handoff to a
-confusable neighbour.
+No case names a skill. The folder says which skill this is, and the list a
+prompt sits in says whether it triggers.
+
+If a prompt should trigger *someone else's* skill, put it in that skill's
+`expected_matches` rather than your `expected_no_matches`. Routing installs the
+whole catalog at once, so it is the same assertion either way, and your list
+keeps meaning exactly what it says.
 
 Add expectations to make a case grade behavior too. All four are optional, and
 any one of them promotes the case from routing-only to behavior-graded:
@@ -254,16 +259,19 @@ any one of them promotes the case from routing-only to behavior-graded:
 Prefer the deterministic two where you can: they are instant and free, where a
 judged expectation costs a second agent call.
 
+An `expected_no_matches` case takes only `should_not`. Nothing loads, so the
+other three would be grading the base model rather than your skill.
+
 Two things you never write. **Do not assert your own skill's name** in
 `logs_contain` — routing mode grades that properly, and a substring match only
 proved the skill was staged. **Do not label a prompt** as positive, near-miss,
-or unrelated: that is derived from where the case lives and what it expects.
+or unrelated: that is derived from the list it sits in and the file it lives in.
 
 ### How much is enough
 
 | Tier | Required when | What it costs you |
 | --- | --- | --- |
-| **0** | always | 3 prompts that should trigger your skill, 2 that should not. CI rejects a skill without them. |
+| **0** | always | 3 `expected_matches`, 2 `expected_no_matches`. CI rejects a skill without them. |
 | **1** | your skill can be exercised on a generic runner | one case with a `should` / `should_not` / `logs_contain` / `files_exist` expectation |
 | **2** | your skill needs hardware or a live service | an `evals/machine.yml` saying where to run |
 
@@ -342,7 +350,7 @@ change touches.
 - [ ] Scripts handle expected errors and document their constants and dependencies
 - [ ] Prerequisites (ROCm version, GPU arch, container, env vars) are stated explicitly
 - [ ] Tested end-to-end on the target hardware against real prompts
-- [ ] `evals/evals.json` has at least 3 triggering prompts and 2 near misses (Tier 0)
+- [ ] `evals/evals.json` has at least 3 `expected_matches` and 2 `expected_no_matches` (Tier 0)
 - [ ] At least one case grades behavior, or the skill genuinely needs hardware CI cannot reach
 - [ ] `./.github/scripts/check.sh` passes (CI runs this on every PR)
 - [ ] `python eval/run_evals.py --skill <name>` passes
@@ -366,9 +374,9 @@ The validator checks every skill under `skills/` for:
 It also checks every eval dataset (`python eval/run_evals.py --validate`, no agent and no tokens):
 
 - `evals/evals.json`: present, parseable, and using only known fields — a typo'd key is an error rather than a silently dropped expectation
-- Tier 0 coverage: ≥ 3 prompts that should trigger the skill, ≥ 2 that should not
+- Tier 0 coverage: ≥ 3 cases under `expected_matches`, ≥ 2 under `expected_no_matches`
 - case ids: unique across the whole repo, because routing pools every skill's cases into one run
-- `expect_skill`: names a real skill under `skills/`, and a case expecting no skill carries no `should`
+- `expected_no_matches`: carries only `should_not`, since no skill loads for those prompts
 - `workspace`: points at a directory that exists
 
 It also checks the plugin manifests:
