@@ -14,10 +14,6 @@ name: behavioral
 #   * opt-in for Instinct -- the MI300X leg is scarce and expensive, so it only
 #     runs on PRs carrying the `enable_mi_ci` label (see behavioral-instinct).
 #
-# The companion question -- "with the whole published catalog installed, does
-# the agent pick the right skill at all?" -- is the routing eval, which lives in
-# its own dispatch-only workflow (routing.yml, eval/routing/).
-#
 # Shape mirrors validate.yml: discover -> matrix -> single aggregate gate, so
 # branch protection can require just the `behavioral` check.
 
