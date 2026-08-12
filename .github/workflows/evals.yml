@@ -15,10 +15,11 @@ name: evals
 # SKILL.md description or a dataset), and behavior runs only for the skills a
 # change touches. The whole suite runs when the shared engine changes.
 #
-# Where a skill's behavior job runs is declared by the skill, in
-# skills/<name>/evals/machine.yml. Nothing here names a skill or a piece of
-# hardware: a hardcoded list of which skills need which runner lives in the
-# wrong place and drifts from reality the first time a skill is added.
+# Which class of machine a skill's behavior job needs is declared by the skill,
+# in skills/<name>/evals/machine.yml, and resolved to labels, gates, and
+# credentials by eval/datasets.py. Nothing here names a skill: a hardcoded list
+# of which skills need which runner lives in the wrong place and drifts from
+# reality the first time a skill is added.
 #
 # Shape mirrors validate.yml: discover -> matrix -> single aggregate gate, so
 # branch protection can require just the `evals` check.
@@ -245,9 +246,9 @@ jobs:
       - name: Run behavior cases for ${{ matrix.skill }}
         run: python eval/run_evals.py --mode behavior --skill ${{ matrix.skill }}
 
-  # Skills whose evals/machine.yml names an environment. Those bring their own
+  # Skills on a runner class that carries its own environment. Those bring
   # scoped secrets, which is why they cannot share the job above: a job's
-  # credentials are fixed before its matrix expands. The MI300X runner, for
+  # credentials are fixed before its matrix expands. The Instinct runner, for
   # instance, sits outside the AMD network and calls api.anthropic.com directly
   # with its own budgeted key, so it sets no gateway base URL or headers.
   behavior-scoped:

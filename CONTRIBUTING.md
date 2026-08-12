@@ -280,7 +280,7 @@ not link to it; `python eval/run_evals.py --validate` is what enforces it.
 | --- | --- | --- |
 | **0** | always | 3 evaluations with `skill_should_trigger: true`, 2 with `false`. CI rejects a skill without them. |
 | **1** | your skill can be exercised on a generic runner | one evaluation with an `expected_behavior` / `unexpected_behavior` / `logs_contain` / `files_exist` expectation |
-| **2** | your skill needs hardware or a live service | an `evals/machine.yml` saying where to run |
+| **2** | your skill needs hardware or a live service | an `evals/machine.yml` naming the kind of machine |
 
 Tier 0 is deliberately cheap, and it buys more than it looks like. Routing
 pools every skill's cases into one run, so your five prompts become negative
@@ -298,15 +298,28 @@ something else.
 Two optional files sit beside the dataset.
 
 `evals/machine.yml` declares where the behavior cases run. Skip it unless you
-need something other than the default Linux and Windows runners. It replaces
+need something other than the default runners on Linux and Windows. It replaces
 the hardcoded hardware list CI used to carry, and the `skipif` guards each test
-file used to repeat:
+file used to repeat. It holds two keys, both optional:
 
 ```yaml
-runner: [self-hosted, Linux, X64, mi300x, gpu, rocm]
-os: [Linux]
-gate: enable_mi_ci       # a PR label must opt in to this scarce runner
+runner_type: instinct    # `default` (assumed) or `instinct`
+os: [Linux]              # defaults to every platform that runner type has
 ```
+
+Most skills that need this file need only `os: [Linux]`, to drop a Windows leg
+that would just exercise the failure path of Linux-only tooling.
+
+Name the kind of machine, not its consequences. `runner_type: instinct` is the
+whole declaration for an Instinct skill: the runner labels, the fact that the
+job is Linux-only, the `enable_mi_ci` pull-request label that rations that
+scarce pool, and the scoped credentials it uses all follow automatically from
+the runner type. Missing the gate label is a warning rather than a failure, so
+a PR is never blocked by a test it deliberately did not request.
+
+Adding a new class of hardware means adding an entry to `RUNNER_TYPES` in
+[`eval/datasets.py`](eval/datasets.py) once, not teaching every skill that
+needs it the same set of labels.
 
 `evals/hooks.py` is the escape hatch for setup a JSON file cannot express —
 cloning a repo, tearing down a container, running an external scoring script.

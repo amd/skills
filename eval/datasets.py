@@ -51,7 +51,7 @@ file a prompt lives in already carry the distinction:
   * an evaluation in the shared pool             -> ``unrelated`` (belongs to
     no skill's domain)
 
-Stdlib only, so the runner needs no ``pip install``. ``load_machine`` is the
+Stdlib only, so the runner needs no ``pip install``. ``machine_plan`` is the
 one exception and imports PyYAML lazily; nothing on the run path calls it.
 """
 
@@ -75,6 +75,37 @@ MACHINE_RELPATH = Path("evals") / "machine.yml"
 # group for every skill at once, so they live centrally instead of being
 # copy-pasted into each dataset.
 SHARED_NEGATIVES = EVAL_DIR / "negatives.json"
+
+# The classes of machine behavior cases can run on. A skill picks one by name;
+# everything that follows from that pick -- the runs-on labels, the platforms
+# the hardware exists on, the pull-request label that rations it, the
+# environment its credentials come from -- is decided here.
+#
+# Naming the class rather than spelling out its consequences is the point. An
+# owner who knows "this needs an Instinct GPU" should not also have to know the
+# label set of the shared runner or which environment holds its API key, and
+# fifteen skills each restating those is fifteen places to fix when one of them
+# changes.
+RUNNER_TYPES = {
+    "default": {
+        "labels": ["self-hosted", "strix_halo"],
+        "os": ["Linux", "Windows"],
+        "gate": "",
+        "environment": "",
+    },
+    "instinct": {
+        "labels": ["self-hosted", "Linux", "X64", "mi300x", "gpu", "rocm"],
+        "os": ["Linux"],
+        # A scarce shared runner, so touching the skill is necessary but not
+        # sufficient: a maintainer opts the pull request in with this label.
+        "gate": "enable_mi_ci",
+        # This runner sits outside the AMD network and cannot reach the
+        # internal gateway, so it calls api.anthropic.com with its own key.
+        "environment": "behavioral-instinct",
+    },
+}
+DEFAULT_RUNNER_TYPE = "default"
+MACHINE_KEYS = {"os", "runner_type"}
 
 # Tier 0, the bar every skill clears before it can ship. Cheap to meet (five
 # prompts, no hardware, no assertions) and enforced structurally so a thin
@@ -440,13 +471,8 @@ def tier0_errors(skill: str, cases: list[Case]) -> list[str]:
     return errors
 
 
-def load_machine(skill: str) -> dict:
-    """Runner requirements for `skill`, or ``{}`` when it runs anywhere.
-
-    Absent is the common case and means the default runners. Only skills that
-    need specific hardware ship ``evals/machine.yml``, and they ship it beside
-    the skill so the declaration is owned by the person who knows about the
-    hardware rather than by a list inside a CI workflow.
+def _read_machine(skill: str) -> dict:
+    """The raw ``evals/machine.yml`` for `skill`, or ``{}`` when it has none.
 
     PyYAML is imported here rather than at module scope: nothing on the run
     path needs this, so the runner stays dependency-free.
@@ -460,3 +486,67 @@ def load_machine(skill: str) -> dict:
     if not isinstance(data, dict):
         raise SystemExit(f"error: {path} must be a YAML mapping.")
     return data
+
+
+def machine_plan(skill: str) -> dict:
+    """Where `skill`'s behavior cases run, fully resolved.
+
+    An absent ``evals/machine.yml`` is the common case and means the default
+    runners on every platform. A skill ships one only to say which class of
+    machine it needs (``runner_type``) or to drop a platform it cannot use
+    (``os``); the labels, gate, and environment that follow are looked up from
+    ``RUNNER_TYPES`` rather than repeated per skill.
+
+    Returns ``{runner_type, os, labels, gate, environment}``. Raises SystemExit
+    on a malformed file, so CI stops at planning rather than on a runner that
+    does not exist.
+    """
+    path = machine_path(skill)
+    data = _read_machine(skill)
+
+    unknown = sorted(set(data) - MACHINE_KEYS)
+    if unknown:
+        raise SystemExit(
+            f"error: {path}: unknown key(s): {', '.join(unknown)}. "
+            f"A machine.yml holds only {' and '.join(sorted(MACHINE_KEYS))}."
+        )
+
+    name = data.get("runner_type", DEFAULT_RUNNER_TYPE)
+    if name not in RUNNER_TYPES:
+        raise SystemExit(
+            f"error: {path}: `runner_type` must be one of "
+            f"{', '.join(sorted(RUNNER_TYPES))}; got {name!r}."
+        )
+    spec = RUNNER_TYPES[name]
+
+    platforms = data.get("os", spec["os"])
+    if (
+        not isinstance(platforms, list)
+        or not platforms
+        or any(p not in spec["os"] for p in platforms)
+    ):
+        raise SystemExit(
+            f"error: {path}: `os` must be a non-empty subset of "
+            f"{spec['os']} for runner_type `{name}`; got {platforms!r}."
+        )
+
+    return {
+        "runner_type": name,
+        "os": list(platforms),
+        "labels": list(spec["labels"]),
+        "gate": spec["gate"],
+        "environment": spec["environment"],
+    }
+
+
+def runner_labels(plan: dict, os_name: str) -> list[str]:
+    """The ``runs-on`` labels for one leg of a skill's behavior matrix.
+
+    The platform label is appended only when the runner class does not already
+    carry it, so a single-platform runner keeps the exact label set its pool
+    was registered with.
+    """
+    labels = list(plan["labels"])
+    if os_name not in labels:
+        labels.append(os_name)
+    return labels

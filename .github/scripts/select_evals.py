@@ -15,29 +15,32 @@ Emits one JSON object on stdout::
       ],
       "scoped": [
         {"skill": "serving-llms-on-instinct", "os": "Linux",
-         "runner": "[\\"self-hosted\\",\\"mi300x\\"]",
+         "runner": "[\\"self-hosted\\",\\"Linux\\",\\"mi300x\\"]",
          "environment": "behavioral-instinct", "gate": "enable_mi_ci"}
       ],
       "skipped": [{"skill": "serving-llms-on-instinct", "gate": "enable_mi_ci"}],
       "gates": ["enable_mi_ci"]
     }
 
-``default`` and ``scoped`` are GitHub Actions matrices. Where each leg runs
-comes from that skill's ``evals/machine.yml``, so adding a skill that needs
+``default`` and ``scoped`` are GitHub Actions matrices. Which class of machine
+a skill needs comes from its ``evals/machine.yml``, and everything that class
+implies is resolved by ``datasets.machine_plan``, so adding a skill that needs
 unusual hardware never means editing this file or the workflow. A hardcoded
 list of which skills need which runner lives in the wrong place: the person
 who knows about the hardware is the skill's owner, not whoever last touched
 CI, and the two drift silently.
 
-The split is by credentials, not by hardware: a skill that names an
-``environment`` reads that environment's scoped secrets, and one that does not
-uses the repo-wide key for AMD's internal gateway. They are separate jobs
-because a job's credentials have to be fixed before the matrix expands.
+The split is by credentials, not by hardware: a runner class with its own
+``environment`` reads that environment's scoped secrets, and one without uses
+the repo-wide key for AMD's internal gateway. They are separate jobs because a
+job's credentials have to be fixed before its matrix expands.
 
-``skipped`` holds legs whose ``gate`` label is missing from the pull request.
-They are reported so the gate job can warn that a change shipped without ever
-running on real hardware, rather than failing a PR for a test it deliberately
-did not request.
+``skipped`` holds legs whose gate label is missing from the pull request. A
+gate comes with the runner class -- the Instinct pool always requires
+``enable_mi_ci`` -- rather than being something a skill opts into. They are
+reported so the gate job can warn that a change shipped without ever running
+on real hardware, rather than failing a PR for a test it deliberately did not
+request.
 
 Usage::
 
@@ -58,11 +61,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT / "eval"))
 
 import datasets  # noqa: E402
-
-# Where a skill's behavior cases run when it ships no evals/machine.yml. The
-# common case, and the only place these labels appear.
-DEFAULT_RUNNER = ["self-hosted", "strix_halo"]
-DEFAULT_OS = ["Linux", "Windows"]
 
 # Touching any of these changes the shared engine rather than one skill, so
 # every skill is re-run rather than guessing at the blast radius. Repo-root
@@ -93,30 +91,21 @@ def matrix_entries(
     for skill in skills:
         if not has_behavior_cases(skill):
             continue
-        machine = datasets.load_machine(skill)
-        gate = str(machine.get("gate") or "")
+        plan = datasets.machine_plan(skill)
+        gate = plan["gate"]
         if gate and not ignore_gates and gate not in labels:
             skipped.append({"skill": skill, "gate": gate})
             continue
 
-        platforms = machine.get("os") or DEFAULT_OS
-        declared = machine.get("runner")
-        environment = str(machine.get("environment") or "")
-        for os_name in platforms:
-            if declared:
-                # The owner named the full label set; using it verbatim avoids
-                # appending an OS label the list already carries.
-                runner = [declared] if isinstance(declared, str) else list(declared)
-            else:
-                runner = [*DEFAULT_RUNNER, os_name]
+        for os_name in plan["os"]:
             leg = {
                 "skill": skill,
                 "os": os_name,
-                "runner": json.dumps(runner),
+                "runner": json.dumps(datasets.runner_labels(plan, os_name)),
                 "gate": gate,
             }
-            if environment:
-                leg["environment"] = environment
+            if plan["environment"]:
+                leg["environment"] = plan["environment"]
             include.append(leg)
     return include, skipped
 
@@ -156,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--names", metavar="A,B,C", help="An explicit comma-separated skill list.")
     parser.add_argument(
         "--labels", default="",
-        help="Comma-separated pull-request labels, used to satisfy machine.yml gates.",
+        help="Comma-separated pull-request labels, used to satisfy runner gates.",
     )
     parser.add_argument(
         "--ignore-gates", action="store_true",

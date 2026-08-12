@@ -6,8 +6,8 @@
     "grants launch approval up front so the agent does not stall on the skill's",
     "'confirm before launching' step.",
     "",
-    "Container teardown lives in evals/hooks.py, and the MI300X runner is",
-    "declared in evals/machine.yml.",
+    "Container teardown lives in evals/hooks.py, and evals/machine.yml asks for",
+    "the Instinct runner class.",
     "",
     "`vllm-on-nvidia` and `consumer-radeon` are the two hardware lines this skill",
     "draws; serving-llms-on-epyc draws the third, from its own dataset."

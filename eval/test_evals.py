@@ -93,16 +93,98 @@ class TestSchemaStaysInSyncWithParser(unittest.TestCase):
 
 
 class TestMachineSchema(unittest.TestCase):
-    def test_every_machine_yml_uses_documented_keys(self) -> None:
-        schema = json.loads(
+    """A bad machine.yml means a job that never schedules, so catch it here."""
+
+    def setUp(self) -> None:
+        self.schema = json.loads(
             (EVAL_DIR / "schema" / "machine.schema.json").read_text(encoding="utf-8")
         )
-        documented = set(schema["properties"])
+
+    def test_documented_keys_match_the_parser(self) -> None:
+        self.assertEqual(set(self.schema["properties"]), datasets.MACHINE_KEYS)
+
+    def test_documented_runner_types_match_the_parser(self) -> None:
+        self.assertEqual(
+            set(self.schema["properties"]["runner_type"]["enum"]), set(datasets.RUNNER_TYPES)
+        )
+
+    def test_every_machine_yml_in_the_repo_resolves(self) -> None:
         for skill in datasets.catalog_skills():
-            if not datasets.machine_path(skill).is_file():
-                continue
             with self.subTest(skill=skill):
-                self.assertLessEqual(set(datasets.load_machine(skill)), documented)
+                plan = datasets.machine_plan(skill)
+                self.assertIn(plan["runner_type"], datasets.RUNNER_TYPES)
+                self.assertTrue(plan["os"])
+
+    def test_a_skill_without_the_file_gets_the_default_everywhere(self) -> None:
+        plan = datasets.machine_plan("local-ai-use")
+        self.assertEqual(plan["runner_type"], "default")
+        self.assertEqual(plan["os"], ["Linux", "Windows"])
+        self.assertEqual(plan["gate"], "")
+        self.assertEqual(plan["environment"], "")
+
+    def test_instinct_carries_its_gate_and_environment_without_saying_so(self) -> None:
+        # The file says `runner_type: instinct` and nothing else; the label
+        # that rations the runner and the environment holding its key are
+        # properties of the hardware, not of the skill.
+        raw = datasets._read_machine("serving-llms-on-instinct")
+        self.assertEqual(raw, {"runner_type": "instinct"})
+        plan = datasets.machine_plan("serving-llms-on-instinct")
+        self.assertEqual(plan["gate"], "enable_mi_ci")
+        self.assertEqual(plan["environment"], "behavioral-instinct")
+        self.assertEqual(plan["os"], ["Linux"])
+
+    def test_the_platform_label_is_not_duplicated(self) -> None:
+        default = datasets.machine_plan("local-ai-use")
+        self.assertEqual(
+            datasets.runner_labels(default, "Windows"),
+            ["self-hosted", "strix_halo", "Windows"],
+        )
+        instinct = datasets.machine_plan("serving-llms-on-instinct")
+        self.assertEqual(
+            datasets.runner_labels(instinct, "Linux"), instinct["labels"]
+        )
+
+
+class TestMachineRejections(unittest.TestCase):
+    """Failing at planning beats scheduling a job onto a pool that has no runners."""
+
+    def plan(self, text: str) -> dict:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "machine.yml"
+            path.write_text(text, encoding="utf-8")
+            original = datasets.machine_path
+            datasets.machine_path = lambda skill: path
+            try:
+                return datasets.machine_plan("demo-skill")
+            finally:
+                datasets.machine_path = original
+
+    def test_a_retired_key_is_rejected_rather_than_ignored(self) -> None:
+        # `runner`, `gate`, `environment`, and `reason` used to live here.
+        # Silently dropping one would leave a skill on the wrong hardware.
+        for text in ("gate: enable_mi_ci\n", "reason: because\n", "runner: [a, b]\n"):
+            with self.subTest(text.strip()), self.assertRaises(SystemExit) as caught:
+                self.plan(text)
+            self.assertIn("unknown key", str(caught.exception))
+
+    def test_an_unknown_runner_type(self) -> None:
+        with self.assertRaises(SystemExit) as caught:
+            self.plan("runner_type: mi500x\n")
+        self.assertIn("runner_type", str(caught.exception))
+
+    def test_a_platform_the_runner_type_does_not_have(self) -> None:
+        with self.assertRaises(SystemExit) as caught:
+            self.plan("runner_type: instinct\nos: [Windows]\n")
+        self.assertIn("`os`", str(caught.exception))
+
+    def test_an_empty_os_list(self) -> None:
+        with self.assertRaises(SystemExit) as caught:
+            self.plan("os: []\n")
+        self.assertIn("`os`", str(caught.exception))
+
+    def test_the_minimum_useful_files(self) -> None:
+        self.assertEqual(self.plan("os: [Linux]\n")["os"], ["Linux"])
+        self.assertEqual(self.plan("runner_type: instinct\n")["gate"], "enable_mi_ci")
 
 
 class TestCaseExpectations(unittest.TestCase):
