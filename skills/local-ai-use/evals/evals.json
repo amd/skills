@@ -1,0 +1,52 @@
+{
+  "$schema": "../../../eval/schema/evals.schema.json",
+  "cases": [
+    {
+      "id": "images-cost",
+      "prompt": "I'm burning way too much money on image generation API calls. Can you make this workspace generate images on my own machine instead?"
+    },
+    {
+      "id": "tts-offline",
+      "prompt": "Stop sending text to a paid cloud TTS service. From now on, I want anything you read aloud synthesized offline on this laptop."
+    },
+    {
+      "id": "transcribe-private",
+      "prompt": "Transcribe meeting.wav for me, and keep the audio on this device instead of uploading it to a transcription service."
+    },
+    {
+      "id": "split-routing",
+      "prompt": "From now on, when using Claude, use local models for generating pictures but keep using the cloud for chat."
+    },
+    {
+      "id": "generate-cat-image",
+      "note": "Tier 2. The end-to-end case: needs a reachable Lemonade Server, which the default runners provide.",
+      "prompt": "Learn how to generate images locally, then generate an image of a cat and save it to out.png.",
+      "files_exist": ["AGENTS.md", "out.png"],
+      "should": [
+        "Install Lemonade Server if it is not already installed",
+        "Download the SD-Turbo model if the model is not already downloaded",
+        "Add a 'Local AI Use' block to AGENTS.md"
+      ],
+      "should_not": [
+        "Pull TTS or STT models for this image generation task",
+        "Reach for a cloud image path instead of local Lemonade"
+      ]
+    },
+    {
+      "id": "convert-app-to-local",
+      "note": "Near miss against local-ai-app-integration: converting someone else's app is that skill's job, not this one's.",
+      "prompt": "My Electron chat app calls the OpenAI API. Add a local mode so it keeps working with no internet.",
+      "expect_skill": "local-ai-app-integration"
+    },
+    {
+      "id": "finetune-on-laptop",
+      "prompt": "Fine-tune a small language model on my own dataset using the GPU in my laptop.",
+      "expect_skill": null
+    },
+    {
+      "id": "compare-cloud-image-models",
+      "prompt": "Compare the output quality of DALL-E 3 and Midjourney for product photography and tell me which to buy.",
+      "expect_skill": null
+    }
+  ]
+}

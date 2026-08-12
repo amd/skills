@@ -18,16 +18,17 @@ Best for cross-cutting skills that do not have a natural product home.
 2. Update the `SKILL.md` frontmatter so the `name` and `description` clearly explain *what* the skill does and *when* an agent should reach for it.
 3. Add the supporting scripts, templates, and reference docs your instructions point to. Keep skills focused: one well-scoped task per skill is better than one mega-skill.
 4. Add a `skill-card.md` at the skill root with `## Description`, `## Owner`, and `## License` sections. This is the skill's governance card; see [Skill cards](#skill-cards) and [docs/skill-cards.md](docs/skill-cards.md).
-5. Publish the skill by adding a `./skills/<name>` entry to the `skills` array of the single `amd-skills` plugin in [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json). All published skills ship together in that one plugin; a skill left out of the array stays unpublished. (The `SKILL.md` description is what the agent uses for routing; the plugin's catalog description is a bundle-level blurb for humans.)
-6. Regenerate the derived manifests so they track the marketplace:
+5. Add an eval dataset at `skills/<name>/evals/evals.json` — copy [`eval/TEMPLATE.json`](eval/TEMPLATE.json). Every skill needs at least three prompts that should trigger it and two that should not; CI rejects a skill without them. See [Evals](#evals).
+6. Publish the skill by adding a `./skills/<name>` entry to the `skills` array of the single `amd-skills` plugin in [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json). All published skills ship together in that one plugin; a skill left out of the array stays unpublished. (The `SKILL.md` description is what the agent uses for routing; the plugin's catalog description is a bundle-level blurb for humans.)
+7. Regenerate the derived manifests so they track the marketplace:
    ```bash
    ./.github/scripts/publish.sh   # writes .cursor-plugin/ and .codex-plugin/ + .agents/plugins/
    ```
-7. Validate the skill locally before pushing:
+8. Validate the skill locally before pushing:
    ```bash
-   ./.github/scripts/check.sh   # validates every SKILL.md and that manifests are in sync
+   ./.github/scripts/check.sh   # validates every SKILL.md and dataset, and that manifests are in sync
    ```
-8. Open a pull request. The `validate` GitHub Actions workflow runs `./.github/scripts/check.sh` and must pass before merge. See [Validating locally](#validating-locally) for the full set of enforced rules.
+9. Open a pull request. The `validate` workflow runs `./.github/scripts/check.sh` and must pass before merge; the `evals` workflow runs your prompts against a real agent. See [Validating locally](#validating-locally) for the full set of enforced rules.
 
 ### Path B: Skills authored in a product repository (federation)
 
@@ -196,38 +197,135 @@ The validator fails any skill whose card is missing or whose required sections a
 Test the skill the way users will hit it:
 
 0. Prototype first. Get the agent through one hard, real instance of the task *before* writing the skill, then extract the winning approach. This gives faster signal than authoring against an untested idea.
-1. Run a fresh agent against ~10 prompts that *should* trigger the skill and ~10 that *shouldn't*. The description should route both sets correctly.
+1. Run a fresh agent against prompts that *should* trigger the skill and prompts that *shouldn't*. The description should route both sets correctly. Write the ones that taught you something into `evals/evals.json` so they keep being checked; see [Evals](#evals).
 2. Run the skill end-to-end on a real machine. Watch where the agent hesitates, asks unnecessary questions, or goes off-script.
 3. Bring those observations back into the skill, usually as a sharper description, a clearer default, or a missing prerequisite, rather than adding more prose.
 
-## Behavioral tests
+## Evals
 
-Structural validation proves a skill is *well-formed*; behavioral tests prove it
-*works*. A behavioral test runs a real agent against the skill once and grades
-what the agent did — see the harness in [`eval/behavioral/`](eval/behavioral/).
+Structural validation proves a skill is *well-formed*; evals prove it *works*.
+There are two questions to answer, and they come in order:
 
-Conventions:
+1. **Routing** — with every skill installed side by side, does the agent pick
+   yours? This is where most skills actually fail, and you cannot test it
+   alone: a skill tested by itself will happily answer prompts that belong to
+   its neighbour.
+2. **Behavior** — once yours is picked, does it do the job?
 
-- **One file per skill, beside the skill.** Put the test at
-  `skills/<skill-name>/evals/evals.py`. The harness excludes `.claude` from
-  workspace assertions, while the skill and its evals are staged together in
-  the agent's sandbox.
-- **Write checks against behavior.** Combine deterministic assertions
-  (`logs_contains`, `workspace_contains`) with LLM-judged expectations
-  (`should`, `should_not`). See `skills/local-ai-use/evals/evals.py` for the
-  pattern.
+You write **one file** and both questions are graded from it:
+`skills/<your-skill>/evals/evals.json`. Copy
+[`eval/TEMPLATE.json`](eval/TEMPLATE.json) and start there.
 
-Run one locally (needs the `claude` CLI authenticated and any per-skill
-prerequisites, e.g. a reachable Lemonade Server for `local-ai-use`):
+### The file
 
-```bash
-pip install -r eval/behavioral/requirements.txt
-cd eval/behavioral
-python -m pytest -c pytest.ini -p conftest ../../skills/local-ai-use/evals/evals.py
+The folder names the skill, so a prompt that should trigger yours needs
+nothing but an id and the prompt:
+
+```json
+{
+  "cases": [
+    {
+      "id": "epyc-vllm-zentorch",
+      "prompt": "Serve Llama 3.1 8B on this box with vLLM and zentorch."
+    },
+    {
+      "id": "vllm-on-nvidia",
+      "prompt": "Serve Llama 3.1 70B with vLLM on my NVIDIA H100 cluster.",
+      "expect_skill": null
+    }
+  ]
+}
 ```
 
-In CI, the `behavioral` workflow runs the affected skill's tests when a PR
-changes a skill with an `evals/evals.py` file.
+Set `expect_skill` only to say something *other* than the default: `null` when
+no skill should fire, or another skill's name to assert a handoff to a
+confusable neighbour.
+
+Add expectations to make a case grade behavior too. All four are optional, and
+any one of them promotes the case from routing-only to behavior-graded:
+
+| Field | Graded by | Use it for |
+| --- | --- | --- |
+| `logs_contain` | exact substring | a literal that must appear: a script name, a flag, a pinned image tag |
+| `files_exist` | the filesystem | an artifact the run must produce |
+| `should` | an LLM judge | a step the agent must take, in plain language |
+| `should_not` | an LLM judge | the mistake this skill exists to prevent |
+
+Prefer the deterministic two where you can: they are instant and free, where a
+judged expectation costs a second agent call.
+
+Two things you never write. **Do not assert your own skill's name** in
+`logs_contain` — routing mode grades that properly, and a substring match only
+proved the skill was staged. **Do not label a prompt** as positive, near-miss,
+or unrelated: that is derived from where the case lives and what it expects.
+
+### How much is enough
+
+| Tier | Required when | What it costs you |
+| --- | --- | --- |
+| **0** | always | 3 prompts that should trigger your skill, 2 that should not. CI rejects a skill without them. |
+| **1** | your skill can be exercised on a generic runner | one case with a `should` / `should_not` / `logs_contain` / `files_exist` expectation |
+| **2** | your skill needs hardware or a live service | an `evals/machine.yml` saying where to run |
+
+Tier 0 is deliberately cheap, and it buys more than it looks like. Routing
+pools every skill's cases into one run, so your five prompts become negative
+cases for every other skill in the catalog, and theirs become negatives for
+yours. Twelve owners writing five prompts each produce a routing matrix none
+of them had to coordinate.
+
+Spend your effort on the near misses. Positive prompts mostly pass; the ones
+that find real problems are the prompts that sit just outside your scope — the
+wrong vendor's hardware, the adjacent skill's job, your vocabulary used to mean
+something else.
+
+### When JSON isn't enough
+
+Two optional files sit beside the dataset.
+
+`evals/machine.yml` declares where the behavior cases run. Skip it unless you
+need something other than the default Linux and Windows runners. It replaces
+the hardcoded hardware list CI used to carry, and the `skipif` guards each test
+file used to repeat:
+
+```yaml
+runner: [self-hosted, Linux, X64, mi300x, gpu, rocm]
+os: [Linux]
+gate: enable_mi_ci       # a PR label must opt in to this scarce runner
+```
+
+`evals/hooks.py` is the escape hatch for setup a JSON file cannot express —
+cloning a repo, tearing down a container, running an external scoring script.
+Every function is optional:
+
+```python
+def setup_session(cache_dir): ...   # once per run; returns {name: value} for {placeholders} in prompts
+def setup(workspace, case, ctx): ...    # before each case; may return more placeholders
+def teardown(workspace, case, ctx): ...
+def check(run, case, ctx): ...      # after each case; raise AssertionError to fail it
+```
+
+Keep prompts and expectations in the dataset even when you use hooks, so what
+is being asserted stays readable without opening Python. See
+[`skills/tracelens-analysis-orchestrator/evals/hooks.py`](skills/tracelens-analysis-orchestrator/evals/hooks.py)
+for the involved case and
+[`skills/serving-llms-on-instinct/evals/hooks.py`](skills/serving-llms-on-instinct/evals/hooks.py)
+for the simple one.
+
+### Running them
+
+```bash
+python eval/run_evals.py --validate              # structure only: no agent, no tokens, instant
+python eval/run_evals.py --skill <your-skill>    # routing and behavior for your skill
+python eval/run_evals.py --mode routing          # the whole catalog
+python eval/run_evals.py --only <case-id> --keep-logs logs   # one case, keeping the transcript
+```
+
+Everything but `--validate` needs the `claude` CLI authenticated, plus whatever
+your own cases need. No `pip install`: the runner is standard library only.
+
+In CI, the `evals` workflow runs routing when a change can move a routing
+decision (a description or a dataset), and runs behavior for the skills a
+change touches.
 
 ## Pre-publish checklist
 
@@ -244,7 +342,10 @@ changes a skill with an `evals/evals.py` file.
 - [ ] Scripts handle expected errors and document their constants and dependencies
 - [ ] Prerequisites (ROCm version, GPU arch, container, env vars) are stated explicitly
 - [ ] Tested end-to-end on the target hardware against real prompts
+- [ ] `evals/evals.json` has at least 3 triggering prompts and 2 near misses (Tier 0)
+- [ ] At least one case grades behavior, or the skill genuinely needs hardware CI cannot reach
 - [ ] `./.github/scripts/check.sh` passes (CI runs this on every PR)
+- [ ] `python eval/run_evals.py --skill <name>` passes
 
 ## Validating locally
 
@@ -261,6 +362,14 @@ The validator checks every skill under `skills/` for:
 - `description`: non-empty, ≤ 1024 characters
 - `SKILL.md` body: ≤ 500 lines
 - `skill-card.md`: present at the skill root with non-empty `## Description`, `## Owner`, and `## License` sections
+
+It also checks every eval dataset (`python eval/run_evals.py --validate`, no agent and no tokens):
+
+- `evals/evals.json`: present, parseable, and using only known fields — a typo'd key is an error rather than a silently dropped expectation
+- Tier 0 coverage: ≥ 3 prompts that should trigger the skill, ≥ 2 that should not
+- case ids: unique across the whole repo, because routing pools every skill's cases into one run
+- `expect_skill`: names a real skill under `skills/`, and a case expecting no skill carries no `should`
+- `workspace`: points at a directory that exists
 
 It also checks the plugin manifests:
 

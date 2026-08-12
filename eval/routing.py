@@ -2,13 +2,12 @@
 #
 # See LICENSE for license information.
 
-"""Routing eval: does the right marketplace skill fire, and only then?
+"""Routing engine: does the right skill fire, and only then?
 
-A behavioral test (``eval/behavioral/``) asks "once this skill runs, does it do
-the job?". This eval asks the question that comes first: **given every published
-skill installed side by side, does the agent pick the right one?** It grades the
-routing decision only, so it catches the four failure modes a description can
-cause:
+Behavior mode asks "once this skill runs, does it do the job?". This asks the
+question that comes first: **given every skill in the catalog installed side
+by side, does the agent pick the right one?** It grades the routing decision
+only, so it catches the four failure modes a description can cause:
 
   * correct trigger -- the expected skill activated.
   * missed trigger  -- a skill was expected and none activated (under-triggering).
@@ -16,33 +15,23 @@ cause:
                        descriptions overlap and the agent picked the wrong side).
   * false trigger   -- no skill was expected and one activated (over-triggering).
 
-Every case installs **all** skills published in
-``.claude-plugin/marketplace.json`` at once, because that is what a user who
-installs the plugin actually gets. Routing is only meaningful against the whole
-catalog: a skill tested alone will happily answer prompts that belong to its
-neighbor.
+Every case installs **all** skills under ``skills/``, because routing is only
+meaningful against the whole catalog: a skill tested alone will happily answer
+prompts that belong to its neighbor. Cases are pooled across every skill's
+dataset, so a positive case for skill Y is automatically a negative for skill
+X and the confusion matrix fills itself in.
 
 Cost control: each run is killed the moment the routing decision is observable
 -- the first skill activation, the final result event, or a small budget of
 tool calls that are neither bookkeeping nor a survey of the installed catalog
 -- so no case pays for the work the skill would have gone on to do.
-``--max-budget-usd`` is a second, independent backstop.
+``max_budget_usd`` is a second, independent backstop.
 
-Usage::
-
-    # every case, JSON + markdown report
-    python eval/routing/routing_eval.py
-
-    # one case, keeping the raw transcript for debugging
-    python eval/routing/routing_eval.py --only qwen-on-mi300x --keep-logs
-
-Output is a JSON artifact (``--output``) plus a markdown report written to
-stdout and, under GitHub Actions, to ``$GITHUB_STEP_SUMMARY``.
+The CLI lives in ``eval/run_evals.py``; this module is the engine.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import queue
@@ -54,25 +43,12 @@ import tempfile
 import threading
 import time
 from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-REPO_ROOT = HERE.parent.parent
-EVAL_DIR = REPO_ROOT / "eval"
-MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
-PROMPTS_FILE = HERE / "prompts.json"
-
-# Reuse the behavioral harness for the skill root, the CI model pin, and the
-# API preflight so both evals agree on those. Both directories go on the path
-# because harness.py itself imports claude_eval.
-sys.path.insert(0, str(EVAL_DIR))
-sys.path.insert(0, str(EVAL_DIR / "behavioral"))
-from claude_eval import SKILLS_DIR  # noqa: E402
-from harness import AUTOMATED_MODEL, check_api_reachable  # noqa: E402
-
-_TRUTHY = {"1", "true", "yes", "on"}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from agent import claude_env  # noqa: E402
+from datasets import SKILLS_DIR, Case  # noqa: E402
 
 # Tools that carry no routing signal. An agent often opens with a todo list or
 # a plan before deciding anything, and spending the non-skill tool budget on
@@ -94,17 +70,25 @@ INCONCLUSIVE_STOPS = {"completed", "timeout"}
 
 
 @dataclass
-class Case:
-    id: str
-    prompt: str
-    expect: str | None
-    category: str
+class RoutingConfig:
+    """Everything ``run_case`` needs that is not the case itself."""
+
+    model: str = "opus"
+    effort: str = "high"
+    timeout: float = 240.0
+    max_tool_calls: int = 4
+    max_inspection_calls: int = 8
+    max_budget_usd: float = 0.75
+    keep_logs: str = ""
+    available_flags: set[str] = field(default_factory=set)
+    isolate_config: bool = False
 
 
 @dataclass
 class Outcome:
     id: str
     category: str
+    skill: str | None
     prompt: str
     expect: str | None
     observed: str | None
@@ -119,66 +103,8 @@ class Outcome:
     error: str | None = None
 
 
-def is_automated() -> bool:
-    """True under CI / an automated workflow (GitHub Actions sets both)."""
-    return any(
-        os.environ.get(var, "").strip().lower() in _TRUTHY
-        for var in ("CI", "GITHUB_ACTIONS")
-    )
-
-
-def enforce_model_policy(model: str) -> str:
-    """Pin automated runs to opus, matching the behavioral harness."""
-    if not is_automated() or "opus" in model.lower():
-        return model
-    print(f"[routing] automated run: coercing model '{model}' -> '{AUTOMATED_MODEL}'.")
-    return AUTOMATED_MODEL
-
-
-def marketplace_skills() -> list[str]:
-    """Skill names published in the marketplace bundle, in manifest order.
-
-    Read from the manifest rather than hardcoded so publishing or unpublishing
-    a skill changes what this eval installs without touching the eval.
-    """
-    manifest = json.loads(MARKETPLACE.read_text(encoding="utf-8"))
-    plugins = manifest.get("plugins") or []
-    names: list[str] = []
-    for plugin in plugins:
-        for entry in plugin.get("skills") or []:
-            name = str(entry).rstrip("/").split("/")[-1]
-            if name and name not in names:
-                names.append(name)
-
-    missing = [n for n in names if not (SKILLS_DIR / n / "SKILL.md").is_file()]
-    if missing:
-        raise SystemExit(
-            f"error: marketplace lists skills with no SKILL.md: {', '.join(missing)}"
-        )
-    if not names:
-        raise SystemExit(f"error: no skills listed in {MARKETPLACE}")
-    return names
-
-
-def load_cases(path: Path) -> list[Case]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    cases = [
-        Case(
-            id=str(entry["id"]),
-            prompt=str(entry["prompt"]),
-            expect=entry.get("expect") or None,
-            category=str(entry.get("category") or "positive"),
-        )
-        for entry in payload["cases"]
-    ]
-    duplicates = [cid for cid, count in Counter(c.id for c in cases).items() if count > 1]
-    if duplicates:
-        raise SystemExit(f"error: duplicate case ids in {path}: {', '.join(duplicates)}")
-    return cases
-
-
 def stage_workspace(skills: list[str]) -> Path:
-    """Install every marketplace skill into a fresh temp workspace.
+    """Install every catalog skill into a fresh temp workspace.
 
     Claude Code loads ``.claude/skills/`` from a directory passed with
     ``--add-dir``, which registers each skill's name and description in the
@@ -215,23 +141,14 @@ def supported_flags(flags: list[str]) -> set[str]:
     return {flag for flag in flags if flag in text}
 
 
-def claude_env(config_dir: Path | None = None) -> dict[str, str]:
-    """Environment for `claude` subprocesses (fail fast instead of retrying)."""
-    env = dict(os.environ)
-    env.setdefault("CLAUDE_CODE_MAX_RETRIES", "0")
-    if config_dir is not None:
-        env["CLAUDE_CONFIG_DIR"] = str(config_dir)
-    return env
-
-
 def can_isolate_config() -> bool:
     """Whether the runner's own ``~/.claude`` can be kept out of the session.
 
     User-level skills are registered next to the staged ones and change every
-    routing decision, so the catalog has to be exactly what the marketplace
-    ships. Pointing the CLI at a throwaway config dir achieves that, but only
-    when auth comes from the environment -- if the login lives in the real
-    config dir, hiding it means no case even starts.
+    routing decision, so the catalog has to be exactly what the repo ships.
+    Pointing the CLI at a throwaway config dir achieves that, but only when
+    auth comes from the environment -- if the login lives in the real config
+    dir, hiding it means no case even starts.
     """
     return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
 
@@ -324,9 +241,9 @@ def detect_activation(event: dict, skills: list[str], allow_body_path: bool = Tr
     put first. The path fallback therefore stays off unless the session has no
     skill tool at all, which is the only case it was written for.
 
-    Returns ``"other:<name>"`` when a skill outside the marketplace fires --
-    that is a contaminated runner, not a routing result, and the report should
-    say so rather than silently scoring it as a miss.
+    Returns ``"other:<name>"`` when a skill outside the catalog fires -- that
+    is a contaminated runner, not a routing result, and the report should say
+    so rather than silently scoring it as a miss.
     """
     for name, tool_input in _iter_tool_uses(event):
         lowered = name.lower()
@@ -465,7 +382,15 @@ def _terminate(proc: subprocess.Popen) -> None:
         pass
 
 
-def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome:
+def classify(expect: str | None, observed: str | None) -> str:
+    if observed is None:
+        return "true_negative" if expect is None else "missed_trigger"
+    if expect is None:
+        return "false_trigger"
+    return "correct_trigger" if observed == expect else "wrong_skill"
+
+
+def run_case(case: Case, skills: list[str], config: RoutingConfig) -> Outcome:
     """Run one prompt, stopping as soon as the routing decision is known."""
     claude_bin = shutil.which("claude")
     if not claude_bin:
@@ -475,7 +400,7 @@ def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome
     # Outside the workspace: the agent can list its own cwd, and a config dir
     # sitting in there would be one more thing for it to find.
     config_dir = (
-        Path(tempfile.mkdtemp(prefix="routing-config-")) if args.isolate_config else None
+        Path(tempfile.mkdtemp(prefix="routing-config-")) if config.isolate_config else None
     )
     cmd = [
         claude_bin,
@@ -487,21 +412,25 @@ def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome
         "--add-dir",
         str(workspace),
         "--model",
-        args.model,
+        config.model,
     ]
-    if args.effort:
-        cmd += ["--effort", args.effort]
-    # 23 throwaway sessions per run; don't leave them on disk.
-    if "--no-session-persistence" in args.available_flags:
+    if config.effort:
+        cmd += ["--effort", config.effort]
+    # Dozens of throwaway sessions per run; don't leave them on disk.
+    if "--no-session-persistence" in config.available_flags:
         cmd += ["--no-session-persistence"]
-    if args.max_budget_usd > 0 and "--max-budget-usd" in args.available_flags:
-        cmd += ["--max-budget-usd", str(args.max_budget_usd)]
+    if config.max_budget_usd > 0 and "--max-budget-usd" in config.available_flags:
+        cmd += ["--max-budget-usd", str(config.max_budget_usd)]
 
     spawn: dict = {}
     if os.name == "nt":
         spawn["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         spawn["start_new_session"] = True
+
+    env = claude_env()
+    if config_dir is not None:
+        env["CLAUDE_CONFIG_DIR"] = str(config_dir)
 
     events: list[dict] = []
     observed: str | None = None
@@ -525,7 +454,7 @@ def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome
         encoding="utf-8",
         errors="replace",
         bufsize=1,
-        env=claude_env(config_dir),
+        env=env,
         **spawn,
     )
     try:
@@ -539,7 +468,7 @@ def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome
             target=lambda: stderr_lines.extend(proc.stderr.readlines()), daemon=True
         ).start()
 
-        deadline = time.perf_counter() + args.timeout
+        deadline = time.perf_counter() + config.timeout
         while True:
             remaining = deadline - time.perf_counter()
             if remaining <= 0:
@@ -592,14 +521,14 @@ def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome
             # Inspection is exempt from the tool budget but not unbounded: an
             # agent that has read the whole catalog and still called no skill
             # has made its decision, and the run should not idle to timeout.
-            if tool_calls >= args.max_tool_calls or inspection_calls >= args.max_inspection_calls:
+            if tool_calls >= config.max_tool_calls or inspection_calls >= config.max_inspection_calls:
                 stop_reason = "tool_budget"
                 break
     finally:
         _terminate(proc)
         elapsed = time.perf_counter() - start
-        if args.keep_logs:
-            logs_dir = Path(args.keep_logs)
+        if config.keep_logs:
+            logs_dir = Path(config.keep_logs)
             logs_dir.mkdir(parents=True, exist_ok=True)
             (logs_dir / f"{case.id}.jsonl").write_text(
                 "\n".join(json.dumps(e, ensure_ascii=False) for e in events),
@@ -627,13 +556,14 @@ def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome
     elif error and observed is None:
         verdict = "error"
     else:
-        verdict = classify(case.expect, observed)
+        verdict = classify(case.expect_skill, observed)
 
     outcome = Outcome(
         id=case.id,
         category=case.category,
+        skill=case.skill,
         prompt=case.prompt,
-        expect=case.expect,
+        expect=case.expect_skill,
         observed=observed,
         verdict=verdict,
         passed=verdict in PASSING_VERDICTS,
@@ -647,19 +577,11 @@ def run_case(case: Case, skills: list[str], args: argparse.Namespace) -> Outcome
     )
     print(
         f"  [{'PASS' if outcome.passed else 'FAIL'}] {case.id}: "
-        f"expected {case.expect or 'no skill'} -> got {observed or 'no skill'} "
+        f"expected {case.expect_skill or 'no skill'} -> got {observed or 'no skill'} "
         f"({verdict}, {stop_reason}, {outcome.elapsed_s}s)",
         flush=True,
     )
     return outcome
-
-
-def classify(expect: str | None, observed: str | None) -> str:
-    if observed is None:
-        return "true_negative" if expect is None else "missed_trigger"
-    if expect is None:
-        return "false_trigger"
-    return "correct_trigger" if observed == expect else "wrong_skill"
 
 
 def summarize(outcomes: list[Outcome], skills: list[str], meta: dict) -> dict:
@@ -746,11 +668,11 @@ def render_markdown(summary: dict) -> str:
     meta = summary["meta"]
     accuracy = totals["accuracy"]
     lines = [
-        "## Skill routing eval",
+        "## Skill routing",
         "",
         f"**{totals['passed']}/{totals['graded']} correct "
         f"({'n/a' if accuracy is None else f'{accuracy:.1%}'})** across "
-        f"{totals['cases']} prompts with {len(meta['skills'])} marketplace skills "
+        f"{totals['cases']} prompts with {len(meta['skills'])} skills "
         f"installed together, on `{meta['model']}` (effort `{meta['effort']}`).",
         "",
         "| Verdict | Count | Meaning |",
@@ -763,6 +685,11 @@ def render_markdown(summary: dict) -> str:
         f"| error | {verdicts['error']} | the run failed; excluded from accuracy |",
         "",
         "### By prompt category",
+        "",
+        "Categories are derived, not declared: a case expecting a skill is "
+        "`positive`, a case expecting nothing inside a skill's own dataset is "
+        "that skill's `near_miss`, and a case from the shared pool is "
+        "`unrelated`.",
         "",
         "| Category | Graded | Correct | Accuracy |",
         "| --- | --- | --- | --- |",
@@ -851,14 +778,14 @@ def render_markdown(summary: dict) -> str:
     if summary["unexpected_skills"]:
         lines += [
             "",
-            f"> **Warning:** a skill outside the marketplace activated "
+            f"> **Warning:** a skill outside the catalog activated "
             f"({', '.join(summary['unexpected_skills'])}). The runner has extra "
             f"skills installed, so these routing results are not trustworthy.",
         ]
     if summary["skills_missing_from_session"]:
         lines += [
             "",
-            f"> **Warning:** the CLI did not report these marketplace skills at "
+            f"> **Warning:** the CLI did not report these catalog skills at "
             f"session init: {', '.join(summary['skills_missing_from_session'])}. "
             f"They may not have been installed for the run.",
         ]
@@ -869,7 +796,7 @@ def render_markdown(summary: dict) -> str:
             shown += f", and {len(extras) - 12} more"
         lines += [
             "",
-            f"> **Warning:** {len(extras)} skill(s) beyond the marketplace catalog "
+            f"> **Warning:** {len(extras)} skill(s) beyond this repo's catalog "
             f"were registered for these sessions ({shown}). They come from the "
             f"runner's own config (usually `~/.claude/skills`) and compete for "
             f"every prompt, so the catalog measured here is not the one users "
@@ -877,148 +804,3 @@ def render_markdown(summary: dict) -> str:
             f"config dir, or remove them from the runner.",
         ]
     return "\n".join(lines) + "\n"
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--model", default="opus", help="Model alias. CI pins this to opus. Default: opus.")
-    parser.add_argument("--effort", default="high", choices=["low", "medium", "high", "max"], help="Reasoning effort. Default: high.")
-    parser.add_argument("--prompts", default=str(PROMPTS_FILE), help="Path to the prompt set. Default: eval/routing/prompts.json.")
-    parser.add_argument("--only", default="", help="Comma-separated case ids or expected skill names to run.")
-    parser.add_argument("--jobs", type=int, default=4, help="Cases to run concurrently. Each gets its own workspace and session. Default: 4.")
-    parser.add_argument(
-        "--timeout",
-        type=float,
-        default=240.0,
-        help=(
-            "Seconds before a case is abandoned. Generous because it only bites "
-            "when the agent neither activates a skill nor answers. Default: 240."
-        ),
-    )
-    parser.add_argument(
-        "--max-tool-calls",
-        type=int,
-        default=4,
-        help=(
-            "Stop a case after this many non-skill tool calls. Agents often look "
-            "around (ls, read a file) before invoking a skill, so this is not 1; "
-            "it is small enough to cut the run off long before real work starts. "
-            "Default: 4."
-        ),
-    )
-    parser.add_argument(
-        "--max-inspection-calls",
-        type=int,
-        default=8,
-        help=(
-            "Separate allowance for tool calls that only read the installed "
-            "skills tree. Surveying the catalog is part of the routing "
-            "decision, so it does not spend --max-tool-calls, but it is capped "
-            "so a run cannot idle to timeout. Default: 8."
-        ),
-    )
-    parser.add_argument(
-        "--max-budget-usd",
-        type=float,
-        default=0.75,
-        help="Per-case spend cap enforced by the CLI, independent of the early stop. 0 disables. Default: 0.75.",
-    )
-    parser.add_argument("--output", default="", help="Write the JSON report here. Default: eval/runs/routing-<timestamp>.json.")
-    parser.add_argument("--summary", default="", help="Write the markdown report here (defaults to $GITHUB_STEP_SUMMARY when set).")
-    parser.add_argument("--keep-logs", default="", help="Directory for raw per-case stream-json transcripts.")
-    parser.add_argument("--min-accuracy", type=float, default=0.0, help="Exit non-zero when accuracy falls below this (0-1). Default: 0 (report only).")
-    parser.add_argument("--skip-preflight", action="store_true", help="Skip the API reachability check.")
-    args = parser.parse_args(argv)
-
-    args.model = enforce_model_policy(args.model)
-
-    skills = marketplace_skills()
-    cases = load_cases(Path(args.prompts))
-    if args.only:
-        wanted = {token.strip() for token in args.only.split(",") if token.strip()}
-        cases = [c for c in cases if c.id in wanted or (c.expect or "") in wanted]
-        if not cases:
-            raise SystemExit(f"error: --only '{args.only}' matched no cases")
-
-    args.available_flags = supported_flags(["--no-session-persistence", "--max-budget-usd"])
-    args.isolate_config = can_isolate_config()
-    if not args.isolate_config:
-        print(
-            "[routing] warning: ANTHROPIC_API_KEY is not set, so the runner's "
-            "own config dir is used and any user-level skill in it joins the "
-            "catalog for every case. The report flags what was registered.",
-        )
-
-    if not args.skip_preflight:
-        ok, detail = check_api_reachable(args.model)
-        if not ok:
-            raise SystemExit(f"error: claude API not reachable -- {detail}")
-
-    print(f"[routing] skills installed per case: {', '.join(skills)}")
-    print(f"[routing] {len(cases)} cases, model={args.model}, effort={args.effort}, jobs={args.jobs}")
-
-    started = time.time()
-    if args.jobs > 1 and len(cases) > 1:
-        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            outcomes = list(pool.map(lambda c: run_case(c, skills, args), cases))
-    else:
-        outcomes = [run_case(case, skills, args) for case in cases]
-
-    meta = {
-        "model": args.model,
-        "effort": args.effort,
-        "skills": skills,
-        "prompts": str(Path(args.prompts).name),
-        "wall_time_s": round(time.time() - started, 1),
-        "max_tool_calls": args.max_tool_calls,
-        "max_inspection_calls": args.max_inspection_calls,
-        "isolated_config_dir": args.isolate_config,
-        "max_budget_usd": args.max_budget_usd,
-        "optional_cli_flags_used": sorted(args.available_flags),
-        "github_run_id": os.environ.get("GITHUB_RUN_ID"),
-    }
-    summary = summarize(outcomes, skills, meta)
-    report = render_markdown(summary)
-
-    # eval/runs/ is already gitignored, and claude_eval.py writes there too.
-    output = (
-        Path(args.output)
-        if args.output
-        else EVAL_DIR / "runs" / f"routing-{time.strftime('%Y%m%d-%H%M%S')}.json"
-    )
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-
-    print()
-    print(report)
-    print(f"[routing] JSON report: {output}")
-
-    summary_path = args.summary or os.environ.get("GITHUB_STEP_SUMMARY", "")
-    if summary_path:
-        with open(summary_path, "a", encoding="utf-8") as handle:
-            handle.write(report)
-
-    totals = summary["totals"]
-    if totals["graded"] == 0:
-        print("[routing] every case errored; treating the run as a failure.", file=sys.stderr)
-        return 1
-    if totals["activations"] == 0 and totals["activations_expected"]:
-        print(
-            "[routing] no skill activated in any case -- the skills were not "
-            "installed, or activation detection is broken. Failing rather than "
-            "reporting a 0% routing rate as if it were real.",
-            file=sys.stderr,
-        )
-        return 1
-    if args.min_accuracy > 0 and (totals["accuracy"] or 0) < args.min_accuracy:
-        print(
-            f"[routing] accuracy {totals['accuracy']} is below the "
-            f"--min-accuracy bar of {args.min_accuracy}.",
-            file=sys.stderr,
-        )
-        return 1
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

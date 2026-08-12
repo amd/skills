@@ -1,0 +1,87 @@
+{
+  "$schema": "../../../eval/schema/evals.schema.json",
+  "_comment": [
+    "Behavior cases are scoped to code generation (\"Do not download or install",
+    "anything\") because the real vendoring step downloads a binary from GitHub,",
+    "which hangs on a runner with no egress. They lean on `logs_contain` rather",
+    "than a judged expectation wherever the thing being checked is a literal:",
+    "it is instant and free where a judge costs a second agent call.",
+    "",
+    "None of these prompts name the skill. An earlier version of these tests did",
+    "(\"Use the local-ai-app-integration skill\"), which made them useless as",
+    "routing cases -- and every case here is now also a routing case."
+  ],
+  "cases": [
+    {
+      "id": "electron-offline-mode",
+      "prompt": "My Electron app calls the OpenAI chat completions endpoint. I want to ship an offline mode that bundles the inference engine into the installer so it still works with no internet."
+    },
+    {
+      "id": "swap-anthropic-backend",
+      "prompt": "My Python desktop tool talks to the Anthropic Messages API today. Give it a mode where the model runs on the customer's own PC so their data never leaves the machine."
+    },
+    {
+      "id": "vendor-binary",
+      "prompt": "Can you vendor an inference binary into my app and repoint my existing HTTP client at it instead of the Ollama server I'm hitting now?"
+    },
+    {
+      "id": "in-app-embeddings",
+      "prompt": "I want my app to compute embeddings on the end user's hardware rather than calling a hosted embeddings API. How do I wire that up?"
+    },
+    {
+      "id": "vendor-lemonade-launcher",
+      "note": "The launcher is the core artifact: a random API key, a dynamically bound port, and lemond spawned as a subprocess.",
+      "prompt": "Help me add local AI to this Python app so it replaces the OpenAI API with a local backend. Do not download or install anything, just write the launcher module.",
+      "workspace": "evals/files/openai-stub",
+      "logs_contain": ["secrets", "socket", "subprocess"],
+      "should_not": [
+        "Hardcode a fixed port instead of binding one dynamically"
+      ]
+    },
+    {
+      "id": "lemond-health-check",
+      "note": "Readiness has two documented failure modes: scraping stdout, and pre-loading the model at startup.",
+      "prompt": "Write a health-check helper for this Python app that waits until the local inference server is ready to serve. Do not download or install anything, just write the code.",
+      "workspace": "evals/files/openai-stub",
+      "logs_contain": ["/api/v1/health"],
+      "should_not": [
+        "Read or parse the local server's stdout or stderr to detect readiness",
+        "Call POST /api/v1/load to pre-load the model at startup"
+      ]
+    },
+    {
+      "id": "repoint-openai-client",
+      "note": "The 120-second timeout is the one the skill exists to get right: first-token latency on a cold local model blows past the OpenAI SDK default.",
+      "prompt": "Update main.py to point the OpenAI client at a local inference server running on this machine. Do not download or install anything, just edit the file.",
+      "workspace": "evals/files/openai-stub",
+      "files_exist": ["main.py"],
+      "logs_contain": ["120"]
+    },
+    {
+      "id": "local-mode-without-api-key",
+      "prompt": "Edit main.py so the app starts in local mode without an OPENAI_API_KEY. Do not download or install anything, just edit the file.",
+      "workspace": "evals/files/apikey-guard",
+      "files_exist": ["main.py"],
+      "should": [
+        "Remove or bypass the API-key guard so the app starts in local mode without requiring OPENAI_API_KEY to be set"
+      ]
+    },
+    {
+      "id": "rate-limit-openai-calls",
+      "note": "Touches an app's OpenAI integration, but wants it to stay in the cloud.",
+      "prompt": "Add rate limiting and retry-with-backoff to the OpenAI API calls in my Express server.",
+      "expect_skill": null
+    },
+    {
+      "id": "pyinstaller-packaging",
+      "prompt": "Package my Python app as a standalone Windows installer with PyInstaller so users don't need Python.",
+      "expect_skill": null
+    },
+    {
+      "id": "agent-generates-image-locally",
+      "note": "Near miss against local-ai-use: the user wants the agent itself to go local, not their app.",
+      "prompt": "Stop calling DALL-E when I ask you for a picture. Generate images on this machine instead so I stop paying per image.",
+      "expect_skill": "local-ai-use"
+    }
+  ]
+}

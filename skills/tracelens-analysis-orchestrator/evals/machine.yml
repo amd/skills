@@ -1,0 +1,10 @@
+# Runner requirements for this skill's behavior cases.
+# See eval/schema/machine.schema.json.
+
+os: [Linux]
+
+reason: >-
+  evals/hooks.py clones TraceLens and builds a virtualenv against it using
+  POSIX venv layout (bin/python), and the case needs network access to
+  github.com/AMD-AGI/TraceLens. No GPU: the trace being analyzed is a
+  checked-in fixture.

@@ -1,0 +1,12 @@
+# Runner requirements for this skill's behavior cases.
+# Absent means "the default runners, Linux and Windows"; this file exists only
+# to drop the Windows leg. See eval/schema/machine.schema.json.
+
+os: [Linux]
+
+reason: >-
+  The skill shells out to Linux-only tooling (lscpu, numactl, a container
+  runtime), so the Windows leg would only ever exercise the failure path.
+  No special hardware: both behavior cases are deliberately observable from a
+  non-EPYC host, one because the guard must fire and one because it is a
+  planning question that runs no commands.

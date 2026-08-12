@@ -1,0 +1,48 @@
+{
+  "$schema": "../../../eval/schema/evals.schema.json",
+  "_comment": [
+    "Tier 0 only. Magpie drives real benchmarks and kernel builds on GPU",
+    "hardware, so no case grades behavior yet; add one with `should` /",
+    "`should_not` plus an evals/machine.yml when a runner is available.",
+    "",
+    "The near misses matter more than usual here: this skill and",
+    "tracelens-analysis-orchestrator both mention TraceLens and trace analysis,",
+    "so the boundary between 'benchmark and optimize kernels' and 'orchestrate",
+    "a trace analysis report' is the thing most likely to route wrong."
+  ],
+  "cases": [
+    {
+      "id": "benchmark-vllm-ttft",
+      "prompt": "Benchmark vLLM throughput and time-to-first-token for Llama 3 on this box, and capture torch traces while it runs."
+    },
+    {
+      "id": "compare-hip-softmax-kernels",
+      "prompt": "I have two HIP implementations of a softmax kernel. Which one is faster, and is the optimized one still numerically correct?"
+    },
+    {
+      "id": "bottleneck-kernel-to-source",
+      "prompt": "Find the top bottleneck kernels in my inference workload and map the profiler names back to the source that generates them."
+    },
+    {
+      "id": "rank-triton-attention-variants",
+      "prompt": "Rank these three Triton attention kernel variants against each other and validate the winner end to end."
+    },
+    {
+      "id": "write-a-cuda-transpose",
+      "note": "Kernel authoring, not kernel evaluation. Shares all the vocabulary and none of the workflow.",
+      "prompt": "Write a CUDA kernel that transposes a matrix, and explain the shared-memory tiling.",
+      "expect_skill": null
+    },
+    {
+      "id": "mi300x-spec-question",
+      "prompt": "What is the theoretical peak FP16 throughput of an MI300X on paper?",
+      "expect_skill": null
+    },
+    {
+      "id": "orchestrate-trace-report",
+      "note": "Near miss the other way: this is the analysis orchestrator's job even though Magpie also post-processes traces.",
+      "prompt": "Run the agentic analysis workflow on this PyTorch profiler trace and write me a prioritized analysis.md.",
+      "expect_skill": "tracelens-analysis-orchestrator"
+    }
+  ]
+}

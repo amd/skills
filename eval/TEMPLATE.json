@@ -1,0 +1,66 @@
+{
+  "$schema": "../../../eval/schema/evals.schema.json",
+  "_comment": [
+    "Copy this to skills/<your-skill>/evals/evals.json and replace the cases.",
+    "Delete this _comment block and the `note` fields once you are done.",
+    "",
+    "The folder names the skill, so a case that should trigger it needs nothing",
+    "but an `id` and a `prompt`. Write the prompt the way a user would actually",
+    "type it -- copying phrases out of your SKILL.md description measures string",
+    "matching, not routing.",
+    "",
+    "Tier 0 (required for every skill): at least 3 cases that should trigger",
+    "your skill and 2 that should not. Add `\"expect_skill\": null` for the ones",
+    "that should not.",
+    "",
+    "Tier 1 (required if your skill can be exercised on a generic runner): give",
+    "at least one case a `should` / `should_not` / `logs_contain` / `files_exist`",
+    "expectation, so something grades what the skill did and not just whether it",
+    "fired.",
+    "",
+    "Tier 2 (hardware or a live service): add skills/<your-skill>/evals/machine.yml",
+    "so CI knows where to run it. Most skills do not need one.",
+    "",
+    "Check your work without spending tokens:",
+    "    python eval/run_evals.py --validate",
+    "Then run it for real:",
+    "    python eval/run_evals.py --skill <your-skill>"
+  ],
+  "cases": [
+    {
+      "id": "REPLACE-unique-slug",
+      "note": "Positive. `expect_skill` is omitted because it defaults to this folder's skill.",
+      "prompt": "Something a user would say that should make this skill fire."
+    },
+    {
+      "id": "REPLACE-second-positive",
+      "prompt": "A different phrasing of the same need, with none of the same keywords."
+    },
+    {
+      "id": "REPLACE-positive-with-expectations",
+      "note": "Tier 1. Same prompt grades routing AND what the agent then did.",
+      "prompt": "A task this skill should carry out end to end.",
+      "should": [
+        "A thing the agent must do, in plain language, graded by an LLM judge"
+      ],
+      "should_not": [
+        "A mistake this skill exists to prevent"
+      ],
+      "logs_contain": [
+        "a-literal-that-must-appear.py"
+      ],
+      "files_exist": ["expected-output.txt"]
+    },
+    {
+      "id": "REPLACE-near-miss",
+      "note": "Negative. Close to this skill's vocabulary but out of its scope: the wrong hardware, an adjacent domain, or a neighbouring skill's job.",
+      "prompt": "Something that sounds like this skill's territory but is not.",
+      "expect_skill": null
+    },
+    {
+      "id": "REPLACE-second-near-miss",
+      "prompt": "Another prompt that must not wake this skill up.",
+      "expect_skill": null
+    }
+  ]
+}

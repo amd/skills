@@ -2,32 +2,32 @@
 #
 # See LICENSE for license information.
 
-"""Behavioral-test harness for repo skills (local, pytest-based, non-CI).
+"""Agent staging and grading for behavior-mode eval runs.
 
-A behavioral test runs a skill-driven prompt through the agent **once**, then
-asserts what the agent *should* and *should not* have done. Tests read like:
+One skill is copied into an isolated temp workspace, one prompt is run to
+completion, and the result is graded against a case's expectations::
 
-    from harness import claude
+    from agent import claude
 
-    def test_image_generation():
-        with claude("opus", skill="local-ai-use") as agent:
-            run = agent.prompt("Use local AI, then generate a cat to out.png.")
+    with claude("opus", skill="local-ai-use") as agent:
+        run = agent.prompt("Use local AI, then generate a cat to out.png.")
+        checks = run.evaluate(
+            files_exist=["out.png"],
+            should=["Download the SD-Turbo model"],
+            should_not=["Use the GenerateImage tool"],
+        )
 
-            # Deterministic checks (cheap, fail fast).
-            run.logs_contains("local-ai-use")
-            run.workspace_contains("out.png")
+``evaluate`` reports every expectation instead of raising at the first
+failure, because a run that took minutes and real tokens should not have to
+be repeated to discover the second thing wrong with it. The asserting
+variants (``logs_contains``, ``should``, ...) are still here for skills whose
+``evals/hooks.py`` needs to express a check the dataset format cannot.
 
-            # Natural-language expectations (graded by an LLM judge).
-            run.should("Download the SD-Turbo model")
-            run.should_not("Use the GenerateImage tool")
-
-`claude(model, skill=...)` returns an `Agent` context manager. Entering it
-stages an isolated temp workspace (skill copied under
-`<tmp>/.claude/skills/<skill>/`); leaving it deletes that workspace. `prompt()`
-runs the agent once with tool permissions bypassed and returns a `Run`.
-
-Every assertion on `Run` raises `AssertionError` on failure and prints a
-`[PASS]`/`[FAIL]` line for visibility under `-s`.
+Two things are deliberately *not* graded here. Routing is not: behavior mode
+installs a single skill, so "did the right one fire" is unanswerable and
+belongs to routing mode, which installs the whole catalog. And nothing checks
+that the skill name appears in the transcript, which was the old stand-in for
+a routing assertion and only ever proved the staged skill was visible.
 """
 
 from __future__ import annotations
@@ -38,10 +38,20 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from claude_eval import SKILLS_DIR  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from datasets import SKILLS_DIR  # noqa: E402
+
+DEFAULT_MODEL = os.environ.get("EVAL_MODEL", "opus")
+DEFAULT_EFFORT = os.environ.get("EVAL_EFFORT", "high")
+
+# Automated runs are pinned to opus: a behavior run makes real cloud calls
+# (agent run + LLM judge), so pinning the model keeps CI results comparable
+# between runs. No override -- the pin is non-negotiable in CI.
+AUTOMATED_MODEL = "opus"
+_TRUTHY = {"1", "true", "yes", "on"}
 
 
 def _safe_print(text: str) -> None:
@@ -52,18 +62,8 @@ def _safe_print(text: str) -> None:
         encoding = sys.stdout.encoding or "ascii"
         print(text.encode(encoding, errors="replace").decode(encoding), flush=True)
 
-DEFAULT_SKILL = os.environ.get("BEHAVIORAL_SKILL", "local-ai-use")
-DEFAULT_MODEL = os.environ.get("BEHAVIORAL_MODEL", "opus")
-DEFAULT_EFFORT = os.environ.get("BEHAVIORAL_EFFORT", "high")
 
-# Automated runs are pinned to opus: a behavioral run makes real cloud calls
-# (agent run + LLM judge), so pinning the model keeps CI results consistent.
-# No override -- the pin is non-negotiable in CI.
-AUTOMATED_MODEL = "opus"
-_TRUTHY = {"1", "true", "yes", "on"}
-
-
-def _is_automated_env() -> bool:
+def is_automated_env() -> bool:
     """True under CI / an automated workflow (GitHub Actions sets both)."""
     return any(
         os.environ.get(var, "").strip().lower() in _TRUTHY
@@ -71,24 +71,24 @@ def _is_automated_env() -> bool:
     )
 
 
-def _enforce_model_policy(model: str | None) -> str | None:
+def enforce_model_policy(model: str | None) -> str | None:
     """Coerce non-opus models to opus in CI; pass through otherwise."""
-    if model is None or not _is_automated_env() or "opus" in model.lower():
+    if model is None or not is_automated_env() or "opus" in model.lower():
         return model
     _safe_print(
-        f"[behavioral] automated run: coercing model '{model}' -> "
+        f"[evals] automated run: coercing model '{model}' -> "
         f"'{AUTOMATED_MODEL}' to pin the CI model."
     )
     return AUTOMATED_MODEL
 
 
-def _claude_env() -> dict[str, str]:
+def claude_env() -> dict[str, str]:
     """Environment for `claude` subprocesses.
 
-    Disable the CLI's internal retry loop by default so a network/auth
-    problem (e.g. not connected to the network that can reach the API)
-    fails fast instead of being retried into a long, confusing hang. The
-    caller can still override by exporting ``CLAUDE_CODE_MAX_RETRIES``.
+    Disable the CLI's internal retry loop by default so a network/auth problem
+    (e.g. not connected to the network that can reach the API) fails fast
+    instead of being retried into a long, confusing hang. The caller can still
+    override by exporting ``CLAUDE_CODE_MAX_RETRIES``.
     """
     env = dict(os.environ)
     env.setdefault("CLAUDE_CODE_MAX_RETRIES", "0")
@@ -100,14 +100,14 @@ def check_api_reachable(model: str | None = DEFAULT_MODEL, timeout: int = 60) ->
 
     Runs a trivial prompt with retries disabled so an unreachable API fails
     fast. Returns ``(ok, detail)`` where ``detail`` is a short human-readable
-    reason on failure. This is meant to be called once before the (expensive)
-    behavioral runs so the suite can skip cleanly when off-network.
+    reason on failure. Called once before the (expensive) runs so a suite can
+    fail cleanly when off-network.
     """
     claude_bin = shutil.which("claude")
     if not claude_bin:
         return False, "'claude' CLI not found on PATH"
 
-    model = _enforce_model_policy(model)
+    model = enforce_model_policy(model)
     cmd = [claude_bin, "-p", "--output-format", "json"]
     if model:
         cmd += ["--model", model]
@@ -115,7 +115,7 @@ def check_api_reachable(model: str | None = DEFAULT_MODEL, timeout: int = 60) ->
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8",
-            input="Reply with the single word: ok", timeout=timeout, env=_claude_env(),
+            input="Reply with the single word: ok", timeout=timeout, env=claude_env(),
         )
     except subprocess.TimeoutExpired:
         return False, f"API preflight timed out after {timeout}s (is the network reachable?)"
@@ -126,16 +126,26 @@ def check_api_reachable(model: str | None = DEFAULT_MODEL, timeout: int = 60) ->
     return True, "ok"
 
 
-def _stage_workspace(skill: str) -> Path:
-    """Copy ``skill`` into an isolated temp workspace and return its path."""
+def _stage_workspace(skill: str, seed: Path | None = None) -> Path:
+    """Copy ``skill`` into an isolated temp workspace and return its path.
+
+    ``seed`` is a directory of fixture files (a case's ``workspace``) whose
+    *contents* land at the workspace root, so a case can hand the agent a
+    starting file to edit rather than describing one in prose.
+    """
     skill_src = SKILLS_DIR / skill
     if not (skill_src / "SKILL.md").is_file():
         raise FileNotFoundError(f"skill '{skill}' not found at {skill_src / 'SKILL.md'}")
 
-    workspace = Path(tempfile.mkdtemp(prefix=f"behavioral-{skill}-"))
+    workspace = Path(tempfile.mkdtemp(prefix=f"behavior-{skill}-"))
     dest = workspace / ".claude" / "skills" / skill
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(skill_src, dest)
+
+    if seed is not None:
+        if not seed.is_dir():
+            raise FileNotFoundError(f"workspace fixture directory not found: {seed}")
+        shutil.copytree(seed, workspace, dirs_exist_ok=True)
 
     return workspace
 
@@ -159,7 +169,7 @@ def _run_agent(prompt_text: str, workspace: Path, model: str | None, effort: str
 
     proc = subprocess.run(
         cmd, cwd=str(workspace), capture_output=True, text=True,
-        encoding="utf-8", input=prompt_text, env=_claude_env(),
+        encoding="utf-8", input=prompt_text, env=claude_env(),
     )
 
     events: list[dict] = []
@@ -241,9 +251,7 @@ def _grade_with_llm(
     )
     if must_happen:
         requirement = f"The agent MUST have done this:\n{statement}"
-        pass_means = (
-            'Set "pass" to true if the agent did it, false if it did not.'
-        )
+        pass_means = 'Set "pass" to true if the agent did it, false if it did not.'
     else:
         requirement = f"The agent MUST NOT have done this:\n{statement}"
         pass_means = (
@@ -276,7 +284,7 @@ def _grade_with_llm(
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8",
-            input=prompt_text, timeout=180, env=_claude_env(),
+            input=prompt_text, timeout=180, env=claude_env(),
         )
     except subprocess.TimeoutExpired:
         return False, "llm_judge timed out after 180s"
@@ -310,12 +318,18 @@ def _grade_with_llm(
     return satisfied, f"llm_judge: {reason}"
 
 
-class Run:
-    """The captured result of one agent run, with inline-asserting checks.
+@dataclass
+class Check:
+    """One graded expectation from a case."""
 
-    Each check prints a ``[PASS]``/``[FAIL]`` line and raises ``AssertionError``
-    on failure, so the owning pytest test fails at that line.
-    """
+    kind: str
+    expectation: str
+    passed: bool
+    detail: str = ""
+
+
+class Run:
+    """The captured result of one agent run."""
 
     def __init__(self, *, workspace: Path, events: list[dict], judge_model: str | None) -> None:
         tool_uses: list[tuple[str, str]] = []
@@ -339,9 +353,52 @@ class Run:
         # create false signals.
         self.command_text = "\n".join([inp for _, inp in tool_uses] + tool_results)
 
-        # `logs` is the full raw transcript, searchable for skill activation,
-        # tool names, command strings, etc.
+        # `logs` is the full raw transcript, searchable for tool names, command
+        # strings, and anything else a case wants to pin down.
         self.logs = "\n".join(json.dumps(ev, ensure_ascii=False) for ev in events)
+
+    def evaluate(
+        self,
+        *,
+        logs_contain: list[str] | tuple[str, ...] = (),
+        files_exist: list[str] | tuple[str, ...] = (),
+        should: list[str] | tuple[str, ...] = (),
+        should_not: list[str] | tuple[str, ...] = (),
+    ) -> list[Check]:
+        """Grade every expectation and return all results, raising nothing.
+
+        Deterministic checks run first so their output is on screen before the
+        judge calls (which take a few seconds each) start.
+        """
+        checks: list[Check] = []
+
+        for text in logs_contain:
+            ok = text.lower() in self.logs.lower()
+            checks.append(Check("logs_contain", text, ok))
+
+        for path in files_exist:
+            ok = (self.workspace / path).is_file()
+            detail = "" if ok else f"workspace holds: {self.files or 'nothing'}"
+            checks.append(Check("files_exist", path, ok, detail))
+
+        for statement in should:
+            ok, reason = _grade_with_llm(statement, self, self.judge_model, must_happen=True)
+            checks.append(Check("should", statement, ok, reason))
+
+        for statement in should_not:
+            ok, reason = _grade_with_llm(statement, self, self.judge_model, must_happen=False)
+            checks.append(Check("should_not", statement, ok, reason))
+
+        for check in checks:
+            suffix = f" -- {check.detail}" if check.detail else ""
+            _safe_print(
+                f"  [{'PASS' if check.passed else 'FAIL'}] "
+                f"({check.kind}) {check.expectation}{suffix}"
+            )
+        return checks
+
+    # Asserting variants, for an `evals/hooks.py` that needs a check the
+    # dataset format cannot express. Each raises AssertionError on failure.
 
     def logs_contains(self, text: str) -> "Run":
         ok = text.lower() in self.logs.lower()
@@ -357,16 +414,12 @@ class Run:
         return self
 
     def should(self, statement: str) -> "Run":
-        satisfied, reason = _grade_with_llm(
-            statement, self, self.judge_model, must_happen=True
-        )
+        satisfied, reason = _grade_with_llm(statement, self, self.judge_model, must_happen=True)
         self._report(satisfied, "should", f"{statement} -- {reason}")
         return self
 
     def should_not(self, statement: str) -> "Run":
-        satisfied, reason = _grade_with_llm(
-            statement, self, self.judge_model, must_happen=False
-        )
+        satisfied, reason = _grade_with_llm(statement, self, self.judge_model, must_happen=False)
         self._report(satisfied, "should_not", f"{statement} -- {reason}")
         return self
 
@@ -388,17 +441,19 @@ class Agent:
         self,
         model: str | None = DEFAULT_MODEL,
         *,
-        skill: str = DEFAULT_SKILL,
+        skill: str,
         effort: str | None = DEFAULT_EFFORT,
+        seed: Path | None = None,
     ) -> None:
         # Coerce here so the agent run and the LLM judge share the capped model.
-        self.model = _enforce_model_policy(model)
+        self.model = enforce_model_policy(model)
         self.skill = skill
         self.effort = effort
+        self.seed = seed
         self.workspace: Path | None = None
 
     def __enter__(self) -> "Agent":
-        self.workspace = _stage_workspace(self.skill)
+        self.workspace = _stage_workspace(self.skill, self.seed)
         return self
 
     def __exit__(self, *exc) -> None:
@@ -407,11 +462,11 @@ class Agent:
             self.workspace = None
 
     def prompt(self, text: str) -> Run:
-        """Run ``text`` through the agent once and return a Run to assert on."""
+        """Run ``text`` through the agent once and return a Run to grade."""
         if self.workspace is None:
             raise RuntimeError("Agent.prompt() must be called inside a 'with' block")
 
-        _safe_print(f"\n[behavioral] skill='{self.skill}' model='{self.model}': {text}")
+        _safe_print(f"\n[behavior] skill='{self.skill}' model='{self.model}': {text}")
         events = _run_agent(text, self.workspace, self.model, self.effort)
         return Run(workspace=self.workspace, events=events, judge_model=self.model)
 
@@ -419,8 +474,9 @@ class Agent:
 def claude(
     model: str | None = DEFAULT_MODEL,
     *,
-    skill: str = DEFAULT_SKILL,
+    skill: str,
     effort: str | None = DEFAULT_EFFORT,
+    seed: Path | None = None,
 ) -> Agent:
     """Factory for a Claude-backed `Agent` (the only agent backend today)."""
-    return Agent(model, skill=skill, effort=effort)
+    return Agent(model, skill=skill, effort=effort, seed=seed)

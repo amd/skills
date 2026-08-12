@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Validate every SKILL.md and that generated plugin manifests are up to date.
+# Validate every SKILL.md and eval dataset, and that generated plugin
+# manifests are up to date. Runs no agent and spends no tokens.
 #
 # Usage:
-#   ./.github/scripts/check.sh              Validate every skill and check manifests.
+#   ./.github/scripts/check.sh              Validate every skill, dataset, and manifest.
 #   ./.github/scripts/check.sh -h|--help    Print this help.
 #
 # Requires `uv` (https://github.com/astral-sh/uv).
@@ -19,6 +20,7 @@ usage() {
 case "${1:-}" in
   "")
     uv run .github/scripts/validate_skills.py
+    python eval/run_evals.py --validate
     uv run .github/scripts/generate_cursor_marketplace.py --check
     uv run .github/scripts/generate_codex_plugin.py --check
     ;;

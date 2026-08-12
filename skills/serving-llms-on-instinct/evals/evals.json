@@ -1,0 +1,67 @@
+{
+  "$schema": "../../../eval/schema/evals.schema.json",
+  "_comment": [
+    "The behavior case serves a deliberately tiny model (Qwen/Qwen3-0.6B) end to",
+    "end on real hardware so the run stays fast: Apache 2.0 so no HF token, a few",
+    "hundred MB of weights, and it fits on one MI300X with room to spare. It",
+    "grants launch approval up front so the agent does not stall on the skill's",
+    "'confirm before launching' step.",
+    "",
+    "Container teardown lives in evals/hooks.py, and the MI300X runner is",
+    "declared in evals/machine.yml."
+  ],
+  "cases": [
+    {
+      "id": "qwen-on-mi300x",
+      "prompt": "Get Qwen3 serving on my MI300X box."
+    },
+    {
+      "id": "vllm-rocm-node",
+      "prompt": "I have an 8-GPU AMD Instinct node with ROCm installed. Spin up a vLLM endpoint for DeepSeek and confirm it's actually healthy before you hand it back to me."
+    },
+    {
+      "id": "openai-compatible-mi355x",
+      "prompt": "How do I launch an OpenAI-compatible inference server on MI355X hardware?"
+    },
+    {
+      "id": "deploy-datacenter-gpu",
+      "prompt": "Deploy a language model on my AMD data center GPUs so my team can hit it over HTTP."
+    },
+    {
+      "id": "serve-tiny-model-on-instinct",
+      "note": "Tier 2. Needs an Instinct GPU, ROCm, and Docker; see evals/machine.yml.",
+      "prompt": "Serve Qwen/Qwen3-0.6B on this AMD Instinct GPU with vLLM. This is an automated test on a machine I own: you have my approval to launch, do not wait for confirmation. Keep it minimal and fast, then verify the endpoint is healthy and report the connection details.",
+      "should": [
+        "Detect the AMD Instinct GPU before configuring vLLM",
+        "Launch the model with vLLM inside a Docker container on the AMD GPU",
+        "Verify the vLLM endpoint is healthy after launching"
+      ],
+      "should_not": [
+        "Fall back to a cloud LLM provider or an NVIDIA/CUDA code path",
+        "Serve a different, larger model than the one that was requested"
+      ]
+    },
+    {
+      "id": "vllm-on-nvidia",
+      "note": "Same request, same tool, excluded hardware.",
+      "prompt": "Serve Llama 3.1 70B with vLLM on my NVIDIA H100 cluster.",
+      "expect_skill": null
+    },
+    {
+      "id": "consumer-radeon",
+      "note": "AMD GPU, but the description rules out the RX/Radeon consumer line.",
+      "prompt": "Which quantization should I pick to fit a 13B model into the 16 GB on my Radeon RX 7800 XT?",
+      "expect_skill": null
+    },
+    {
+      "id": "hbm-vs-gddr",
+      "prompt": "Explain the practical difference between HBM3 and GDDR6 memory bandwidth for inference workloads.",
+      "expect_skill": null
+    },
+    {
+      "id": "serve-on-epyc-cpu-only",
+      "prompt": "I have no GPUs at all, just a big EPYC server. Serve Llama 3.1 8B on it.",
+      "expect_skill": "serving-llms-on-epyc"
+    }
+  ]
+}
