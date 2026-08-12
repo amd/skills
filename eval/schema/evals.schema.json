@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/amd/skills/eval/schema/evals.schema.json",
   "title": "AMD skill eval dataset",
-  "description": "One dataset per skill at skills/<name>/evals/evals.json, holding two arrays of prompts: expected_matches (this skill should trigger) and expected_no_matches (no skill should trigger). No case names a skill; the folder says which skill, the array says whether it fires. The same case is graded twice: routing mode installs the whole catalog and checks the trigger decision, behavior mode installs only this skill and checks should / should_not / logs_contain / files_exist. Reference the schema from your file with \"$schema\": \"../../../eval/schema/evals.schema.json\" for editor autocomplete. eval/datasets.py is the enforcing implementation; this file exists so editors can help.",
+  "description": "One dataset per skill at skills/<name>/evals/evals.json, holding two arrays of prompts: expected_matches (this skill should trigger) and expected_no_matches (no skill should trigger). No case names a skill; the folder says which skill, the array says whether it fires. Routing mode installs the whole catalog and grades the trigger decision for every case in both arrays. Behavior mode installs only this skill and grades should / should_not / logs_contain / files_exist, which is why those fields exist on expected_matches cases alone. eval/datasets.py is the enforcing implementation and `python eval/run_evals.py --validate` is how you run it; this file is the field reference, and datasets do not link to it.",
   "type": "object",
   "additionalProperties": false,
   "anyOf": [
@@ -10,11 +10,7 @@
     { "required": ["expected_no_matches"] }
   ],
   "properties": {
-    "$schema": {
-      "type": "string",
-      "description": "Points editors at this schema for autocomplete. Ignored by the runner."
-    },
-    "_comment": {
+    "comment": {
       "description": "Free-text notes for humans. Ignored by the runner.",
       "oneOf": [
         { "type": "string" },
@@ -28,7 +24,7 @@
     },
     "expected_no_matches": {
       "type": "array",
-      "description": "Prompts where no skill should trigger. Tier 0 requires at least 2. These are the near misses only this skill's owner knows to write: close enough to the domain to be tempting, wrong enough that firing would be a bug.",
+      "description": "Prompts where no skill should trigger. Tier 0 requires at least 2. These are the near misses only this skill's owner knows to write: close enough to the domain to be tempting, wrong enough that firing would be a bug. They are graded on the trigger decision alone, so a case here is a prompt and nothing more.",
       "items": { "$ref": "#/$defs/expectedNoMatch" }
     }
   },
@@ -42,11 +38,6 @@
       "type": "string",
       "minLength": 1,
       "description": "What the user says, phrased the way a user would. Do not copy the skill description: that measures string matching rather than routing. A prompt that references a file must either stage it via `workspace` or link a real URL, because the routing workspace holds nothing but the skills tree."
-    },
-    "should_not": {
-      "type": "array",
-      "items": { "type": "string", "minLength": 1 },
-      "description": "Natural-language things the agent must not do, graded by an LLM judge over the transcript and workspace. This is where a skill's guard rails get pinned down."
     },
     "workspace": {
       "type": "string",
@@ -69,7 +60,11 @@
           "items": { "type": "string", "minLength": 1 },
           "description": "Natural-language things the agent must do, graded by an LLM judge over the transcript and workspace."
         },
-        "should_not": { "$ref": "#/$defs/should_not" },
+        "should_not": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Natural-language things the agent must not do, graded by an LLM judge over the transcript and workspace. This is where a skill's guard rails get pinned down."
+        },
         "logs_contain": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 },
@@ -88,12 +83,10 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "prompt"],
-      "description": "No skill loads, so there is nothing to grade beyond silence. `should`, `logs_contain`, and `files_exist` all ask whether something happened, which here would grade the base model rather than the skill, and are rejected.",
+      "description": "Graded on the trigger decision alone: did anything fire? No skill is ever loaded for this prompt, so there is no behavior phase, and should / should_not / logs_contain / files_exist / workspace are rejected here rather than silently ignored.",
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "prompt": { "$ref": "#/$defs/prompt" },
-        "should_not": { "$ref": "#/$defs/should_not" },
-        "workspace": { "$ref": "#/$defs/workspace" },
         "note": { "$ref": "#/$defs/note" }
       }
     }

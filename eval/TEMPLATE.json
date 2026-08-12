@@ -1,8 +1,7 @@
 {
-  "$schema": "../../../eval/schema/evals.schema.json",
-  "_comment": [
+  "comment": [
     "Copy this to skills/<your-skill>/evals/evals.json and replace the cases.",
-    "Delete this _comment block and the `note` fields once you are done.",
+    "Delete this comment block and the `note` fields once you are done.",
     "",
     "A dataset is two lists of prompts. `expected_matches` are the ones that",
     "should wake your skill up; `expected_no_matches` are the ones where no",
@@ -16,6 +15,10 @@
     "`expected_matches`, not in your `expected_no_matches`. Routing installs",
     "the whole catalog at once, so it is the same assertion either way, and",
     "your list keeps meaning 'nothing should fire'.",
+    "",
+    "An `expected_no_matches` case is an id and a prompt. It is graded on one",
+    "thing -- that nothing fired -- so no skill is ever loaded for it and there",
+    "is nothing else to assert.",
     "",
     "Tier 0 (required for every skill): at least 3 `expected_matches` and 2",
     "`expected_no_matches`.",

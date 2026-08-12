@@ -1,6 +1,5 @@
 {
-  "$schema": "../../../eval/schema/evals.schema.json",
-  "_comment": [
+  "comment": [
     "Behavior cases are scoped to code generation (\"Do not download or install",
     "anything\") because the real vendoring step downloads a binary from GitHub,",
     "which hangs on a runner with no egress. They lean on `logs_contain` rather",

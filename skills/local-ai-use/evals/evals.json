@@ -1,6 +1,5 @@
 {
-  "$schema": "../../../eval/schema/evals.schema.json",
-  "_comment": [
+  "comment": [
     "The boundary worth guarding is against local-ai-app-integration: this skill",
     "makes the *agent* use local models, that one makes the *user's app* do it.",
     "`agent-generates-image-locally` is that line from this side."

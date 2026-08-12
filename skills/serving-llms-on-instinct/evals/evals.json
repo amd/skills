@@ -1,6 +1,5 @@
 {
-  "$schema": "../../../eval/schema/evals.schema.json",
-  "_comment": [
+  "comment": [
     "The behavior case serves a deliberately tiny model (Qwen/Qwen3-0.6B) end to",
     "end on real hardware so the run stays fast: Apache 2.0 so no HF token, a few",
     "hundred MB of weights, and it fits on one MI300X with room to spare. It",

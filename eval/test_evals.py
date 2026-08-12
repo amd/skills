@@ -9,8 +9,8 @@
 Two jobs. First, guard the parts that decide whether a paid run is
 trustworthy: routing verdicts, activation detection, and the rules that reject
 a malformed dataset. Second, keep the JSON Schema in lockstep with the parser
--- the schema exists for editor autocomplete, and a schema that has quietly
-drifted from what the runner enforces is worse than no schema at all.
+-- the schema is the field reference skill owners read, and one that has
+quietly drifted from what the runner enforces is worse than no schema at all.
 """
 
 from __future__ import annotations
@@ -164,25 +164,26 @@ class TestDatasetRejections(unittest.TestCase):
         _, errors = parse({"expected_matches": {"id": "a", "prompt": "p"}})
         self.assertTrue(any("must be an array" in e for e in errors), errors)
 
-    def test_positive_assertions_are_rejected_in_expected_no_matches(self) -> None:
-        # No skill loads, so these would grade the base model.
-        for key in ("should", "logs_contain", "files_exist"):
+    def test_expected_no_matches_takes_a_prompt_and_nothing_else(self) -> None:
+        # No skill is ever loaded for these, so there is no behavior phase for
+        # an assertion to be graded in or a workspace to be staged into.
+        for key, value in (
+            ("should", ["x"]),
+            ("should_not", ["x"]),
+            ("logs_contain", ["x"]),
+            ("files_exist", ["x"]),
+            ("workspace", "evals/files/thing"),
+        ):
             with self.subTest(key):
-                _, errors = parse(no_match(id="a", prompt="p", **{key: ["x"]}))
+                _, errors = parse(no_match(id="a", prompt="p", **{key: value}))
                 self.assertTrue(
                     any(f"`{key}`" in e and MATCH_KEY in e for e in errors), errors
                 )
 
-    def test_should_not_in_expected_no_matches_is_allowed(self) -> None:
-        cases, errors = parse(no_match(id="a", prompt="p", should_not=["x"]))
+    def test_an_expected_no_match_case_never_reaches_behavior_mode(self) -> None:
+        cases, errors = parse(no_match(id="a", prompt="p", note="why"))
         self.assertEqual(errors, [])
-        self.assertTrue(cases[0].has_behavior)
-
-    def test_shared_negatives_cannot_assert_behavior(self) -> None:
-        # Behavior mode stages one skill and these belong to none, so the
-        # assertion would be silently skipped rather than run.
-        _, errors = parse(no_match(id="a", prompt="p", should_not=["x"]), skill=None)
-        self.assertTrue(any("routing-only" in e for e in errors), errors)
+        self.assertFalse(cases[0].has_behavior)
 
     def test_the_shared_pool_cannot_expect_a_match(self) -> None:
         _, errors = parse(match(id="a", prompt="p"), skill=None)
@@ -264,12 +265,13 @@ class TestRepositoryDatasets(unittest.TestCase):
                     f"{case.id}: routing is graded by routing mode, not logs_contain",
                 )
 
-    def test_template_matches_the_schema_shape(self) -> None:
+    def test_template_is_a_valid_dataset(self) -> None:
+        # New owners copy this file, so a template the parser rejects would
+        # greet every one of them with an error they did not cause.
         template = json.loads((EVAL_DIR / "TEMPLATE.json").read_text(encoding="utf-8"))
-        _, errors = parse(
-            {k: v for k, v in template.items() if k != "$schema"}, skill="demo-skill"
-        )
+        cases, errors = parse(template, skill="demo-skill")
         self.assertEqual(errors, [])
+        self.assertEqual(datasets.tier0_errors("local-ai-use", cases), [])
 
 
 class TestRoutingClassification(unittest.TestCase):

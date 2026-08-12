@@ -1,11 +1,9 @@
 {
-  "$schema": "../../../eval/schema/evals.schema.json",
-  "_comment": [
+  "comment": [
     "The three matches cover the skill's three shapes: keyword rules, regex",
-    "rules, and LLM-as-router. Both no-match cases carry `should_not`, so they",
-    "are graded twice -- routing mode proves no skill fires with the whole",
-    "catalog installed, and behavior mode proves this skill stays quiet even",
-    "when it is the only one available."
+    "rules, and LLM-as-router. Each one asserts that no live Lemonade API call",
+    "is made, because the skill's whole promise is that a policy can be authored",
+    "and validated offline."
   ],
   "expected_matches": [
     {
@@ -57,20 +55,12 @@
     {
       "id": "nginx-load-balance",
       "note": "The word 'routing' with none of the meaning.",
-      "prompt": "Set up nginx to load-balance incoming requests across three backend servers.",
-      "should_not": [
-        "Produce a collection.router policy JSON",
-        "Run scripts/validate.py"
-      ]
+      "prompt": "Set up nginx to load-balance incoming requests across three backend servers."
     },
     {
       "id": "which-lemonade-model",
       "note": "Lemonade, models, and a choice between them, but no policy to author.",
-      "prompt": "Which Lemonade model should I download for summarizing long documents on my laptop?",
-      "should_not": [
-        "Generate a collection.router policy",
-        "Mention routing.rules or routing.candidates"
-      ]
+      "prompt": "Which Lemonade model should I download for summarizing long documents on my laptop?"
     }
   ]
 }

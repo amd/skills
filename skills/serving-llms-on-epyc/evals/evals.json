@@ -1,6 +1,5 @@
 {
-  "$schema": "../../../eval/schema/evals.schema.json",
-  "_comment": [
+  "comment": [
     "Both behavior cases are observable without an EPYC host, which is why this",
     "skill needs no special runner -- only evals/machine.yml pinning it to Linux",
     "for the detection tooling (lscpu, numactl, a container runtime).",

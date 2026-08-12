@@ -11,18 +11,25 @@ two arrays of prompts:
   * ``expected_no_matches`` -- no skill should trigger.
 
 A case is a user prompt plus what should be true after the agent sees it, and
-the same case feeds both run modes:
+there are two run modes to satisfy:
 
   * **routing** -- the whole catalog is installed and only the trigger
-    decision is graded ("did the right skill fire, and only then?").
+    decision is graded ("did the right skill fire, and only then?"). Every
+    case in both arrays runs here.
   * **behavior** -- just this skill is installed, the run goes to completion,
     and ``should`` / ``should_not`` / ``logs_contain`` / ``files_exist`` are
-    graded ("once it fired, did it do the job?").
+    graded ("once it fired, did it do the job?"). Only ``expected_matches``
+    cases can run here, and only the ones that assert something.
 
-Writing the prompt once for both is the point: a routing prompt that nothing
-grades is a prompt nobody maintains, and a behavioral test that re-asserts
-routing with a substring match is a worse version of a check this module
-already models as a field.
+An ``expected_matches`` prompt written once and graded by both is the point: a
+routing prompt that nothing grades is a prompt nobody maintains, and a
+behavioral test that re-asserts routing with a substring match is a worse
+version of a check this module already models as a field.
+
+An ``expected_no_matches`` prompt is a routing prompt and nothing else. No
+skill loads for it, so there is no behavior phase to hang an assertion or a
+staged workspace off, and those fields are rejected rather than silently
+ignored. Such a case is an ``id``, a ``prompt``, and an optional ``note``.
 
 The folder is the identity and the array is the expectation, so no case names
 a skill. ``skills/serving-llms-on-epyc/evals/evals.json`` is a dataset about
@@ -83,10 +90,11 @@ NO_MATCH_KEY = "expected_no_matches"
 # `additionalProperties: false`, by hand. A mistyped key would otherwise be
 # silently dropped, quietly turning an expectation into no expectation at all.
 #
-# The two arrays take different fields. A case where nothing should trigger has
-# no skill to grade, so every assertion that asks whether something *happened*
-# -- `should`, `logs_contain`, `files_exist` -- would be grading the base
-# model. Only `should_not` makes sense there.
+# The two arrays take different fields, and the difference is not a style
+# choice. An `expected_no_matches` prompt is graded on exactly one thing --
+# that nothing fired -- and no skill is ever loaded for it, so there is no
+# behavior phase to hang an assertion or a staged workspace off. Those cases
+# are a prompt and nothing more.
 MATCH_CASE_KEYS = {
     "id",
     "prompt",
@@ -97,11 +105,9 @@ MATCH_CASE_KEYS = {
     "workspace",
     "note",
 }
-NO_MATCH_CASE_KEYS = {"id", "prompt", "should_not", "workspace", "note"}
+NO_MATCH_CASE_KEYS = {"id", "prompt", "note"}
 
-# `$schema` is allowed so a dataset can point editors at
-# eval/schema/evals.schema.json for autocomplete; the runner ignores it.
-DATASET_KEYS = {MATCH_KEY, NO_MATCH_KEY, "_comment", "$schema"}
+DATASET_KEYS = {MATCH_KEY, NO_MATCH_KEY, "comment"}
 
 # JSON has no comments, so `note` is the sanctioned place for one. The runner
 # ignores it; without it owners annotate fields that are not free text.
@@ -204,10 +210,10 @@ def _parse_case(
     misplaced = sorted(unknown & (MATCH_CASE_KEYS - NO_MATCH_CASE_KEYS))
     if misplaced:
         errors.append(
-            f"{label} uses {', '.join(f'`{k}`' for k in misplaced)}, which "
-            f"only work under `{MATCH_KEY}`. No skill loads for a prompt in "
-            f"`{NO_MATCH_KEY}`, so an assertion that something happened would "
-            "grade the base model. Use `should_not` to pin down what must not."
+            f"{label} uses {', '.join(f'`{k}`' for k in misplaced)}, which only "
+            f"apply under `{MATCH_KEY}`. A prompt in `{NO_MATCH_KEY}` is graded "
+            "on one thing -- that no skill fired -- so no skill is ever loaded "
+            "for it and there is no behavior phase to assert anything about."
         )
     unknown = sorted(unknown - set(misplaced))
     if unknown:
@@ -248,16 +254,6 @@ def _parse_case(
     note = entry.get("note", "")
     if not isinstance(note, str):
         errors.append(f"{label} (`{case_id}`): `note` must be a string.")
-        return None
-
-    if skill is None and any(lists[key] for key in _STRING_LISTS):
-        # Behavior mode stages exactly one skill, and these cases belong to
-        # none, so the assertions would be silently skipped rather than run.
-        errors.append(
-            f"{label} (`{case_id}`): shared negatives are routing-only and "
-            "cannot carry behavioral assertions. Move the case into the "
-            f"`{NO_MATCH_KEY}` of the skill it should not trigger."
-        )
         return None
 
     return Case(
@@ -402,10 +398,10 @@ def validate_all() -> list[str]:
         )
 
     for case in cases:
-        if case.workspace:
-            if case.skill is None:
-                errors.append(f"case `{case.id}`: shared negatives cannot stage a workspace.")
-            elif not (SKILLS_DIR / case.skill / case.workspace).is_dir():
+        # Only reachable for an `expected_matches` case, which is the only kind
+        # that owns a skill and the only kind allowed to stage anything.
+        if case.workspace and case.skill:
+            if not (SKILLS_DIR / case.skill / case.workspace).is_dir():
                 errors.append(
                     f"case `{case.id}`: `workspace` points at "
                     f"`{case.skill}/{case.workspace}`, which is not a directory."

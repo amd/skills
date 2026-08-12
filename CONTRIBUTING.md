@@ -241,13 +241,19 @@ where nothing should fire.
 No case names a skill. The folder says which skill this is, and the list a
 prompt sits in says whether it triggers.
 
+An `expected_no_matches` case is exactly what you see above: an id and a
+prompt, plus an optional `note`. It answers one question — did anything fire? —
+and no skill is ever loaded for it, so there is no behavior phase to assert
+anything about. Writing `should_not` there is an error rather than a no-op.
+
 If a prompt should trigger *someone else's* skill, put it in that skill's
 `expected_matches` rather than your `expected_no_matches`. Routing installs the
 whole catalog at once, so it is the same assertion either way, and your list
 keeps meaning exactly what it says.
 
-Add expectations to make a case grade behavior too. All four are optional, and
-any one of them promotes the case from routing-only to behavior-graded:
+Only an `expected_matches` case can grade behavior. All four fields below are
+optional, and any one of them promotes the case from routing-only to
+behavior-graded:
 
 | Field | Graded by | Use it for |
 | --- | --- | --- |
@@ -259,13 +265,14 @@ any one of them promotes the case from routing-only to behavior-graded:
 Prefer the deterministic two where you can: they are instant and free, where a
 judged expectation costs a second agent call.
 
-An `expected_no_matches` case takes only `should_not`. Nothing loads, so the
-other three would be grading the base model rather than your skill.
-
 Two things you never write. **Do not assert your own skill's name** in
 `logs_contain` — routing mode grades that properly, and a substring match only
 proved the skill was staged. **Do not label a prompt** as positive, near-miss,
 or unrelated: that is derived from the list it sits in and the file it lives in.
+
+The full field reference is
+[`eval/schema/evals.schema.json`](eval/schema/evals.schema.json). Datasets do
+not link to it; `python eval/run_evals.py --validate` is what enforces it.
 
 ### How much is enough
 
@@ -376,7 +383,7 @@ It also checks every eval dataset (`python eval/run_evals.py --validate`, no age
 - `evals/evals.json`: present, parseable, and using only known fields — a typo'd key is an error rather than a silently dropped expectation
 - Tier 0 coverage: ≥ 3 cases under `expected_matches`, ≥ 2 under `expected_no_matches`
 - case ids: unique across the whole repo, because routing pools every skill's cases into one run
-- `expected_no_matches`: carries only `should_not`, since no skill loads for those prompts
+- `expected_no_matches`: an id and a prompt only, since no skill loads for those prompts
 - `workspace`: points at a directory that exists
 
 It also checks the plugin manifests:

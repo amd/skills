@@ -1,6 +1,5 @@
 {
-  "$schema": "../../../eval/schema/evals.schema.json",
-  "_comment": [
+  "comment": [
     "Tier 0 only. Magpie drives real benchmarks and kernel builds on GPU",
     "hardware, so no case grades behavior yet; add one with `should` /",
     "`should_not` plus an evals/machine.yml when a runner is available.",

@@ -1,6 +1,5 @@
 {
-  "$schema": "schema/evals.schema.json",
-  "_comment": [
+  "comment": [
     "Prompts that belong to no skill's domain. Routing runs them against the",
     "whole catalog, so they are the `unrelated` control group for every skill at",
     "once -- which is why they live here instead of being copy-pasted into each",
@@ -12,8 +11,6 @@
     "its owner is the one who maintains it.",
     "",
     "There is no `expected_matches` here, because this file belongs to no skill.",
-    "For the same reason these are routing-only: behavior mode stages exactly one",
-    "skill, so any assertion written here would never run.",
     "",
     "A false trigger here is much more serious than a near-miss failure. It means",
     "a description is broad enough to capture ordinary programming work."

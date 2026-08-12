@@ -1,6 +1,5 @@
 {
-  "$schema": "../../../eval/schema/evals.schema.json",
-  "_comment": [
+  "comment": [
     "Routing prompts hand over a real trace URL from the TraceLens fixtures",
     "rather than claiming one is on disk. The routing workspace holds nothing",
     "but the skills tree, so a prompt that names a local file sends the agent",
