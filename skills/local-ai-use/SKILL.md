@@ -1,19 +1,19 @@
 ---
 name: local-ai-use
 description: >-
-  Generates images, transcribes audio, and synthesizes speech on the user's own
-  machine through a local Lemonade Server instead of a paid cloud API, for work
-  the agent itself does in the current workspace. Use for a one-off request —
-  transcribe this recording, make this picture, read this text aloud — whenever
-  the user wants it done locally, offline, on-device, or kept private, and also
-  when the user wants that routing to stick from now on. Use when the user wants
-  to save money, cost, or tokens on image, audio, or voice API calls; wants to
-  stop using DALL-E, Whisper-as-a-service, ElevenLabs, or other paid multimodal
-  APIs; says "use local models for pictures but keep the cloud for chat" in
-  Claude, Cursor, Codex, or another agent harness; or
-  mentions Lemonade Server, OmniRouter, SD-Turbo, kokoro, Whisper, Ryzen AI, or
-  NPU/iGPU/dGPU inference. Changes no application source code; do not use this 
-  skill if the user is instead adding local AI to an app they ship.
+  Makes this agent generate images, transcribe audio, and synthesize speech on
+  the user's own machine through a local Lemonade Server instead of a paid cloud
+  API. Use it above all to change that routing persistently, from now on — keep
+  generating pictures locally while chat stays on the cloud; set this workspace
+  up to make images on my own machine — even when the user asks for no image or
+  file in the same breath. Also use it for a single request the user wants done
+  locally, offline, on-device, or kept private: transcribe this recording, make
+  this picture, read this text aloud. Applies in Claude, Cursor, Codex, or any
+  agent harness. Use when the user wants to cut cost or tokens on image, audio,
+  or voice API calls, or to drop DALL-E, hosted Whisper, ElevenLabs, or other
+  paid multimodal APIs; or mentions Lemonade Server, OmniRouter, SD-Turbo,
+  kokoro, Ryzen AI, or NPU/iGPU/dGPU inference. Changes no application source
+  code; do not use it if the user is adding local AI to an app they ship.
 ---
 
 # Local AI Use (route image, TTS, STT through Lemonade)

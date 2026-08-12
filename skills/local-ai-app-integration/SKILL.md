@@ -7,7 +7,7 @@ description: >-
   text-to-speech to an existing app; replace or supplement OpenAI, Anthropic, Ollama, or
   other cloud AI APIs with a local backend; only use to convert user apps. Do not use when
   the user just wants the agent itself to generate images, transcribe, or speak locally in
-  the current workspace, even to cut their own API bill — that is local-ai-use.
+  the current workspace, even to cut their own API bill.
 ---
 
 # Local AI App Integration (Embeddable Lemonade)
