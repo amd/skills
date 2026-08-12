@@ -253,8 +253,31 @@ def _match_skill(text: str, skills: list[str]) -> str | None:
     return None
 
 
+def _skill_from_body_path(text: str, skills: list[str]) -> str | None:
+    """The skill whose own ``SKILL.md`` path appears in `text`, or None.
+
+    Matching the joined ``skills/<name>/skill.md`` path -- never the bare
+    filename, never the bare skill name -- is what separates "this skill's
+    body was loaded" from "this text happens to mention the skill". Two or
+    more matches mean the text enumerates the catalog, which is a listing
+    rather than a decision, so that is not an activation either.
+    """
+    haystack = text.lower().replace("\\\\", "/").replace("\\", "/")
+    hits = [skill for skill in skills if f"skills/{skill.lower()}/skill.md" in haystack]
+    return hits[0] if len(hits) == 1 else None
+
+
 def detect_activation(event: dict, skills: list[str]) -> str | None:
     """The skill this event activates, or None.
+
+    Only the agent's own tool calls count. Tool *results* and assistant prose
+    are deliberately excluded: the staged workspace holds nothing but the
+    skills tree, so any prompt that sends the agent looking for a file it
+    cannot find gets a recursive listing of every ``SKILL.md`` back. Scoring
+    that as an activation credited the longest skill name in the catalog with
+    a false trigger on unrelated prompts, and -- worse -- scored a correct
+    trigger whenever an expected skill's prompt named a path that did not
+    exist, hiding real misses behind the file hunt.
 
     Returns ``"other:<name>"`` when a skill outside the marketplace fires --
     that is a contaminated runner, not a routing result, and the report should
@@ -279,19 +302,18 @@ def detect_activation(event: dict, skills: list[str]) -> str | None:
             return f"other:{invoked or 'unknown'}"
 
         # Fallback for builds that load a skill body by reading the file
-        # instead of going through the Skill tool.
-        hit = _match_skill(tool_input, skills)
-        if hit and ("skill.md" in tool_input.lower() or ".claude/skills" in tool_input.lower()):
+        # instead of going through the Skill tool. The call itself has to
+        # target that skill's own SKILL.md; merely touching the skills
+        # directory (`ls .claude/skills`) is not a routing decision.
+        hit = _skill_from_body_path(tool_input, skills)
+        if hit:
             return hit
 
-    # Last resort, independent of tool naming: a skill body can only reach the
-    # context through its own SKILL.md path, so seeing that exact path
-    # anywhere in the event means the skill loaded. Matching the joined path
-    # (not the bare filename) keeps a directory listing from counting.
-    blob = json.dumps(event, ensure_ascii=False).lower().replace("\\\\", "/").replace("\\", "/")
-    for skill in sorted(skills, key=len, reverse=True):
-        if f"skills/{skill.lower()}/skill.md" in blob:
-            return skill
+    # Some builds announce an activation as a system event instead of a tool
+    # call. Same joined-path rule, and init is excluded because it enumerates
+    # the whole catalog by design.
+    if event.get("type") == "system" and event.get("subtype") != "init":
+        return _skill_from_body_path(json.dumps(event, ensure_ascii=False), skills)
     return None
 
 
