@@ -30,24 +30,6 @@ def test_routes_optimize_vllm_throughput_request():
         run.should(
             "Mention workspace bootstrap such as hyperloom-setup or setup.md"
         )
-        run.should(
-            "Describe a phased flow where workload parameters (model path, "
-            "framework, TP, concurrency, ISL, OSL, precision, time budget) are "
-            "collected in a later workload-intake phase, not during bootstrap"
-        )
-        run.should(
-            "Say it will present a launch plan and get user confirmation before "
-            "launching the optimizer"
-        )
-        run.should(
-            "Mention a GPU preflight check for stale serving processes or VRAM "
-            "in use (IR-1)"
-        )
-        run.should(
-            "Explain that confirmed workload values are persisted (e.g. to a "
-            "workload.env file) and sourced at launch, since agent shells do not "
-            "keep exports between calls"
-        )
 
         run.should_not(
             "Start a plain vLLM docker serve as the primary answer without the optimization loop"
@@ -58,19 +40,46 @@ def test_routes_optimize_vllm_throughput_request():
         )
 
 
-def test_states_install_gate_before_launch():
-    # Asked on its own, and answered in prose, so the reply stays inside the
-    # window the judge sees; buried in a long plan this gate gets cut off.
+def test_states_launcher_gates_before_launch():
     with claude("opus", skill="hyperloom-workload-optimizer") as agent:
         run = agent.prompt(
-            "Before Hyperloom's optimize command is launched, what has to be "
-            "run and sourced in that same shell, and why does it have to be the "
-            "same shell? Answer in two or three sentences. Do not run anything."
+            "What are Hyperloom's two launcher gates, in the order they run, "
+            "and what does each one check? Answer in three or four sentences. "
+            "Do not run anything."
         )
 
         run.should(
             "Mention running install.sh and sourcing kernel-agent.env.sh (IR-2) "
             "before launching the optimizer"
+        )
+        run.should(
+            "Mention a GPU preflight check for stale serving processes or VRAM "
+            "in use (IR-1)"
+        )
+
+
+def test_collects_workload_values_before_launch():
+    with claude("opus", skill="hyperloom-workload-optimizer") as agent:
+        run = agent.prompt(
+            "The environment is already set up and I want to start optimizing. "
+            "Which workload values do you need from me, and what happens "
+            "between me giving them and the optimizer starting? Answer in four "
+            "or five sentences. Do not run anything."
+        )
+
+        run.should(
+            "Name the workload values it needs -- model path, framework, TP, "
+            "concurrency, ISL, OSL, precision and time budget -- as its own "
+            "intake step"
+        )
+        run.should(
+            "Say it will present a launch plan and get user confirmation before "
+            "launching the optimizer"
+        )
+        run.should(
+            "Explain that confirmed workload values are persisted (e.g. to a "
+            "workload.env file) and sourced at launch, since agent shells do not "
+            "keep exports between calls"
         )
 
 
