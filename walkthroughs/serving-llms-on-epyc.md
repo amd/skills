@@ -25,7 +25,7 @@ chat template) or `/v1/completions` for base models.
 
 ## Step 2 - Enabling claude to see `serving-llms-on-epyc`
 
-* Install the skill with the [`skills` CLI](https://github.com/vercel-labs/skills):
+* Install the skill with the [`skills` CLI](https://github.com/vercel-labs/skills). Run this in your terminal, not inside Claude:
 
 ```bash
 npx skills add amd/skills --skill serving-llms-on-epyc --agent claude-code

@@ -2,9 +2,9 @@
 
 ## Requirements
 
-This collection of walkthroughs assume you already have `claude code` setup on your machine.
+This collection of walkthroughs assumes you already have `claude code` setup on your machine.
 
-Participatns using other are still encouraged to participate. Just please note that you may have to adapt some of the instructions provided below to your specific agent.
+Participants using other agents are still encouraged to participate. Just please note that you may have to adapt some of the instructions provided below to your specific agent.
 
 Please choose a skill to get started.
 
