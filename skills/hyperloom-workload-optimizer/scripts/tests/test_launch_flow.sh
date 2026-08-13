@@ -28,6 +28,16 @@ fail() {
   exit 1
 }
 
+# launch.sh and resume.sh background the optimizer with setsid nohup, so the stub
+# writes its argv dump after they return. Poll for it rather than racing.
+wait_for_argv() {
+  local path="$1" deadline=$((SECONDS + 10))
+  while [ ! -e "$path" ]; do
+    [ "$SECONDS" -lt "$deadline" ] || fail "timed out waiting for $path"
+    sleep 0.1
+  done
+}
+
 # --- stub optimizer -------------------------------------------------------
 # Only "-m hyperloom..." is simulated; every other invocation (the launch-info
 # JSON reader inside launch_health.sh) goes to the real interpreter.
@@ -47,7 +57,9 @@ for i in "\${!args[@]}"; do
   fi
 done
 
-printf '%s\n' "\$@" > "\${STUB_ARGV_OUT}"
+# Renamed into place so a poll on the path cannot observe a partial dump.
+printf '%s\n' "\$@" > "\${STUB_ARGV_OUT}.tmp"
+mv "\${STUB_ARGV_OUT}.tmp" "\${STUB_ARGV_OUT}"
 
 mkdir -p "\${STUB_SESSION_DIR}"
 echo '{}' > "\${STUB_SESSION_DIR}/manifest.json"
@@ -122,6 +134,7 @@ grep -q "^export LAUNCH_INFO_FILE=" "$LAST_LAUNCH" \
   || fail "last_launch.env is missing LAUNCH_INFO_FILE"
 echo "[ok] launch.sh recorded the run handles on disk"
 
+wait_for_argv "$STUB_ARGV_OUT"
 for expected in --model --framework --tp --ep --conc --isl --osl --precision \
   --max-hours --target-gain; do
   grep -qx -- "$expected" "$STUB_ARGV_OUT" || fail "$expected not passed to the CLI"
@@ -173,6 +186,7 @@ bash "$SCRIPTS_DIR/resume.sh" > "$WORK/resume.out"
 . "$LAST_LAUNCH"
 STARTED_PIDS+=("$(cat "$PID_FILE")")
 
+wait_for_argv "$WORK/argv_resume.txt"
 grep -qx -- "--resume-from" "$WORK/argv_resume.txt" \
   || fail "resume.sh did not pass --resume-from explicitly"
 if grep -qx -- "--model" "$WORK/argv_resume.txt"; then
