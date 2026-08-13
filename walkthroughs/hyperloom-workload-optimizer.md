@@ -61,9 +61,9 @@ Set up Hyperloom and prepare to optimize vLLM throughput on MI300X.
 The agent works through four phases in order and should not ask workload
 questions before the environment is ready:
 
-1. **Phase 0 — Bootstrap:** confirm the install directory, find the latest
-   Hyperloom wheel on GitHub releases and `pip install --target .`, then run
-   `/hyperloom-setup` to write `.env` (credentials + run mode only).
+1. **Phase 0 — Bootstrap:** confirm the install directory, install a pinned
+   `hyperloom-inference-optimizer` release from PyPI with `pip install --target .`,
+   then run `/hyperloom-setup` to write `.env` (credentials + run mode only).
 2. **Phase 1 — Environment prep:** load `hyperloom-custom-advanced` Setup
    Configuration. On bare metal, confirm the host is ready; in Docker, start a
    long-running container and run the in-container setup first.

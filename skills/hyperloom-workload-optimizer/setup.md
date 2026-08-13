@@ -19,14 +19,17 @@ pick another dedicated path. `cd` into the chosen directory before installing.
 Skip when `hyperloom/` already exists in the directory (wheel layout) or
 `src/hyperloom/` exists (source checkout).
 
-Find the latest release of
-[AMD-AGI/Hyperloom](https://github.com/AMD-AGI/Hyperloom/releases), tell the user
-that version, and ask whether to install it or a version they name. The wheel
-asset is `hyperloom_inference_optimizer-<version>-py3-none-any.whl`.
+The runtime is published to PyPI as `hyperloom-inference-optimizer`. List the
+releases, tell the user the newest one, and ask whether to install it or a
+version they name.
+
+List with `--pre` so prereleases are visible, and install an exact `==` version
+so a later bootstrap installs the same runtime.
 
 ```bash
 cd "$INSTALL_DIR"   # the directory confirmed in Step 0
-python3 -m pip install "<the chosen wheel URL>" --target .
+pip index versions hyperloom-inference-optimizer --pre
+pip install hyperloom-inference-optimizer==<version the user approved> --target .
 ```
 
 After install, confirm:
