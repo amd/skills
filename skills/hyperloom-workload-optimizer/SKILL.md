@@ -250,22 +250,28 @@ EOF
 
 ## Phase 3 — Install (IR-2)
 
+`INSTALL_DIR` is the directory confirmed in Phase 0, the one holding `hyperloom/`
+and `.env`. Every Phase 3 block below rebuilds it from the current directory, so
+run them from there; the check refuses a directory that is not it.
+
 Resolve paths for wheel or source layout:
 
 ```bash
-export REPO_ROOT="$(pwd -P)"
-set -a; . "${REPO_ROOT}/.env"; set +a
+export INSTALL_DIR="$(pwd -P)"
+[ -d "${INSTALL_DIR}/hyperloom" ] || [ -d "${INSTALL_DIR}/src/hyperloom" ] || {
+  echo "ERROR: ${INSTALL_DIR} holds no hyperloom/ -- cd to the Phase 0 install directory" >&2; exit 1; }
+set -a; . "${INSTALL_DIR}/.env"; set +a
 export USER_DATA_PATH="${USER_DATA_PATH:?USER_DATA_PATH missing}"
 . "${USER_DATA_PATH}/optimizer_runs/workload.env"   # confirmed Phase 2 values
-export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
+export PYTHONPATH="${INSTALL_DIR}:${PYTHONPATH:-}"
 ulimit -Sn 65536 || true
 
-INSTALL_SH="${REPO_ROOT}/hyperloom/inference_optimizer/assets/install.sh"
-[ -f "$INSTALL_SH" ] || INSTALL_SH="${REPO_ROOT}/src/hyperloom/inference_optimizer/assets/install.sh"
+INSTALL_SH="${INSTALL_DIR}/hyperloom/inference_optimizer/assets/install.sh"
+[ -f "$INSTALL_SH" ] || INSTALL_SH="${INSTALL_DIR}/src/hyperloom/inference_optimizer/assets/install.sh"
 
 bash "$INSTALL_SH"
 . "${KERNEL_AGENT_ENV:-${USER_DATA_PATH}/runtime/kernel-agent.env.sh}"
-export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
+export PYTHONPATH="${INSTALL_DIR}:${PYTHONPATH:-}"
 ```
 
 In Docker mode, run this inside the container.
@@ -301,7 +307,7 @@ After IR-2 and IR-1 pass, launch. `setsid nohup` is required for runs longer tha
 5 minutes, so the run outlives the agent shell.
 
 ```bash
-export REPO_ROOT="$(pwd -P)"
+export INSTALL_DIR="$(pwd -P)"
 export SKILL_DIR="${SKILL_DIR:?absolute path of the directory holding this SKILL.md}"
 bash "${SKILL_DIR}/scripts/launch.sh"
 ```
@@ -323,7 +329,7 @@ file so the monitor watches the right process, and records both in
 `$RUN_DIR/last_launch.env` for the later phases.
 
 ```bash
-export REPO_ROOT="$(pwd -P)"
+export INSTALL_DIR="$(pwd -P)"
 export SKILL_DIR="${SKILL_DIR:?absolute path of the directory holding this SKILL.md}"
 bash "${SKILL_DIR}/scripts/launch_health.sh"
 ```
@@ -340,10 +346,10 @@ reader the wheel ships rather than parsing `state.json` by hand — it also prin
 the recent lifecycle events.
 
 ```bash
-export REPO_ROOT="$(pwd -P)"
+export INSTALL_DIR="$(pwd -P)"
 . "${USER_DATA_PATH}/optimizer_runs/last_launch.env"   # SESSION_DIR from launch
-STATE_TOOL="${REPO_ROOT}/hyperloom/inference_optimizer/tools/read_optimizer_state.py"
-[ -f "$STATE_TOOL" ] || STATE_TOOL="${REPO_ROOT}/src/hyperloom/inference_optimizer/tools/read_optimizer_state.py"
+STATE_TOOL="${INSTALL_DIR}/hyperloom/inference_optimizer/tools/read_optimizer_state.py"
+[ -f "$STATE_TOOL" ] || STATE_TOOL="${INSTALL_DIR}/src/hyperloom/inference_optimizer/tools/read_optimizer_state.py"
 "${PYTHON:-python3}" "$STATE_TOOL" "$SESSION_DIR"
 ```
 
@@ -361,7 +367,7 @@ Resume runs in a fresh shell. Re-run the IR-2 and IR-1 gates first, exactly as f
 a fresh launch — the script does not re-check them.
 
 ```bash
-export REPO_ROOT="$(pwd -P)"
+export INSTALL_DIR="$(pwd -P)"
 export SKILL_DIR="${SKILL_DIR:?absolute path of the directory holding this SKILL.md}"
 bash "${SKILL_DIR}/scripts/resume.sh"
 bash "${SKILL_DIR}/scripts/launch_health.sh"

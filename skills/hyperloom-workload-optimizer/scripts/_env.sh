@@ -9,19 +9,27 @@
 #
 # Sourced, not executed: a failure here exits the calling script.
 
-: "${REPO_ROOT:="$(pwd -P)"}"
-cd "$REPO_ROOT" || exit 1
+: "${INSTALL_DIR:="$(pwd -P)"}"
+cd "$INSTALL_DIR" || exit 1
 
-if [ -f "$REPO_ROOT/.env" ]; then
+# Defaulting to the current directory is only right when the caller is already
+# in the install directory, so say which directory was wrong rather than failing
+# later on a path built from it.
+if [ ! -d "$INSTALL_DIR/hyperloom" ] && [ ! -d "$INSTALL_DIR/src/hyperloom" ]; then
+  echo "ERROR: $INSTALL_DIR holds no hyperloom/ or src/hyperloom/ -- set INSTALL_DIR to the directory the wheel was installed into" >&2
+  exit 1
+fi
+
+if [ -f "$INSTALL_DIR/.env" ]; then
   # Values containing spaces must be double-quoted in .env, otherwise this
   # source fails with exit 127. hyperloom-setup writes them quoted.
   set -a
-  . "$REPO_ROOT/.env"
+  . "$INSTALL_DIR/.env"
   set +a
 fi
 
 : "${USER_DATA_PATH:?USER_DATA_PATH missing -- run the Hyperloom setup skill first}"
-export REPO_ROOT USER_DATA_PATH
+export INSTALL_DIR USER_DATA_PATH
 export RUN_DIR="${USER_DATA_PATH}/optimizer_runs"
 mkdir -p "$RUN_DIR"
 
@@ -45,7 +53,7 @@ export KERNEL_AGENT_ENV
 
 export PYTHON="${PYTHON:-$(command -v python3)}"
 export PATH="$(dirname "$PYTHON"):/usr/local/bin:$PATH"
-export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
+export PYTHONPATH="${INSTALL_DIR}:${PYTHONPATH:-}"
 
 # Run handles are recorded here because the health check, monitor and resume
 # steps each run in a fresh shell.

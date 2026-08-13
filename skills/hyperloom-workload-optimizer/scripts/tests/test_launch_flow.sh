@@ -83,7 +83,10 @@ chmod +x "$WORK/stub_python"
 # variant must be generated fresh rather than copied from another root.
 make_fixture() {
   local root="$1"
-  mkdir -p "$root/model" "$root/data/runtime" "$root/data/optimizer_runs"
+  # hyperloom/ is what `pip install --target` leaves behind, and what marks this
+  # root as an install directory rather than whatever the caller happened to cd to.
+  mkdir -p "$root/model" "$root/data/runtime" "$root/data/optimizer_runs" \
+           "$root/hyperloom/inference_optimizer"
 
   # A value with a space and a colon, double-quoted the way hyperloom-setup
   # writes it. Unquoted, the .env source in _env.sh would fail with exit 127.
@@ -113,7 +116,7 @@ EOF
 ROOT="$WORK/repo"
 make_fixture "$ROOT"
 
-export REPO_ROOT="$ROOT"
+export INSTALL_DIR="$ROOT"
 export PYTHON="$WORK/stub_python"
 export STUB_SESSION_DIR="$ROOT/data/model/20260101_000000"
 export STUB_ARGV_OUT="$WORK/argv_launch.txt"
@@ -171,7 +174,7 @@ export RUN_LOG="$BROKEN/data/optimizer_runs/run_broken.log"
 export PID_FILE="$BROKEN/data/optimizer_runs/run_broken.pid"
 export LAUNCH_INFO_FILE="$BROKEN/data/optimizer_runs/launch_broken.json"
 EOF
-if (cd "$BROKEN" && REPO_ROOT="$BROKEN" bash "$SCRIPTS_DIR/launch_health.sh") \
+if (cd "$BROKEN" && INSTALL_DIR="$BROKEN" bash "$SCRIPTS_DIR/launch_health.sh") \
   > "$WORK/health_fail.out" 2>&1; then
   fail "health check passed even though the launch-info JSON was missing"
 fi
@@ -202,7 +205,7 @@ echo "[ok] resume targets the recorded session and writes its own log"
 NOPLAN="$WORK/noplan"
 make_fixture "$NOPLAN"
 rm -f "$NOPLAN/data/optimizer_runs/workload.env"
-if (cd "$NOPLAN" && REPO_ROOT="$NOPLAN" bash "$SCRIPTS_DIR/launch.sh") \
+if (cd "$NOPLAN" && INSTALL_DIR="$NOPLAN" bash "$SCRIPTS_DIR/launch.sh") \
   > "$WORK/noplan.out" 2>&1; then
   fail "launch.sh started without workload.env"
 fi
@@ -210,10 +213,25 @@ grep -q "workload.env missing" "$WORK/noplan.out" \
   || fail "launch.sh did not name the missing workload.env"
 echo "[ok] launch.sh refuses to start without the confirmed plan"
 
+# A directory that is not the install directory -- what the caller gets when the
+# shell is left somewhere else and INSTALL_DIR falls back to the current one.
+WRONGDIR="$WORK/wrongdir"
+make_fixture "$WRONGDIR"
+rm -rf "$WRONGDIR/hyperloom"
+# INSTALL_DIR is unset so the script falls back to the current directory, which
+# is the case the check exists for; the earlier export would otherwise mask it.
+if (cd "$WRONGDIR" && env -u INSTALL_DIR bash "$SCRIPTS_DIR/launch.sh") \
+  > "$WORK/wrongdir.out" 2>&1; then
+  fail "launch.sh started from a directory holding no hyperloom/"
+fi
+grep -q "holds no hyperloom/" "$WORK/wrongdir.out" \
+  || fail "launch.sh did not name the directory that is missing hyperloom/"
+echo "[ok] launch.sh refuses to start outside the install directory"
+
 NOINSTALL="$WORK/noinstall"
 make_fixture "$NOINSTALL"
 rm -f "$NOINSTALL/data/runtime/kernel-agent.env.sh"
-if (cd "$NOINSTALL" && REPO_ROOT="$NOINSTALL" bash "$SCRIPTS_DIR/launch.sh") \
+if (cd "$NOINSTALL" && INSTALL_DIR="$NOINSTALL" bash "$SCRIPTS_DIR/launch.sh") \
   > "$WORK/noinstall.out" 2>&1; then
   fail "launch.sh started without the kernel-agent env from install.sh"
 fi
