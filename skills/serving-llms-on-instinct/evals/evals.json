@@ -1,18 +1,20 @@
 {
-  "comment": [
-    "The behavior case serves a deliberately tiny model (Qwen/Qwen3-0.6B) end to",
-    "end on real hardware so the run stays fast: Apache 2.0 so no HF token, a few",
-    "hundred MB of weights, and it fits on one MI300X with room to spare. It",
-    "grants launch approval up front so the agent does not stall on the skill's",
-    "'confirm before launching' step.",
-    "",
-    "Container teardown lives in evals/hooks.py, and evals/machine.yml asks for",
-    "the Instinct runner class.",
-    "",
-    "`vllm-on-nvidia` and `consumer-radeon` are the two hardware lines this skill",
-    "draws; serving-llms-on-epyc draws the third, from its own dataset."
-  ],
   "evaluations": [
+    {
+      "id": "serve-tiny-model-on-instinct",
+      "skill_should_trigger": true,
+      "note": "Tier 2. Needs an Instinct GPU, ROCm, and Docker; see evals/machine.yml.",
+      "prompt": "Serve Qwen/Qwen3-0.6B on this AMD Instinct GPU with vLLM. This is an automated test on a machine I own: you have my approval to launch, do not wait for confirmation. Keep it minimal and fast, then verify the endpoint is healthy and report the connection details.",
+      "expected_behavior": [
+        "Detect the AMD Instinct GPU before configuring vLLM",
+        "Launch the model with vLLM inside a Docker container on the AMD GPU",
+        "Verify the vLLM endpoint is healthy after launching"
+      ],
+      "unexpected_behavior": [
+        "Fall back to a cloud LLM provider or an NVIDIA/CUDA code path",
+        "Serve a different, larger model than the one that was requested"
+      ]
+    },
     {
       "id": "qwen-on-mi300x",
       "skill_should_trigger": true,
@@ -32,21 +34,6 @@
       "id": "deploy-datacenter-gpu",
       "skill_should_trigger": true,
       "prompt": "Deploy a language model on my AMD data center GPUs so my team can hit it over HTTP."
-    },
-    {
-      "id": "serve-tiny-model-on-instinct",
-      "skill_should_trigger": true,
-      "note": "Tier 2. Needs an Instinct GPU, ROCm, and Docker; see evals/machine.yml.",
-      "prompt": "Serve Qwen/Qwen3-0.6B on this AMD Instinct GPU with vLLM. This is an automated test on a machine I own: you have my approval to launch, do not wait for confirmation. Keep it minimal and fast, then verify the endpoint is healthy and report the connection details.",
-      "expected_behavior": [
-        "Detect the AMD Instinct GPU before configuring vLLM",
-        "Launch the model with vLLM inside a Docker container on the AMD GPU",
-        "Verify the vLLM endpoint is healthy after launching"
-      ],
-      "unexpected_behavior": [
-        "Fall back to a cloud LLM provider or an NVIDIA/CUDA code path",
-        "Serve a different, larger model than the one that was requested"
-      ]
     },
     {
       "id": "vllm-on-nvidia",

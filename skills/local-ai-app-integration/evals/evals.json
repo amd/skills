@@ -1,36 +1,5 @@
 {
-  "comment": [
-    "Behavior cases are scoped to code generation (\"Do not download or install",
-    "anything\") because the real vendoring step downloads a binary from GitHub,",
-    "which hangs on a runner with no egress. They lean on `logs_contain` rather",
-    "than a judged expectation wherever the thing being checked is a literal:",
-    "it is instant and free where a judge costs a second agent call.",
-    "",
-    "None of these prompts name the skill. An earlier version of these tests did",
-    "(\"Use the local-ai-app-integration skill\"), which made them useless as",
-    "routing cases -- and every case here is now also a routing case."
-  ],
   "evaluations": [
-    {
-      "id": "electron-offline-mode",
-      "skill_should_trigger": true,
-      "prompt": "My Electron app calls the OpenAI chat completions endpoint. I want to ship an offline mode that bundles the inference engine into the installer so it still works with no internet."
-    },
-    {
-      "id": "swap-anthropic-backend",
-      "skill_should_trigger": true,
-      "prompt": "My Python desktop tool talks to the Anthropic Messages API today. Give it a mode where the model runs on the customer's own PC so their data never leaves the machine."
-    },
-    {
-      "id": "vendor-binary",
-      "skill_should_trigger": true,
-      "prompt": "Can you vendor an inference binary into my app and repoint my existing HTTP client at it instead of the Ollama server I'm hitting now?"
-    },
-    {
-      "id": "in-app-embeddings",
-      "skill_should_trigger": true,
-      "prompt": "I want my app to compute embeddings on the end user's hardware rather than calling a hosted embeddings API. How do I wire that up?"
-    },
     {
       "id": "vendor-lemonade-launcher",
       "skill_should_trigger": true,
@@ -84,6 +53,26 @@
       "files_exist": [
         "main.py"
       ]
+    },
+    {
+      "id": "electron-offline-mode",
+      "skill_should_trigger": true,
+      "prompt": "My Electron app calls the OpenAI chat completions endpoint. I want to ship an offline mode that bundles the inference engine into the installer so it still works with no internet."
+    },
+    {
+      "id": "swap-anthropic-backend",
+      "skill_should_trigger": true,
+      "prompt": "My Python desktop tool talks to the Anthropic Messages API today. Give it a mode where the model runs on the customer's own PC so their data never leaves the machine."
+    },
+    {
+      "id": "vendor-binary",
+      "skill_should_trigger": true,
+      "prompt": "Can you vendor an inference binary into my app and repoint my existing HTTP client at it instead of the Ollama server I'm hitting now?"
+    },
+    {
+      "id": "in-app-embeddings",
+      "skill_should_trigger": true,
+      "prompt": "I want my app to compute embeddings on the end user's hardware rather than calling a hosted embeddings API. How do I wire that up?"
     },
     {
       "id": "rate-limit-openai-calls",

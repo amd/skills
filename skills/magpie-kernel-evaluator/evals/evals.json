@@ -1,15 +1,4 @@
 {
-  "comment": [
-    "Tier 0 only. Magpie drives real benchmarks and kernel builds on GPU",
-    "hardware, so nothing grades behavior yet; add an `expected_behavior` /",
-    "`unexpected_behavior` plus an evals/machine.yml when a runner is available.",
-    "",
-    "The boundary that matters here is against tracelens-analysis-orchestrator:",
-    "both mention TraceLens and trace analysis, so 'benchmark and optimize",
-    "kernels' versus 'orchestrate a trace analysis report' is the thing most",
-    "likely to route wrong. `benchmark-then-optimize-kernel` is that line, in the",
-    "words someone would use when they mean this skill."
-  ],
   "evaluations": [
     {
       "id": "benchmark-vllm-ttft",

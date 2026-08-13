@@ -1,32 +1,5 @@
 {
-  "comment": [
-    "Both behavior cases are observable without an EPYC host, which is why this",
-    "skill needs no special runner -- only evals/machine.yml pinning it to Linux",
-    "for the detection tooling (lscpu, numactl, a container runtime).",
-    "",
-    "`non-epyc-host-is-rejected` is the sharp one: detect.py can report",
-    "avx512: true alongside is_amd_epyc: false and still exit 0, so an agent",
-    "that stops has honored the skill rather than a failing exit code.",
-    "",
-    "The confusable neighbour is serving-llms-on-instinct; the GPU-side prompts",
-    "that must reach it instead of this skill live in its dataset."
-  ],
   "evaluations": [
-    {
-      "id": "epyc-cpu-inference-setup",
-      "skill_should_trigger": true,
-      "prompt": "Set up CPU inference for Llama 3.1 8B on my dual-socket EPYC server. No GPU in the box."
-    },
-    {
-      "id": "zentorch-on-turin",
-      "skill_should_trigger": true,
-      "prompt": "Get a model serving with zentorch on my Turin box and give me an OpenAI-compatible endpoint."
-    },
-    {
-      "id": "llm-without-a-gpu",
-      "skill_should_trigger": true,
-      "prompt": "What's the fastest way to run an LLM on AMD server CPUs when there's no accelerator available?"
-    },
     {
       "id": "non-epyc-host-is-rejected",
       "skill_should_trigger": true,
@@ -60,6 +33,21 @@
       "logs_contain": [
         "amdih/zendnn_zentorch"
       ]
+    },
+    {
+      "id": "epyc-cpu-inference-setup",
+      "skill_should_trigger": true,
+      "prompt": "Set up CPU inference for Llama 3.1 8B on my dual-socket EPYC server. No GPU in the box."
+    },
+    {
+      "id": "zentorch-on-turin",
+      "skill_should_trigger": true,
+      "prompt": "Get a model serving with zentorch on my Turin box and give me an OpenAI-compatible endpoint."
+    },
+    {
+      "id": "llm-without-a-gpu",
+      "skill_should_trigger": true,
+      "prompt": "What's the fastest way to run an LLM on AMD server CPUs when there's no accelerator available?"
     },
     {
       "id": "xeon-avx512-benchmark",

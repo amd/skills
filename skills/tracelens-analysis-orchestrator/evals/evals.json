@@ -1,19 +1,14 @@
 {
-  "comment": [
-    "Routing prompts hand over a real trace URL from the TraceLens fixtures",
-    "rather than claiming one is on disk. The routing workspace holds nothing",
-    "but the skills tree, so a prompt that names a local file sends the agent",
-    "hunting for something that cannot exist, and it can end the turn asking",
-    "where the trace is without ever making a routing decision.",
-    "",
-    "The behavior case is the first standalone repeatability case from TraceLens",
-    "(gemm_01_compute_few_tiles). Its prompt is templated: evals/hooks.py clones",
-    "and installs TraceLens once per run and fills in the {placeholders}.",
-    "",
-    "The confusable neighbour is magpie-kernel-evaluator, which shares the",
-    "TraceLens vocabulary; the prompts that belong to it live in its dataset."
-  ],
   "evaluations": [
+    {
+      "id": "gemm-01-repeatability",
+      "skill_should_trigger": true,
+      "note": "Tier 2. Clones and pip-installs TraceLens, then scores the agent's analysis.md with TraceLens's own workflow_scripted_evals.py. See evals/hooks.py.",
+      "prompt": "Run the full standalone TraceLens analysis workflow locally with analysis mode default.\n- trace_path: {trace_path}\n- platform: {platform}\n- output_dir: {output_dir}\n- venv_path: {venv_path}\n- tracelens_dir: {tracelens_dir}\n",
+      "files_exist": [
+        "analysis_output/analysis.md"
+      ]
+    },
     {
       "id": "analyze-torch-trace",
       "skill_should_trigger": true,
@@ -33,15 +28,6 @@
       "id": "kernel-perf-report",
       "skill_should_trigger": true,
       "prompt": "I captured a GPU kernel trace from a distributed training run: https://github.com/AMD-AGI/TraceLens/raw/main/tests/traces/mi300/llama_70b_fsdp/rank0_trace_no_pyfn.json.gz. I need a prioritized report of the worst performance offenders that I can show stakeholders."
-    },
-    {
-      "id": "gemm-01-repeatability",
-      "skill_should_trigger": true,
-      "note": "Tier 2. Clones and pip-installs TraceLens, then scores the agent's analysis.md with TraceLens's own workflow_scripted_evals.py. See evals/hooks.py.",
-      "prompt": "Run the full standalone TraceLens analysis workflow locally with analysis mode default.\n- trace_path: {trace_path}\n- platform: {platform}\n- output_dir: {output_dir}\n- venv_path: {venv_path}\n- tracelens_dir: {tracelens_dir}\n",
-      "files_exist": [
-        "analysis_output/analysis.md"
-      ]
     },
     {
       "id": "node-event-loop",
