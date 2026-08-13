@@ -9,7 +9,9 @@ For each source, the script:
 
 1. Shallow-clones the repo at the pinned `ref` into a temp directory,
    using sparse-checkout so only the configured `path` is fetched.
-2. Copies each named skill folder into `skills/<skill>/`.
+2. Copies each named skill folder into `skills/<skill>/`. When refreshing an
+   existing import, a local `evals/` subdirectory is kept if the upstream
+   skill folder does not ship one (catalog-authored behavioral tests).
 2b. Optionally vendors the skill under a different local catalog name (the
    `as:` field on a skill entry). Federated skills follow a
    `<projectrepo>-<skill>` naming convention in this catalog (e.g. the
@@ -72,6 +74,8 @@ CATALOG_FILE = Path(__file__).resolve().parent / "sources.yml"
 SKILLS_DIR = REPO_ROOT / "skills"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 MARKER_FILENAME = ".federated.json"
+# Local-only subdirectories preserved across re-import when absent upstream.
+PRESERVE_IF_ABSENT_UPSTREAM = ("evals",)
 # The bundle references each published skill as `./skills/<name>` in the
 # marketplace plugin entry's `skills` array.
 SKILLS_PATH_PREFIX = "./skills/"
@@ -370,10 +374,24 @@ def find_federated_skills() -> dict[str, dict]:
     return found
 
 
-def copy_skill(src: Path, dest: Path) -> None:
-    if dest.exists():
-        shutil.rmtree(dest)
-    shutil.copytree(src, dest)
+def copy_skill(src: Path, dest: Path, log: list[str] | None = None) -> None:
+    with tempfile.TemporaryDirectory(prefix="amd-skills-preserve-") as tmpdir:
+        preserved: dict[str, Path] = {}
+        if dest.exists():
+            for subdir in PRESERVE_IF_ABSENT_UPSTREAM:
+                local_subdir = dest / subdir
+                if local_subdir.is_dir() and not (src / subdir).exists():
+                    preserved_path = Path(tmpdir) / subdir
+                    shutil.copytree(local_subdir, preserved_path)
+                    preserved[subdir] = preserved_path
+            shutil.rmtree(dest)
+        shutil.copytree(src, dest)
+        for subdir, preserved_path in preserved.items():
+            shutil.copytree(preserved_path, dest / subdir)
+            if log is not None:
+                log.append(
+                    f"    preserved local {subdir}/ (absent in upstream import)"
+                )
 
 
 def write_marker(
@@ -556,7 +574,7 @@ def import_source(
                 f"[{source.name}] {action} {spec.folder} -> skills/{dest_name}{renamed}"
             )
             if not dry_run:
-                copy_skill(src_skill, dest_skill)
+                copy_skill(src_skill, dest_skill, log)
                 write_marker(dest_skill, source, commit, relative_path)
                 write_card(dest_skill, source, marketplace_description)
                 rewrite_skill_name(dest_skill, dest_name, log)

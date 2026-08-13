@@ -11,13 +11,18 @@ name: behavioral
 #     behavioral test, the `behavioral` gate FAILS until the tests pass. A PR
 #     that touches nothing testable passes neutrally.
 #   * dispatchable -- run any subset by hand from the Actions tab.
+#   * opt-in for Instinct -- the MI300X leg is scarce and expensive, so it only
+#     runs on PRs carrying the `enable_mi_ci` label (see behavioral-instinct).
 #
 # Shape mirrors validate.yml: discover -> matrix -> single aggregate gate, so
 # branch protection can require just the `behavioral` check.
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # `labeled` is here so adding `enable_mi_ci` to an open PR starts the
+    # MI300X leg. Re-running an existing run would not work: the replayed
+    # event payload is the one from before the label was applied.
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - "skills/**"
       - "eval/behavioral/**"
@@ -46,8 +51,14 @@ jobs:
     name: Select behavioral tests
     runs-on: ubuntu-latest
     outputs:
-      skills: ${{ steps.select.outputs.skills }}
-      any: ${{ steps.select.outputs.any }}
+      strix_skills: ${{ steps.select.outputs.strix_skills }}
+      strix_any: ${{ steps.select.outputs.strix_any }}
+      # Which Instinct skills the change touches, and whether it touches any
+      # of them at all...
+      instinct_skills: ${{ steps.select.outputs.instinct_skills }}
+      instinct: ${{ steps.select.outputs.instinct }}
+      # ...versus whether they should actually run, which also needs the label.
+      instinct_run: ${{ steps.select.outputs.instinct_run }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -74,19 +85,53 @@ jobs:
             skills=$(git diff --name-only "$base" "$head" \
               | uv run .github/scripts/select_behavioral.py --changed)
           fi
+
           echo "Selected skills: $skills"
-          echo "skills=$skills" >> "$GITHUB_OUTPUT"
-          if [ "$skills" = "[]" ]; then
-            echo "any=false" >> "$GITHUB_OUTPUT"
+
+          # These skills exercise AMD Instinct GPUs, so they must run on the
+          # MI300X runner rather than the strix_halo ones. Split them out into
+          # their own list/flag; everything else stays on the existing
+          # strix_halo matrix. Space-separated, one name per skill.
+          instinct_names="serving-llms-on-instinct hyperloom-workload-optimizer"
+          strix=$(printf '%s' "$skills" | INSTINCT="$instinct_names" python3 -c \
+            "import sys,os,json;mi=os.environ['INSTINCT'].split();print(json.dumps([s for s in json.load(sys.stdin) if s not in mi]))")
+          instinct_skills=$(printf '%s' "$skills" | INSTINCT="$instinct_names" python3 -c \
+            "import sys,os,json;mi=os.environ['INSTINCT'].split();sel=json.load(sys.stdin);print(json.dumps([s for s in mi if s in sel]))")
+          if [ "$instinct_skills" = "[]" ]; then
+            has_instinct=false
           else
-            echo "any=true" >> "$GITHUB_OUTPUT"
+            has_instinct=true
+          fi
+
+          # The MI300X runner is a scarce shared resource, so touching one of
+          # those skills is necessary but not sufficient: a maintainer has to
+          # opt the PR in with the `enable_mi_ci` label. A manual dispatch is
+          # already explicit human intent, so it does not need the label.
+          mi_label="${{ contains(github.event.pull_request.labels.*.name, 'enable_mi_ci') }}"
+          instinct_run=false
+          if [ "$has_instinct" = "true" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$mi_label" = "true" ]; then
+              instinct_run=true
+            fi
+          fi
+
+          echo "strix_skills=$strix"
+          echo "instinct_skills=$instinct_skills (enable_mi_ci label: $mi_label -> run: $instinct_run)"
+          echo "strix_skills=$strix" >> "$GITHUB_OUTPUT"
+          echo "instinct_skills=$instinct_skills" >> "$GITHUB_OUTPUT"
+          echo "instinct=$has_instinct" >> "$GITHUB_OUTPUT"
+          echo "instinct_run=$instinct_run" >> "$GITHUB_OUTPUT"
+          if [ "$strix" = "[]" ]; then
+            echo "strix_any=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "strix_any=true" >> "$GITHUB_OUTPUT"
           fi
 
   behavioral:
     name: Behavioral (${{ matrix.skill }} on ${{ matrix.os }})
     needs: discover
-    # Run whenever the change affects something testable.
-    if: needs.discover.outputs.any == 'true'
+    # Run whenever the change affects a strix_halo-testable skill.
+    if: needs.discover.outputs.strix_any == 'true'
     # Self-hosted Strix Halo runners. The OS label (Linux / Windows) comes from
     # the matrix below so each skill is exercised on both platforms.
     runs-on: [self-hosted, strix_halo, "${{ matrix.os }}"]
@@ -97,7 +142,7 @@ jobs:
       # One skill / OS failing should not hide the others' results.
       fail-fast: false
       matrix:
-        skill: ${{ fromJson(needs.discover.outputs.skills) }}
+        skill: ${{ fromJson(needs.discover.outputs.strix_skills) }}
         os: [Linux, Windows]
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
@@ -150,26 +195,105 @@ jobs:
           Write-Host "Running $test_file"
           python -m pytest -c pytest.ini -p conftest $test_file
 
+  # These skills drive real work on an AMD Instinct GPU, so they can't run on
+  # the strix_halo runners above. They get their own job on the self-hosted
+  # MI300X runner. Linux-only (ROCm + Docker); no Windows leg.
+  #
+  # Opt-in: `instinct_run` is true only when the change touches one of the
+  # skills AND the PR carries the `enable_mi_ci` label (or the run was
+  # dispatched by hand).
+  behavioral-instinct:
+    name: Behavioral (${{ matrix.skill }} on MI300X)
+    needs: discover
+    if: needs.discover.outputs.instinct_run == 'true'
+    runs-on: [self-hosted, Linux, X64, mi300x, gpu, rocm]
+    timeout-minutes: 45
+    # Scopes the Anthropic key to this job alone: only jobs that name this
+    # environment can read its secrets, unlike a repo-level secret.
+    environment: behavioral-instinct
+    strategy:
+      # One skill failing should not hide the others' results.
+      fail-fast: false
+      matrix:
+        skill: ${{ fromJson(needs.discover.outputs.instinct_skills) }}
+    env:
+      # The MI300X runner lives outside the AMD network, so it can't reach the
+      # internal gateway the strix_halo jobs use. It calls api.anthropic.com
+      # directly with its own budgeted key, hence no BASE_URL / CUSTOM_HEADERS.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      BEHAVIORAL_SKILL: ${{ matrix.skill }}
+      # Model pin: opus only. The harness also enforces this under CI.
+      BEHAVIORAL_MODEL: opus
+    steps:
+      - name: Verify the Anthropic key is available
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "ANTHROPIC_API_KEY resolved to an empty value. GitHub withholds" >&2
+            echo "secrets from pull requests opened from forks; re-run this from" >&2
+            echo "a branch in amd/skills, or check that the secret is set on the" >&2
+            echo "behavioral-instinct environment." >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install the claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install behavioral test dependencies
+        run: pip install -r eval/behavioral/requirements.txt
+
+      - name: Run behavioral test for ${{ matrix.skill }}
+        working-directory: eval/behavioral
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_file="../../skills/${{ matrix.skill }}/evals/evals.py"
+          echo "Running $test_file"
+          python -m pytest -c pytest.ini -p conftest "$test_file"
+
   # Single aggregate gate. Mark THIS check required in branch protection.
   #
   #   * nothing testable changed -> pass (neutral).
   #   * testable change          -> pass iff the behavioral job passed.
+  #
+  # The Instinct leg is only gated on when it was actually requested, so a PR
+  # that touches one of those skills without the `enable_mi_ci` label is not
+  # blocked by a test it deliberately skipped.
   behavioral-gate:
     name: behavioral
-    needs: [discover, behavioral]
+    needs: [discover, behavioral, behavioral-instinct]
     if: always()
     runs-on: ubuntu-latest
     env:
       DISCOVER_RESULT: ${{ needs.discover.result }}
       BEHAVIORAL_RESULT: ${{ needs.behavioral.result }}
-      AFFECTED: ${{ needs.discover.outputs.any }}
-      SKILLS: ${{ needs.discover.outputs.skills }}
+      INSTINCT_RESULT: ${{ needs.behavioral-instinct.result }}
+      STRIX_ANY: ${{ needs.discover.outputs.strix_any }}
+      INSTINCT_AFFECTED: ${{ needs.discover.outputs.instinct }}
+      INSTINCT_REQUESTED: ${{ needs.discover.outputs.instinct_run }}
+      STRIX_SKILLS: ${{ needs.discover.outputs.strix_skills }}
+      INSTINCT_SKILLS: ${{ needs.discover.outputs.instinct_skills }}
     steps:
       - name: Verify behavioral results
         run: |
-          echo "discover:    $DISCOVER_RESULT"
-          echo "behavioral:  $BEHAVIORAL_RESULT"
-          echo "affected:    $AFFECTED ($SKILLS)"
+          echo "discover:            $DISCOVER_RESULT"
+          echo "behavioral (strix):  $BEHAVIORAL_RESULT"
+          echo "behavioral-instinct: $INSTINCT_RESULT"
+          echo "strix affected:      $STRIX_ANY ($STRIX_SKILLS)"
+          echo "instinct affected:   $INSTINCT_AFFECTED ($INSTINCT_SKILLS)"
+          echo "instinct requested:  $INSTINCT_REQUESTED"
 
           # If discovery itself failed, surface that rather than guessing.
           if [ "$DISCOVER_RESULT" != "success" ]; then
@@ -177,16 +301,32 @@ jobs:
             exit 1
           fi
 
+          # Touching an Instinct skill without opting in is allowed, but say so
+          # loudly: the change went out without ever running on real hardware.
+          if [ "$INSTINCT_AFFECTED" = "true" ] && [ "$INSTINCT_REQUESTED" != "true" ]; then
+            echo "::warning::This PR changes $INSTINCT_SKILLS but has no" \
+                 "'enable_mi_ci' label, so the MI300X behavioral tests did not run."
+          fi
+
           # No skill or behavioral test changed: nothing to gate on.
-          if [ "$AFFECTED" != "true" ]; then
+          if [ "$STRIX_ANY" != "true" ] && [ "$INSTINCT_REQUESTED" != "true" ]; then
             echo "No behavioral tests affected by this change."
             exit 0
           fi
 
-          # Something testable changed: the gate reflects the test result.
-          if [ "$BEHAVIORAL_RESULT" = "success" ]; then
-            echo "All affected behavioral tests passed."
-            exit 0
+          # Each affected leg must have passed. A leg that wasn't triggered is
+          # 'skipped', which we ignore.
+          failed=0
+          if [ "$STRIX_ANY" = "true" ] && [ "$BEHAVIORAL_RESULT" != "success" ]; then
+            echo "Strix behavioral tests did not pass ($BEHAVIORAL_RESULT)." >&2
+            failed=1
           fi
-          echo "One or more behavioral tests failed ($BEHAVIORAL_RESULT)." >&2
-          exit 1
+          if [ "$INSTINCT_REQUESTED" = "true" ] && [ "$INSTINCT_RESULT" != "success" ]; then
+            echo "Instinct behavioral test did not pass ($INSTINCT_RESULT)." >&2
+            failed=1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "All affected behavioral tests passed."
+          exit 0

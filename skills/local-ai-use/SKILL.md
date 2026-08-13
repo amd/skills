@@ -1,16 +1,19 @@
 ---
 name: local-ai-use
 description: >-
-  Routes image generation, text-to-speech, and speech-to-text through a local
-  Lemonade Server so the agent stops paying for cloud calls on those modalities.
-  Use when the user wants to save tokens, save cost, or save money using local
-  AI; default to local, offline, on-device, or private image generation,
-  transcription, or text-to-speech in this workspace; stop using DALL-E,
-  Whisper-as-a-service, ElevenLabs, or other paid multimodal APIs; route the
-  agent's image, TTS, or STT tool calls to a local model; or mentions Lemonade
-  Server, OmniRouter, SD-Turbo, kokoro, Whisper, Ryzen AI, NPU/iGPU/dGPU
-  inference, or "use local for images but cloud for chat". Run once per
-  workspace; the rule it installs handles every later request.
+  Makes this agent generate images, transcribe audio, and synthesize speech on
+  the user's own machine through a local Lemonade Server instead of a paid cloud
+  API. Use it above all to change that routing persistently, from now on — keep
+  generating pictures locally while chat stays on the cloud; set this workspace
+  up to make images on my own machine — even when the user asks for no image or
+  file in the same breath. Also use it for a single request the user wants done
+  locally, offline, on-device, or kept private: transcribe this recording, make
+  this picture, read this text aloud. Applies in Claude, Cursor, Codex, or any
+  agent harness. Use when the user wants to cut cost or tokens on image, audio,
+  or voice API calls, or to drop DALL-E, hosted Whisper, ElevenLabs, or other
+  paid multimodal APIs; or mentions Lemonade Server, OmniRouter, SD-Turbo,
+  kokoro, Ryzen AI, or NPU/iGPU/dGPU inference. Changes no application source
+  code; do not use it if the user is adding local AI to an app they ship.
 ---
 
 # Local AI Use (route image, TTS, STT through Lemonade)
@@ -250,6 +253,7 @@ machine.
 | `status` gives an "invalid choice" / usage error | An old, incompatible `lemonade` (pre-v10.1.0, from any install channel) is shadowing the modern CLI | Uninstall it the way it was installed (see the Step 1a table: `winget uninstall -e --id AMD.LemonadeServer` / `sudo apt remove lemonade-server` / `pip uninstall lemonade-sdk`), then re-run the setup script or install Lemonade from the docs link. |
 | `Server is not running` | `lemond` service stopped | Start it via the OS service manager — `sudo systemctl start lemond` / `systemctl --user start lemond` (Linux), `launchctl load /Library/LaunchDaemons/com.lemonade.server.plist` (macOS), or the tray app / `Start-Service lemond` (Windows). There is no `lemonade serve`. |
 | `POST /v1/images/generations` returns 404 model not found | Image model not downloaded | `lemonade pull SD-Turbo` and retry. |
+| `lemonade pull` keeps printing `Progress: NN%` but never finishes | Download target is a bad path (out of space, no write permission, quota, read-only mount). The write error may surface only in the server log while the console keeps showing progress | Check the target and free space first: `GET /api/v1/system-info` reports `models_dir` and `model_storage.free_bytes`. If a pull stalls, read the recent lines of the server log (typically `lemonade-server.log` in the OS temp dir) for the real error (e.g. a download/write failure like `CURL code 23`, or an out-of-space message), then point the download at a writable disk with room. |
 | Image generation is slow on CPU (~4–5 min) | sd-cpp on CPU backend | Install the GPU backend on supported AMD hardware: `lemonade backends install sd-cpp:rocm`. |
 | `POST /v1/audio/transcriptions` returns 400 unsupported format | Input is not 16 kHz mono WAV | Re-encode with `ffmpeg -i in.* -ar 16000 -ac 1 out.wav`. |
 | `POST /v1/audio/speech` returns 404 | TTS model not downloaded | `lemonade pull kokoro-v1`. |
