@@ -10,7 +10,7 @@ under `reports/` showing validated throughput gain over baseline.
 
 Expect a full optimization run to take hours depending on `--max-hours` and model
 size. This walkthrough covers workspace bootstrap; a short smoke run is possible
-with a small model and `--max-hours 0.5 --no-kernel`.
+with a small model and `--max-hours 3 --no-kernel`.
 
 ## Prerequisites
 
@@ -85,7 +85,7 @@ Provide a local model path and workload when the agent asks, for example:
 
 ```text
 Optimize /path/to/Qwen3-8B with vLLM on MI300X: TP=1, conc=64, ISL=1024, OSL=1024,
-max-hours 0.5, no kernel agent. Launch and monitor.
+max-hours 3, no kernel agent. Launch and monitor.
 ```
 
 Once workload values are resolved, the agent should run `install.sh` (IR-2),
