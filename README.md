@@ -119,7 +119,7 @@ Documentation describes an API surface: every flag, every option, neutral by des
 Skills earn their keep on repeated, opinionated workflows, exactly where the AMD stack lives.
 
 
-## A federated catalog
+## Catalog Federation
 
 The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integrations each have their own team, release cadence, and validation matrix. So skills here are **federated**: each skill is owned and versioned by the team that owns the product it describes, and this repository is the catalog that brings them together.
 
@@ -142,31 +142,6 @@ The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integr
    gfx-target-...  triton-amd-...  ...               integration/    repos
 ```
 
-Federation is the only route into the catalog for new skills: we no longer
-accept skills authored directly in this repository. The skills already under
-`skills/` that predate the policy continue to ship, and are expected to move to
-a product repo over time.
-
-```
-skills/                  # All skills the agent can load
-docs/                    # Contributor guides (requirements, best practices, evals)
-.claude-plugin/          # Claude Code marketplace manifest
-.cursor-plugin/          # Cursor marketplace manifest (generated)
-.codex-plugin/           # Codex plugin manifest (generated)
-.agents/plugins/         # Codex repo marketplace catalog (generated)
-plugin-metadata.json     # Vendor-neutral identity/discovery metadata
-.github/workflows/       # CI for validating skills
-.github/scripts/         # Internal repo scripts
-.github/scripts/sources.yml  # External skill sources for federation
-```
-
-Federated skills are declared in
-[`.github/scripts/sources.yml`](.github/scripts/sources.yml) and vendored into
-`skills/` by the manually-dispatched `import-external-skills` workflow, which
-opens a pull request with the imported copies. Each vendored skill carries a
-`.federated.json` marker recording the upstream repo and pinned commit, so the
-importer can refresh or remove it without disturbing anything else.
-
 ## Manual Installation
 
 Until marketplace integration lands, install skills manually: clone this repo, then copy (or symlink) the skill folders you want from `skills/` into your agent's skills directory. Each agent discovers `SKILL.md` automatically.
@@ -182,13 +157,9 @@ cp -r amd-skills/skills/local-ai-use <agent-skills-dir>/
 | Claude Code | `~/.claude/skills/` / `.claude/skills/` |
 | Codex | `$HOME/.agents/skills` / `$REPO_ROOT/.agents/skills` |
 
-## Contributing a skill
+## Contributing
 
-We welcome contributions from AMD engineers and selected partners. Skills are
-authored in an AMD-owned product repository and registered here through
-[`.github/scripts/sources.yml`](.github/scripts/sources.yml) with a pinned ref,
-so each skill ships and versions with its product. We only accept federated
-submissions; skills authored directly under `skills/` are not accepted.
+We welcome contributions from AMD engineers and selected partners.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the step-by-step instructions, then
 [docs/skill-requirements.md](docs/skill-requirements.md) for the rules CI enforces,
