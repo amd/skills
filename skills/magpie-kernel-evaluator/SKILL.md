@@ -1,137 +1,147 @@
 ---
 name: magpie-kernel-evaluator
-description: Performs GPU kernel correctness and performance evaluation and LLM inference benchmarking with Magpie. Analyzes single or multiple kernels (HIP/CUDA/PyTorch), compares kernel implementations, runs vLLM/SGLang benchmarks with profiling and TraceLens, and runs gap analysis on torch traces. Creates kernel config YAMLs, discovers kernels in a project, and queries GPU specs. Use when the user mentions Magpie, kernel analyze or compare, HIP/CUDA kernel evaluation, vLLM/SGLang benchmark, gap analysis, TraceLens, creating kernel configs, or discovering GPU kernels.
+description: Benchmarks LLM inference and drives GPU kernel optimization with Magpie. Use when the user wants to benchmark vLLM, SGLang, or Atom; capture torch traces; post-process inference traces with TraceLens into prefill/decode and roofline reports; identify top bottleneck kernels or map profiler names to source; analyze or compare HIP, CUDA, PyTorch, or Triton kernels; validate and rank optimized variants; run local, container, or Ray workloads; or mentions Magpie, TraceLens, gap analysis, TTFT, TPOT, kernel evaluation, or AMD GPU optimization.
 ---
 
 # Magpie
 
-Magpie is a GPU kernel evaluation and LLM benchmarking framework. Use this skill when performing analyze, compare, benchmark, gap-analysis, or when creating kernel configs or discovering kernels without MCP.
+Use Magpie for three connected jobs:
 
-**When describing Magpie's capabilities:** Describe only what is in this skill. Do not add project-specific, pipeline-specific, or other product/org names (e.g. do not mention any parent repo name).
+1. Benchmark an inference workload and collect throughput, latency, and traces.
+2. Analyze or compare GPU kernels for correctness and performance.
+3. Drive an optimization loop from a benchmark bottleneck to source, candidate kernels, and end-to-end validation.
 
-## Entry point
+Describe only capabilities supported by the checked-out Magpie version. Do not infer support for an unverified ROCm, GPU, framework, or experimental integration.
 
-- **CLI:** `magpie` or `python -m Magpie`. Run from the Magpie repo root (or with `PYTHONPATH` including the Magpie package).
-- **Setup:** From repo root, `pip install -e .` (or `make install`).
+## Choose the workflow
 
-## Analyze (single or multi-kernel)
+| User goal | Workflow |
+|---|---|
+| Evaluate one implementation | `analyze` |
+| Rank two or more implementations | `compare` |
+| Measure model-serving performance | `benchmark` |
+| Find expensive kernels in existing traces | standalone gap analysis |
+| Explain a profiled inference workload | benchmark → TraceLens post-processing → stage/roofline review |
+| Optimize an end-to-end workload | benchmark → TraceLens/gap analysis → source mapping → analyze/compare → re-benchmark |
 
-Analyze kernel(s) for correctness and performance.
+Use a YAML config for reproducible or multi-step work. Use inline CLI arguments for small exploratory runs.
 
-**With kernel config (recommended):**
+## Preflight
+
+1. Locate the Magpie repository or installed package.
+2. Check the local interface before constructing commands:
+
+   ```bash
+   magpie --help
+   magpie analyze --help
+   magpie compare --help
+   magpie benchmark --help
+   magpie --gpu-info
+   ```
+
+3. Check required tools, model access, GPU visibility, writable output space, and container or Ray access as applicable.
+4. Read the repository compatibility matrix before making version claims. Treat ROCm or hardware not listed there as unverified until tested.
+5. Record the exact config, model revision, image, environment variables, GPU allocation, and Magpie commit for benchmark comparisons.
+
+Run from the Magpie repository root, install with `pip install -e .`, or use `python -m Magpie` when the `magpie` entry point is unavailable.
+
+## Analyze a kernel
+
+Prefer a config when correctness or profiler settings matter:
 
 ```bash
 magpie analyze --kernel-config path/to/kernel.yaml
 ```
 
-**Inline (single kernel):**
+For a quick single-kernel run:
 
 ```bash
-magpie analyze path/to/kernel.hip --testcase "./run_test.sh"
+magpie analyze path/to/kernel.hip --type hip --testcase "./run_test.sh"
 ```
 
-- `-k`, `--kernel-config`: YAML with `kernel` or `kernels` (see template below).
-- `-t`, `--testcase`: Command to run the test (required if not in config).
-- `--type`: `hip` | `cuda` | `pytorch` (default: hip).
-- `--compile-cmd`: Custom compile command.
-- `--no-perf`: Skip performance profiling.
-- `-o`, `--output-dir`: Output directory (default: `./results`).
+Supported public kernel types are `hip`, `cuda`, `pytorch`, and `triton`. Use `--no-perf` only when the user wants correctness or execution validation without profiling.
 
-**Config template (single kernel):** Use `kernel:` with `id`, `type`, `source_files`, `working_dir`, `testcase_command`, optional `compile_command`, `env`. See [Magpie/kernel_config.yaml.example](https://github.com/AMD-AGI/Magpie/blob/70023bada7762105157450554256b946ec869c73/Magpie/kernel_config.yaml.example) and [examples/ck_gemm_add.yaml](https://github.com/AMD-AGI/Magpie/blob/70023bada7762105157450554256b946ec869c73/examples/ck_gemm_add.yaml).
+Do not equate successful execution with numerical correctness. Supply a representative testcase whenever an optimized result will be accepted or rejected.
 
-## Compare (multiple kernels)
+## Compare kernel variants
 
-Compare and rank multiple kernel implementations.
-
-**With config:**
+Compare at least two implementations and identify the baseline explicitly:
 
 ```bash
 magpie compare --kernel-config path/to/compare.yaml
 ```
 
-**Inline:**
+Keep inputs, tolerances, warmup, iteration count, GPU allocation, and profiler settings identical across candidates. Reject candidates that fail correctness before considering performance rankings.
+
+For PyTorch without a testcase, Magpie's built-in check only verifies that each result is finite; it does not prove numerical equivalence between variants. Require a testcase for numerical validation.
+
+## Benchmark inference
+
+Prefer a checked-in benchmark config:
 
 ```bash
-magpie compare kernel1.hip kernel2.hip --testcase "./run_test.sh"
+magpie benchmark --benchmark-config path/to/benchmark.yaml
 ```
 
-- `-k`, `--kernel-config`: YAML with `kernels:` list.
-- `--baseline`: Index of baseline kernel (default: 0).
-- `--no-perf`, `-o`: Same as analyze.
+The stable public CLI supports `vllm`, `sglang`, and `atom`. It supports direct `docker` and `local` run modes; use YAML configuration and the repository's Ray examples for distributed execution. Do not advertise integrations that exist only in internal enums or partial code paths as stable.
 
-Example: [examples/ck_grouped_gemm_compare.yaml](https://github.com/AMD-AGI/Magpie/blob/70023bada7762105157450554256b946ec869c73/examples/ck_grouped_gemm_compare.yaml).
+Enable profiling deliberately: profiler runs perturb latency and should not replace a clean baseline. Compare throughput, completed requests, TTFT, TPOT, ITL, and end-to-end latency using equivalent workloads.
 
-## Benchmark (vLLM / SGLang)
+## Post-process traces with TraceLens
 
-Run framework-level LLM inference benchmarks with optional profiling and gap analysis.
+Enable TraceLens in the profiled benchmark YAML; torch traces are its required input:
 
-**With config (recommended):**
+```yaml
+benchmark:
+  profiler:
+    torch_profiler:
+      enabled: true
+    tracelens:
+      enabled: true
+      analysis_mode: inference
+      analysis_stages: all
+      export_format: csv
+```
+
+Use `analysis_mode: inference` for vLLM/SGLang. It splits the rank-0 trace into `prefilldecode`, `decode`, and `prefill` stages when available, runs TraceLens post-processing, and writes full stage reports plus compact `*_kernel_roofline_simple.csv` files under the benchmark workspace's `tracelens/` directory. For direct PyTorch trace reporting, use `analysis_mode: pytorch`.
+
+Open the compact roofline CSVs first. Rank rows by `kernel_time_ms_sum` or `time_pct`; then use `roofline_bound`, arithmetic intensity, achieved TFLOP/s or TB/s, and `pct_roofline_mean` to form an optimization hypothesis. Confirm `benchmark_report.json.tracelens_analysis` has outputs and no error before treating post-processing as successful. Use `analysis_mode: pytorch` when the task specifically needs the legacy direct single-rank or multi-rank collective reports.
+
+Magpie's integrated TraceLens stage produces CSV/Excel analysis artifacts, not an agent-written `analysis.md`. If the user requests a prioritized agentic report, pass the captured trace to the separate `tracelens-analysis-orchestrator` skill when installed; keep that result distinct from Magpie's benchmark report.
+
+## Analyze existing traces and find source
+
+Run standalone gap analysis with `--trace-dir` directly on `benchmark`:
 
 ```bash
-magpie benchmark --benchmark-config examples/benchmarks/benchmark_vllm_dsr1.yaml
+magpie benchmark \
+  --trace-dir path/to/torch_trace \
+  --top-k 20 \
+  --find-kernel-sources \
+  --kernel-source-repos path/to/repository
 ```
 
-**CLI overrides:** `magpie benchmark [vllm|sglang] -m <model> --benchmark-config <yaml>` with optional:
+Do not insert a `gap-analysis` positional token; it is not a CLI subcommand. Inspect the generated aggregate and per-rank CSVs, and preserve source-mapping confidence rather than assuming every normalized kernel name maps uniquely.
 
-- `-m`, `--model`: Model name or path.
-- `-p`, `--precision`: fp8 | fp16 | bf16 | fp4 (default: fp8).
-- `--tp`: Tensor parallel size (default: 1).
-- `--concurrency`, `--input-len`, `--output-len`: Request and sequence settings.
-- `--torch-profiler`, `--system-profiler`: Enable profilers.
-- `--run-mode`: `docker` (default) or `local`.
-- `--docker-image`, `--timeout`, `-o`: Override image, timeout (seconds), output dir.
+## Drive the optimization loop
 
-Example configs: [examples/benchmarks/benchmark_vllm_dsr1.yaml](https://github.com/AMD-AGI/Magpie/blob/70023bada7762105157450554256b946ec869c73/examples/benchmarks/benchmark_vllm_dsr1.yaml), [docs/how-to/benchmark.md](https://github.com/AMD-AGI/Magpie/blob/70023bada7762105157450554256b946ec869c73/docs/how-to/benchmark.md).
+1. Run an unprofiled baseline benchmark and save its config and report.
+2. Repeat with torch profiling and TraceLens inference post-processing enabled.
+3. Review stage-level TraceLens roofline summaries to classify dominant operations and likely compute, memory, or communication limits.
+4. Run gap analysis over the representative steady-state window to rank concrete kernels.
+5. Select bottlenecks by total contribution, not only single-dispatch duration.
+6. Map the selected kernel to source and an executable testcase.
+7. Generate isolated candidate implementations; preserve the baseline.
+8. Use `analyze` for iteration, then `compare` with correctness gates to rank candidates.
+9. Re-run the original unprofiled benchmark with the winning candidate and the same workload. Report both kernel-level and end-to-end changes, including regressions.
 
-## Gap analysis (standalone)
+Stop before claiming success if correctness is unproven, the benchmark inputs changed, the source mapping is uncertain, or the end-to-end improvement is within run-to-run noise.
 
-Run gap analysis on existing torch trace directories.
+## Use MCP tools when available
 
-```bash
-magpie benchmark gap-analysis --trace-dir path/to/torch_trace
-```
+Prefer Magpie MCP tools for structured agent workflows such as hardware inspection, kernel discovery, config generation, analyze/compare, optimization suggestions, result lookup, report comparison, Ray job management, and benchmark batches.
 
-- `--trace-dir`: Path to `torch_trace` dir or benchmark workspace (required).
-- `--start-pct`, `--end-pct`: Analysis window 0–100 (default: 0, 100).
-- `--top-k`: Top bottleneck kernels (default: 20).
-- `--min-duration-us`: Minimum event duration (µs).
-- `--categories`, `--ignore-categories`: Include/exclude event categories.
-
-## GPU info
-
-```bash
-magpie --gpu-info
-```
-
-Shows vendor, architecture, compiler, profiler. No mode required.
-
-## Create kernel config (no CLI)
-
-When the user needs a kernel config file:
-
-1. Emit YAML matching the structure in [Magpie/kernel_config.yaml.example](https://github.com/AMD-AGI/Magpie/blob/70023bada7762105157450554256b946ec869c73/Magpie/kernel_config.yaml.example): `kernel:` with `id`, `type` (hip|cuda|pytorch), `source_files`, `working_dir`, `testcase_command`, and optionally `compile_command`, `env`.
-2. Write the file to the user's requested path (e.g. `kernel_config.yaml`).
-3. Run: `magpie analyze --kernel-config <that_file>`.
-
-For **compare**, use `kernels:` as a list of kernel entries (each with `id`, `type`, `source_files`, etc.).
-
-## Discover kernels (no CLI)
-
-1. Scan the project for `.hip`, `.cu`, or PyTorch kernel files.
-2. For each candidate, build a kernel config entry (id, type, source_files, working_dir, testcase_command if inferrable; otherwise prompt user).
-3. Optionally write a combined config and run `magpie analyze -k <file>` or `magpie compare -k <file>`.
-
-## Suggest optimizations (no CLI)
-
-1. Read analyze or compare JSON output (from `-o` results or last run).
-2. Use `performance_state`, `performance_result.summary`, and per-kernel stats (dispatch count, duration, utilization).
-3. Suggest improvements (e.g. memory bandwidth, occupancy, kernel fusion) based on the metrics.
-
-## List / get benchmark results (no CLI)
-
-- **List:** Results live under the benchmark `--output-dir` (default: `./results`); each run has a timestamped workspace (e.g. `results/benchmark_vllm_<timestamp>/`).
-- **Get result:** Open `benchmark_report.json` or `inferencex_result.json` in that workspace.
-- **Compare runs:** Diff two workspace reports or run two benchmarks and compare; for TraceLens comparison use TraceLens tooling if available.
+Do not pass a CLI `analyze_report.json` wrapper directly to an MCP tool that expects one result object's `performance_state` and `performance_result`. Do not assume every CLI option exists in MCP; kernel-source enrichment is currently exposed by the CLI gap-analysis path.
 
 ## Additional resources
 
