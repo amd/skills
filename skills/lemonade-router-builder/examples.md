@@ -7,6 +7,19 @@ should produce. Note what was defaulted: names, ids, thresholds, `on_error`,
 is derived from the default candidate rather than a fixed literal, so the
 examples below each get a distinct name.
 
+**These are shape references, not runnable policies.** Each names models a
+given host may not have. They all pass `scripts/validate.py`, which
+deliberately cannot check model existence - that needs a live server. Register
+one against a host missing a referenced model and the server rejects it:
+
+```
+400 Collection component not registered: '<model>'.
+    Pull or register it before referencing it in a collection.
+```
+
+That is correct, documented behaviour. Substitute models the target host
+actually has (`GET /api/v1/models`) before registering.
+
 
 ## 1. Pure intent, no concrete signals → LLM-as-router
 

@@ -237,6 +237,13 @@ The `x-lemonade-route` response header carries the matched rule id (or
 `x_lemonade_route`: `{ route_to, matched_rule, default_used, outputs,
 trace[] }` - useful for verifying each rule fires as expected.
 
+**Read `default_used`, not the rationale.** A fallback returns HTTP 200 with no
+error, so the silent failure Step 4 warns about is invisible unless you check
+the trace. `"default_used": true` with `"matched_rule": ""` is the signature.
+In Mode A an empty `rationale` on its own is *not* a fallback signal - a
+successful route to a non-first candidate commonly returns one. See
+[reference.md](reference.md#reading-a-mode-a-trace).
+
 ## Defaults summary
 
 | Field | Default when the user doesn't say |
