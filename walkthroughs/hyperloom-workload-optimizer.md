@@ -2,7 +2,7 @@
 
 This skill teaches your AI agent to set up a Hyperloom workspace and autonomously
 optimize end-to-end LLM inference throughput on AMD Instinct GPUs (MI300X /
-MI325X / MI350X / MI355X).
+MI308X / MI325X / MI355X).
 
 **What you'll end up with:** a running Hyperloom optimization session with
 `manifest.json`, `state.json`, benchmark runs under `runs/`, and a final report
