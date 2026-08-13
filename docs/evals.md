@@ -14,114 +14,81 @@ A skill reaches the catalog after passing three review stages: an eligibility an
 
 The rest of this document is the dataset that structural screening and agentic testing read. You write one file, `evals/evals.json`, inside your skill folder. It ships with the skill from your repo and is vendored into the catalog along with everything else. Copy [`eval/TEMPLATE.json`](../eval/TEMPLATE.json) to start.
 
-## The file
+## What skill owners write
 
-One `evaluations` array. Each entry is a prompt plus `skill_should_trigger`:
-yes if your skill should wake up for it, no if nothing should.
+One file, `skills/<your-skill>/evals/evals.json`, holding an `evaluations` array:
 
 ```json
 {
   "evaluations": [
     {
-      "id": "epyc-vllm-zentorch",
+      "id": "images-cost",
       "skill_should_trigger": true,
-      "prompt": "Serve Llama 3.1 8B on this box with vLLM and zentorch."
+      "prompt": "I'm burning too much money on image generation APIs. Generate images on my own machine instead."
     },
     {
-      "id": "vllm-on-non-amd",
+      "id": "generate-cat-image",
+      "skill_should_trigger": true,
+      "prompt": "Learn how to generate images locally, then save an image of a cat to out.png.",
+      "expected_behavior": ["Install Lemonade Server if it is not already installed"],
+      "unexpected_behavior": ["Reach for a cloud image path instead of local Lemonade"],
+      "files_exist": ["AGENTS.md", "out.png"]
+    },
+    {
+      "id": "finetune-on-laptop",
       "skill_should_trigger": false,
-      "prompt": "Serve Llama 3.1 70B with vLLM on my non-AMD cluster."
+      "note": "Local, on-device, and model-shaped, but training is nobody's job here.",
+      "prompt": "Fine-tune a small language model on my own dataset using my laptop GPU."
     }
   ]
 }
 ```
 
-No evaluation names a skill: the folder says which skill this is, and
-`skill_should_trigger` refers to it. The flag is required rather than defaulted,
-so the routing expectation is always written down.
+Every evaluation is a prompt plus `skill_should_trigger`: `true` if your skill should fire for it, `false` if it shoudn't.
 
-A `false` evaluation is exactly what you see above — an id, a prompt, and the
-flag, plus an optional `note`. No skill loads for it, so there is no behavior
-phase; writing `unexpected_behavior` there is an error, not a no-op. If a prompt
-should trigger *someone else's* skill, put it in that skill's dataset as `true`
-rather than in yours as `false`. Routing installs the bundle all at once, so it
-is the same assertion either way.
+**When a prompt is all you provide, the evaluation only checks whether the skill was triggered.** Understanding whether your skill is being correctly triggered (both in isolation as well as when other skills are present) is essential and cheap to check for.
 
-## Grading behavior
+**When you add expectations, the prompt also runs end to end** and what the agent did is grated (pass fail) based on the generated logs and workspace.
 
-Only a `true` evaluation can grade behavior. All four fields are optional, and
-any one of them promotes the case from routing-only to behavior-graded.
+### Requirements
+
+- At least **3** evaluations with `skill_should_trigger: true`
+- At least **2** evaluations with `skill_should_trigger: false`
+- At least **1** of the `true` evaluations carries `expected_behavior` or
+  `unexpected_behavior`, so something beyond triggering is graded
+
+### Evaluation criteria and optional fields
+
+Four optional fields, all arrays, all valid only on a `true` evaluation:
 
 | Field | Graded by | Use it for |
 | --- | --- | --- |
-| `logs_contain` | exact substring | a literal that must appear: a script name, a flag, a pinned image tag |
-| `files_exist` | the filesystem | an artifact the run must produce |
 | `expected_behavior` | an LLM judge | a step the agent must take, in plain language |
 | `unexpected_behavior` | an LLM judge | the mistake this skill exists to prevent |
+| `logs_contain` | substring match | a literal that must appear: a script name, a flag, a pinned image tag |
+| `files_exist` | the filesystem | an artifact the run must produce |
 
-Prefer the deterministic two: they are instant and free, where a judged
-expectation costs a second agent call.
-
-Two things you never write. **Do not assert your own skill's name** in
-`logs_contain` — routing grades that properly, and a substring match only proves
-the skill was staged. **Do not label a prompt** as positive, near-miss, or
-unrelated: that is derived from the flag and the file it lives in.
+The bottom two are instant and free where a judged expectation costs a second agent call, so reach for them when the thing you want is literal. Never assert your own skill's name in `logs_contain`; triggering is already graded properly.
 
 The full field reference is
 [`eval/schema/evals.schema.json`](../eval/schema/evals.schema.json), enforced by
 `python eval/run_evals.py --validate`.
 
-## How much is enough
+### Enabling more complex tests
 
-| Tier | Required when | What it costs you |
-| --- | --- | --- |
-| **0** | always | 3 evaluations with `skill_should_trigger: true`, 2 with `false`. CI rejects a skill without them. |
-| **1** | your skill can be exercised on a generic runner | one evaluation with an `expected_behavior` / `unexpected_behavior` / `logs_contain` / `files_exist` expectation |
-| **2** | your skill needs hardware or a live service | an `evals/machine.yml` naming the kind of machine |
+Two optional files sit beside the dataset when JSON is not enough.
 
-Tier 0 buys more than it looks like. Routing pools every published skill's cases
-into one run, so your five prompts become negative cases for every other skill,
-and theirs become negatives for yours — a routing matrix nobody had to
-coordinate.
-
-Spend your effort on the near misses. Positive prompts mostly pass; the prompts
-that find real problems sit just outside your scope — the wrong vendor's
-hardware, the adjacent skill's job, your vocabulary used to mean something else.
-
-Routing is measured against the set of skills a user actually installs, so a
-skill that is not yet in the bundle cannot win a prompt and its positives are
-not scored. Its dataset is still validated and its behavior cases still run.
-The importer adds your skill to the bundle when it lands, so this only affects
-local runs before the first import.
-
-## When JSON isn't enough
-
-Two optional files sit beside the dataset.
-
-**`evals/machine.yml`** declares where the behavior cases run. Skip it unless you
-need something other than the default runners on Linux and Windows. Both keys
-are optional:
+**`evals/machine.yml`** — needed only if the default Linux and Windows runners
+are wrong for your skill. Both keys are optional:
 
 ```yaml
 runner_type: instinct    # `default` (assumed) or `instinct`
 os: [Linux]              # defaults to every platform that runner type has
 ```
 
-Most skills that need this file need only `os: [Linux]`, to drop a Windows leg
-that would just exercise the failure path of Linux-only tooling.
+Name the kind of machine and the rest follows: `runner_type: instinct` implies the runner labels, the Linux-only constraint, the `enable_mi_ci` pull-request label that rations that scarce pool, and the scoped credentials. Most skills that need this file need only `os: [Linux]`, to drop a Windows leg that would just exercise the failure path of Linux-only tooling.
 
-Name the kind of machine, not its consequences. `runner_type: instinct` is the
-whole declaration: the runner labels, the Linux-only constraint, the
-`enable_mi_ci` pull-request label that rations that scarce pool, and the scoped
-credentials all follow from it. A missing gate label is a warning rather than a
-failure, so a PR is never blocked by a test it did not request. Adding a new
-class of hardware means one entry in `RUNNER_TYPES` in
-[`eval/datasets.py`](../eval/datasets.py), not teaching every skill the same
-set of labels.
-
-**`evals/hooks.py`** is the escape hatch for setup JSON cannot express — cloning
-a repo, tearing down a container, running an external scoring script. Every
-function is optional:
+**`evals/hooks.py`** — setup a dataset cannot express: cloning a repo, tearing down a container, running an external scoring script. Every function is optional:
 
 ```python
 def setup_session(cache_dir): ...     # once per run; returns {name: value} for {placeholders} in prompts
@@ -130,14 +97,9 @@ def teardown(workspace, case, ctx): ...
 def check(run, case, ctx): ...        # after each case; raise AssertionError to fail it
 ```
 
-Keep prompts and expectations in the dataset even when you use hooks, so what is
-being asserted stays readable without opening Python. See
-[`skills/tracelens-analysis-orchestrator/evals/hooks.py`](../skills/tracelens-analysis-orchestrator/evals/hooks.py)
-for the involved case and
-[`skills/serving-llms-on-instinct/evals/hooks.py`](../skills/serving-llms-on-instinct/evals/hooks.py)
-for the simple one.
+Keep prompts and expectations in the dataset even when you use hooks, so what is being asserted stays readable without opening Python. See [`skills/serving-llms-on-instinct/evals/hooks.py`](../skills/serving-llms-on-instinct/evals/hooks.py) for a simple example and [`skills/tracelens-analysis-orchestrator/evals/hooks.py`](../skills/tracelens-analysis-orchestrator/evals/hooks.py) for an involved one.
 
-## Running them
+### Running tests locally
 
 ```bash
 python eval/run_evals.py --validate              # structure only: no agent, no tokens, instant
@@ -146,9 +108,6 @@ python eval/run_evals.py --mode routing          # the published bundle
 python eval/run_evals.py --only <case-id> --keep-logs logs   # one case, keeping the transcript
 ```
 
-Everything but `--validate` needs the `claude` CLI authenticated, plus whatever
-your own cases need. No `pip install`: the runner is standard library only.
+Everything but `--validate` needs the `claude` CLI authenticated, plus whatever your own cases need. No `pip install`: the runner is standard library only.
 
-In CI, the `evals` workflow runs routing when a change can move a routing
-decision (a published description, any dataset, or the bundle itself), and runs
-behavior for the skills a change touches.
+In CI, the `evals` workflow runs routing when a change can move a routing decision (a published description, any dataset, or the bundle itself), and runs behavior for the skills a change touches.
