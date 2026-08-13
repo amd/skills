@@ -1,12 +1,4 @@
 {
-  "comment": [
-    "The staged HIP fixtures come from Magpie's own examples/simple_hip_test. The",
-    "analyze config carries an explicit compile command so the fixture stands on",
-    "its own, and the compare candidate differs from the baseline only in block",
-    "size. Every behavior case asks for a plan or a config and forbids compiling,",
-    "running, or installing anything, so they hold on a runner with no GPU and no",
-    "Magpie checkout."
-  ],
   "evaluations": [
     {
       "id": "analyze-simple-hip-kernel",

@@ -9,12 +9,10 @@ permissions:
 
 jobs:
   label:
-    if: >-
-      contains(github.event.issue.labels.*.name, 'skill_proposal') ||
-      contains(github.event.issue.labels.*.name, 'skill-issue')
+    if: contains(github.event.issue.labels.*.name, 'skill-issue')
     runs-on: ubuntu-latest
     steps:
-      - name: Apply kind/path labels based on issue form answers
+      - name: Apply kind labels based on issue form answers
         uses: actions/github-script@v7
         with:
           script: |
@@ -67,18 +65,6 @@ jobs:
                   core.warning(`Could not add label ${labelToAdd}: ${err.message}. Make sure the label exists in the repo.`);
                 }
               }
-            }
-
-            if (templateLabels.includes("skill_proposal")) {
-              await applyGroup({
-                section: "Where should this skill live\\?",
-                groupLabels: ["incubated", "imported"],
-                pick: (answer) => {
-                  if (/^Path A\b/i.test(answer)) return "incubated";
-                  if (/^Path B\b/i.test(answer)) return "imported";
-                  return null;
-                },
-              });
             }
 
             if (templateLabels.includes("skill-issue")) {

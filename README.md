@@ -70,8 +70,8 @@ Run and optimize on Ryzen AI.
 
 | Skill | What it does | Source |
 | --- | --- | --- |
-| [`local-ai-use`](skills/local-ai-use/SKILL.md) | Route image generation, text-to-speech, and speech-to-text through a local AI server to reduce token cost. | in-repo |
-| [`local-ai-app-integration`](skills/local-ai-app-integration/SKILL.md) | Integrate local AI into cloud LLM apps for offline support, better privacy, and lower API costs. | in-repo |
+| [`local-ai-use`](skills/local-ai-use/SKILL.md) | Route image generation, text-to-speech, and speech-to-text through a local AI server to reduce token cost. | in-repo (legacy) |
+| [`local-ai-app-integration`](skills/local-ai-app-integration/SKILL.md) | Integrate local AI into cloud LLM apps for offline support, better privacy, and lower API costs. | in-repo (legacy) |
 
 ### Cross-Stack
 
@@ -79,9 +79,9 @@ Cross-stack skills, from client to cloud.
 
 | Skill | What it does | Source |
 | --- | --- | --- |
-| [`rocm-doctor`](staging/rocm-doctor/SKILL.md) | Diagnose ROCm / HIP / PyTorch / llama.cpp failures on AMD GPUs (Linux and Windows) against a closed list of known misconfigurations, then fix with consent or route upstream. Thin driver over the `rocm` CLI (`examine` / `diagnose` / `fix`). | _experimental_ |
+| [`rocm-doctor`](staging/rocm-doctor/SKILL.md) | Diagnose ROCm / HIP / PyTorch / llama.cpp failures on AMD GPUs (Linux and Windows) against a closed list of known misconfigurations, then fix with consent or route upstream. Thin driver over the `rocm` CLI (`examine` / `diagnose` / `fix`). | _planned_ |
 | `hyperloom-workload-optimizer` | Autonomously optimizes LLM inference on AMD GPUs. | _planned_ |
-| [`lemonade-router-builder`](skills/lemonade-router-builder/SKILL.md) | Set up a Lemonade model router that handles requests based on content, sensitivity, or required capabilities. | in-repo |
+| [`lemonade-router-builder`](skills/lemonade-router-builder/SKILL.md) | Set up a Lemonade model router that handles requests based on content, sensitivity, or required capabilities. | in-repo (legacy) |
 | `hrr-replay-analysis` | Record, replay, and analyze GPU workload behavior on ROCm across AMD Instinct, Radeon, and Ryzen hardware using HIP Record and Replay archives. | _planned_ |
 
 ### Server-Native
@@ -90,8 +90,8 @@ Run and optimize on AMD Instinct.
 
 | Skill | What it does | Source |
 | --- | --- | --- |
-| [`serving-llms-on-instinct`](skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine/backend selection in later phases. | in-repo |
-| [`serving-llms-on-epyc`](skills/serving-llms-on-epyc/SKILL.md) | Serve LLMs on AMD EPYC CPUs with vLLM + zentorch, in a container (Docker/Podman) or conda. Handles CPU detection, runtime/env validation, vLLM model-support and RAM-fit checks, hardware-sized threads/KV, launch, and health verification. Single instance; reports and stops on failure. | in-repo |
+| [`serving-llms-on-instinct`](skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine/backend selection in later phases. | in-repo (legacy) |
+| [`serving-llms-on-epyc`](skills/serving-llms-on-epyc/SKILL.md) | Serve LLMs on AMD EPYC CPUs with vLLM + zentorch, in a container (Docker/Podman) or conda. Handles CPU detection, runtime/env validation, vLLM model-support and RAM-fit checks, hardware-sized threads/KV, launch, and health verification. Single instance; reports and stops on failure. | in-repo (legacy) |
 | [`magpie-kernel-evaluator`](skills/magpie-kernel-evaluator/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM / SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
 | [`tracelens-analysis-orchestrator`](skills/tracelens-analysis-orchestrator/SKILL.md) | Orchestrate modular PyTorch profiler trace analysis with TraceLens: generate perf reports, run system-level and compute-kernel subagents in parallel, and write a prioritized stakeholder report. | [TraceLens](https://github.com/AMD-AGI/TraceLens) |
 
@@ -110,7 +110,7 @@ skills/
 
 When an agent decides a skill is relevant (or you invoke it explicitly), it loads that `SKILL.md` and follows the instructions inside. Descriptions stay in context cheaply; the full body of a skill only loads when the task actually matches.
 
-Every skill also ships a `skill-card.md`: a short, human-facing governance card (Description, Owner, License) that tells a reviewer what the skill is and who stands behind it without reading the source. See [docs/skill-cards.md](docs/skill-cards.md).
+Every skill also ships a `skill-card.md`: a short, human-facing governance card (Description, Owner, License) that tells a reviewer what the skill is and who stands behind it without reading the source. See [docs/skill-requirements.md](docs/skill-requirements.md#skill-cardmd).
 
 ## Why a skill, not a doc?
 
@@ -128,7 +128,7 @@ The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integr
                 │                amd/skills (this repo)               │
                 │                                                     │
                 │   skills/         .github/scripts/ .*-plugin/       │
-                │   in-repo skills  sources.yml      agent manifests  │
+                │   vendored copies sources.yml      agent manifests  │
                 └──────────────────────┬──────────────────────────────┘
                                        │  one install
                                        ▼
@@ -142,11 +142,14 @@ The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integr
    gfx-target-...  triton-amd-...  ...               integration/    repos
 ```
 
-This repo also acts as an **incubator**: a skill can start under `skills/` to iterate quickly, then graduate to its product repo and be re-pointed from `.github/scripts/sources.yml` once it has a clear owner, with no change for installed users.
+Federation is the only route into the catalog for new skills: we no longer
+accept skills authored directly in this repository. The skills already under
+`skills/` that predate the policy continue to ship, and are expected to move to
+a product repo over time.
 
 ```
 skills/                  # All skills the agent can load
-docs/                    # Long-form documentation (e.g. skill-cards.md)
+docs/                    # Contributor guides (requirements, best practices, evals)
 .claude-plugin/          # Claude Code marketplace manifest
 .cursor-plugin/          # Cursor marketplace manifest (generated)
 .codex-plugin/           # Codex plugin manifest (generated)
@@ -157,13 +160,12 @@ plugin-metadata.json     # Vendor-neutral identity/discovery metadata
 .github/scripts/sources.yml  # External skill sources for federation
 ```
 
-In-repo skills are authored directly under `skills/`. Federated skills are
-declared in [`.github/scripts/sources.yml`](.github/scripts/sources.yml) and vendored into
-`skills/` by the manually-dispatched `import-external-skills` workflow,
-which opens a pull request with the imported copies. Each vendored skill
-carries a `.federated.json` marker that records the upstream repo and
-pinned commit, so the importer can refresh or remove it without disturbing
-in-repo skills.
+Federated skills are declared in
+[`.github/scripts/sources.yml`](.github/scripts/sources.yml) and vendored into
+`skills/` by the manually-dispatched `import-external-skills` workflow, which
+opens a pull request with the imported copies. Each vendored skill carries a
+`.federated.json` marker recording the upstream repo and pinned commit, so the
+importer can refresh or remove it without disturbing anything else.
 
 ## Manual Installation
 
@@ -182,12 +184,16 @@ cp -r amd-skills/skills/local-ai-use <agent-skills-dir>/
 
 ## Contributing a skill
 
-We welcome contributions from AMD engineers and selected partners. Two paths, matching how the catalog is organized:
+We welcome contributions from AMD engineers and selected partners. Skills are
+authored in an AMD-owned product repository and registered here through
+[`.github/scripts/sources.yml`](.github/scripts/sources.yml) with a pinned ref,
+so each skill ships and versions with its product. We only accept federated
+submissions; skills authored directly under `skills/` are not accepted.
 
-- **Path A: In-repo skills.** Authored directly under `skills/`. Best for cross-cutting workflows without a natural product home.
-- **Path B: Product-repo skills.** Authored in a product repository and registered here through [`.github/scripts/sources.yml`](.github/scripts/sources.yml) with a pinned tag. Best for skills that should ship and version with a specific product.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for step-by-step instructions and the rules CI enforces.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the step-by-step instructions, then
+[docs/skill-requirements.md](docs/skill-requirements.md) for the rules CI enforces,
+[docs/best-practices.md](docs/best-practices.md) for writing guidance, and
+[docs/evals.md](docs/evals.md) for how skills are graded.
 
 ## License
 

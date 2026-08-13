@@ -6,8 +6,10 @@ They answer two questions, in order:
 1. **Routing** — with the published bundle installed side by side, does the agent pick yours? This is where most skills fail, and you cannot test it alone: a skill tested by itself will happily answer prompts that belong to its neighbour.
 2. **Behavior** — once yours is picked, does it do the job?
 
-You write one file, `skills/<your-skill>/evals/evals.json`, and both questions
-are graded from it. Copy [`eval/TEMPLATE.json`](../eval/TEMPLATE.json) to start.
+You write one file, `evals/evals.json` inside your skill folder, and both
+questions are graded from it. It ships with the skill from your repo and is
+vendored into the catalog along with everything else. Copy
+[`eval/TEMPLATE.json`](../eval/TEMPLATE.json) to start.
 
 ## The file
 
@@ -83,13 +85,11 @@ Spend your effort on the near misses. Positive prompts mostly pass; the prompts
 that find real problems sit just outside your scope — the wrong vendor's
 hardware, the adjacent skill's job, your vocabulary used to mean something else.
 
-**Before your skill is published** it is not in the bundle, so it cannot win a
-prompt and its positives are not scored. Your dataset is still validated, your
-behavior cases still run, and your `false` prompts still run as near misses
-against the published skills. Positives start being scored the day the skill
-joins the bundle, with no edit to them. Routing is measured against the set of
-skills a user actually installs, so an unpublished skill would otherwise change
-everyone else's score while shipping to nobody.
+Routing is measured against the set of skills a user actually installs, so a
+skill that is not yet in the bundle cannot win a prompt and its positives are
+not scored. Its dataset is still validated and its behavior cases still run.
+The importer adds your skill to the bundle when it lands, so this only affects
+local runs before the first import.
 
 ## When JSON isn't enough
 

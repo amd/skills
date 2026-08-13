@@ -2,16 +2,21 @@
 
 What must be true for a skill to merge. Every rule here is checked by
 `./.github/scripts/check.sh`, which is the same command CI runs on every pull
-request. These apply to in-repo and federated skills alike: vendored copies go
-through the identical validator.
+request.
 
-For advice on writing a *good* skill rather than a valid one, see
-[best-practices.md](best-practices.md).
+New skills are accepted only as federated submissions, authored in an AMD
+product repo and vendored into this catalog; see
+[CONTRIBUTING.md](../CONTRIBUTING.md) for that process. The rules below are
+validated against the vendored copy, so everything they ask for belongs in the
+skill folder upstream. For advice on writing a *good* skill rather than a valid
+one, see [best-practices.md](best-practices.md).
 
 ## Required files
 
+Each skill is one folder in your repo, vendored to `skills/<skill-name>/` here:
+
 ```
-skills/<skill-name>/
+<skill-name>/
   SKILL.md          # required: frontmatter + instructions
   skill-card.md     # required: governance card
   evals/evals.json  # required: routing and behavior dataset
@@ -26,6 +31,11 @@ The frontmatter must be a valid YAML block containing `name` and `description`.
 | `name` | lowercase-with-hyphens, ≤ 64 characters, no `anthropic` or `claude` substring, matches the directory name |
 | `description` | non-empty, ≤ 1024 characters |
 | body | ≤ 500 lines |
+
+Catalog names are namespaced `<project>-<skill>` to stay unique. You do not
+have to rename your upstream folder for that: set `as:` in `sources.yml` and
+the importer rewrites the folder name and the `name` frontmatter together, so
+they still match after vendoring.
 
 ## skill-card.md
 
@@ -43,7 +53,7 @@ Three sections are required, each a `##` heading with non-empty body text:
 | Owner | Who is accountable for maintaining it? |
 | License | What license governs its use and redistribution? |
 
-Copy this into `skills/<your-skill>/skill-card.md`:
+Copy this into your skill folder as `skill-card.md`:
 
 ```markdown
 # Skill Card
@@ -74,11 +84,9 @@ The card stays at these three sections. Evaluation results, benchmark data,
 risk statements, and signing identifiers are not part of the AMD card today;
 sections can be added later without breaking the validation gate.
 
-**Federated skills** are vendored wholesale, so a card authored here would be
-overwritten on the next import. If upstream ships its own `skill-card.md` it is
-kept as-is; otherwise the importer synthesizes a minimal card from the source
-metadata. To customize a federated skill's card, add it to the skill folder in
-the upstream repository.
+If your skill folder ships a card, it is vendored as-is. If it does not, the
+importer synthesizes a minimal one from the source metadata so the skill still
+clears the validation gate — but it will be generic, so write your own.
 
 ## evals/evals.json
 
@@ -97,23 +105,14 @@ See [evals.md](evals.md) for what to put in the file and how it is graded.
 
 ## Publishing
 
-A skill is published by adding a `./skills/<name>` entry to the `skills` array
-of the single `amd-skills` plugin in
-[`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json). All
-published skills ship together in that one plugin; a skill left out of the
-array stays unpublished.
+All published skills ship together in one `amd-skills` plugin, listed as
+`./skills/<name>` entries in
+[`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json). The
+importer adds your entry for you, and `./.github/scripts/publish.sh`
+regenerates the derived Cursor, Codex, and repo-marketplace manifests from it.
 
-The other manifests are derived and must be in sync, which the validator
-checks. Regenerate them rather than hand-editing:
-
-```bash
-./.github/scripts/publish.sh   # writes .cursor-plugin/, .codex-plugin/, .agents/plugins/
-```
-
-`.claude-plugin/marketplace.json` must list exactly one plugin with `source`
-set to `./`, `strict: false`, and a non-empty human-readable description.
-Shared identity (name, description, version, author) comes from
-`plugin-metadata.json`.
+Nothing here is hand-edited. The validator only checks that the manifests are
+in sync, so if it complains, rerun `publish.sh` and commit the result.
 
 ## Before you open the PR
 
