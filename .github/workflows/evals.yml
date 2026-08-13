@@ -35,6 +35,9 @@ on:
       - "eval/**"
       - ".github/workflows/evals.yml"
       - ".github/scripts/select_evals.py"
+      # Publishing a skill changes what routing installs, so the bundle is an
+      # input to this workflow even when no skill file changed.
+      - ".claude-plugin/marketplace.json"
   workflow_dispatch:
     inputs:
       mode:

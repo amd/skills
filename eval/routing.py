@@ -5,9 +5,9 @@
 """Routing engine: does the right skill fire, and only then?
 
 Behavior mode asks "once this skill runs, does it do the job?". This asks the
-question that comes first: **given every skill in the catalog installed side
-by side, does the agent pick the right one?** It grades the routing decision
-only, so it catches the four failure modes a description can cause:
+question that comes first: **given the published bundle installed side by side,
+does the agent pick the right one?** It grades the routing decision only, so it
+catches the four failure modes a description can cause:
 
   * correct trigger -- the expected skill activated.
   * missed trigger  -- a skill was expected and none activated (under-triggering).
@@ -15,11 +15,13 @@ only, so it catches the four failure modes a description can cause:
                        descriptions overlap and the agent picked the wrong side).
   * false trigger   -- no skill was expected and one activated (over-triggering).
 
-Every case installs **all** skills under ``skills/``, because routing is only
-meaningful against the whole catalog: a skill tested alone will happily answer
-prompts that belong to its neighbor. Cases are pooled across every skill's
-dataset, so a positive case for skill Y is automatically a negative for skill
-X and the confusion matrix fills itself in.
+Every case installs the skills the marketplace bundle publishes, because
+routing is only meaningful against a catalog someone actually has: a skill
+tested alone will happily answer prompts that belong to its neighbor, and a
+skill installed next to unpublished neighbors is scored against competition
+that ships to nobody. Cases are pooled across those skills' datasets, so a
+positive case for skill Y is automatically a negative for skill X and the
+confusion matrix fills itself in.
 
 Cost control: each run is killed the moment the routing decision is observable
 -- the first skill activation, the final result event, or a small budget of
@@ -672,9 +674,22 @@ def render_markdown(summary: dict) -> str:
         "",
         f"**{totals['passed']}/{totals['graded']} correct "
         f"({'n/a' if accuracy is None else f'{accuracy:.1%}'})** across "
-        f"{totals['cases']} prompts with {len(meta['skills'])} skills "
-        f"installed together, on `{meta['model']}` (effort `{meta['effort']}`).",
+        f"{totals['cases']} prompts with the {len(meta['skills'])} published "
+        f"skills installed together, on `{meta['model']}` "
+        f"(effort `{meta['effort']}`).",
         "",
+    ]
+    held_out = meta.get("held_out_skills") or []
+    if held_out:
+        lines += [
+            f"Installed: {', '.join(f'`{s}`' for s in meta['skills'])}. Routing "
+            f"is scored against the bundle a user actually gets, so prompts "
+            f"expecting an unpublished skill ({', '.join(f'`{s}`' for s in held_out)}) "
+            f"are held out -- an uninstalled skill cannot win them. Their near "
+            f"misses do run, since those assert that nothing fires.",
+            "",
+        ]
+    lines += [
         "| Verdict | Count | Meaning |",
         "| --- | --- | --- |",
         f"| correct_trigger | {verdicts['correct_trigger']} | expected skill activated |",

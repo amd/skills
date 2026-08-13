@@ -17,9 +17,9 @@ true once it has::
 
 There are two run modes to satisfy:
 
-  * **routing** -- the whole catalog is installed and only the trigger
-    decision is graded ("did the right skill fire, and only then?"). Every
-    evaluation runs here.
+  * **routing** -- the published bundle is installed side by side and only the
+    trigger decision is graded ("did the right skill fire, and only then?").
+    Every evaluation of a published skill runs here.
   * **behavior** -- just this skill is installed, the run goes to completion,
     and ``expected_behavior`` / ``unexpected_behavior`` / ``logs_contain`` /
     ``files_exist`` are graded ("once it fired, did it do the job?"). Only a
@@ -65,6 +65,10 @@ from pathlib import Path
 EVAL_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EVAL_DIR.parent
 SKILLS_DIR = REPO_ROOT / "skills"
+
+# The published bundle. Routing installs what this lists, because that is the
+# set of skills a user has competing for a prompt.
+CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 
 # One dataset per skill, beside the skill it describes.
 DATASET_RELPATH = Path("evals") / "evals.json"
@@ -210,11 +214,8 @@ def machine_path(skill: str) -> Path:
 def catalog_skills() -> list[str]:
     """Every skill under ``skills/``, published or not.
 
-    Deliberately not read from ``.claude-plugin/marketplace.json``: routing is
-    measured against the catalog the agent can see, and an unpublished skill
-    still competes for prompts the moment someone installs the repo. Gating
-    coverage on publication also meant a skill got its first routing test only
-    after it shipped, which is exactly the wrong order.
+    This is the set that must be tested and validated, not the set that gets
+    installed side by side: see ``routing_catalog`` for that.
     """
     if not SKILLS_DIR.is_dir():
         return []
@@ -228,6 +229,56 @@ def catalog_skills() -> list[str]:
 def skills_with_datasets() -> list[str]:
     """Skills that ship an eval dataset (and so can be run or gated on)."""
     return [skill for skill in catalog_skills() if dataset_path(skill).is_file()]
+
+
+def published_skills() -> list[str]:
+    """Skills listed in the marketplace bundle, in the order it lists them.
+
+    Unlisted skills under ``skills/`` are unpublished on purpose, so this is a
+    subset of ``catalog_skills``.
+    """
+    if not CLAUDE_MARKETPLACE.is_file():
+        return []
+    data = json.loads(CLAUDE_MARKETPLACE.read_text(encoding="utf-8"))
+    plugins = data.get("plugins") if isinstance(data, dict) else None
+    if not isinstance(plugins, list) or not plugins:
+        return []
+    entries = plugins[0].get("skills") if isinstance(plugins[0], dict) else None
+    if not isinstance(entries, list):
+        return []
+    names = [str(entry).rstrip("/").rsplit("/", 1)[-1] for entry in entries]
+    on_disk = set(catalog_skills())
+    return [name for name in names if name in on_disk]
+
+
+def routing_catalog() -> list[str]:
+    """The skills installed side by side for a routing run.
+
+    Routing asks which skill wins a prompt when the others are there to
+    compete, so the answer only means something if the set competing is the set
+    a user actually gets: the marketplace bundle. Installing every folder under
+    ``skills/`` measures a product nobody has, and it moves the score whenever
+    an unpublished skill is added -- an unrelated change quietly re-scoring
+    every other skill's routing.
+
+    An unpublished skill therefore gets no routing number until it ships. Its
+    dataset is still validated and its behavior cases still run; the day it is
+    added to the bundle, its prompts join this run with no edit to them.
+    """
+    return published_skills()
+
+
+def routing_cases(cases: list[Case], catalog: list[str]) -> list[Case]:
+    """The subset of `cases` whose expected outcome `catalog` can produce.
+
+    A prompt that expects an uninstalled skill cannot route correctly however
+    good that skill's description is, so grading it would book a guaranteed
+    loss as a routing defect. A prompt that expects nothing to fire is a claim
+    about the installed set, not about its author, so an unpublished skill's
+    near miss stays in: it still tests that no published skill grabs it.
+    """
+    installed = set(catalog)
+    return [case for case in cases if case.expect_skill is None or case.expect_skill in installed]
 
 
 def _parse_case(entry: object, skill: str | None, label: str, errors: list[str]) -> Case | None:

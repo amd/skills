@@ -73,6 +73,9 @@ INFRA_FILES = {
     "eval/negatives.json",
     ".github/scripts/select_evals.py",
     ".github/workflows/evals.yml",
+    # Publishing or unpublishing a skill changes who competes for every prompt,
+    # so it re-scores the whole catalog rather than just the skill it names.
+    ".claude-plugin/marketplace.json",
 }
 
 
@@ -116,13 +119,23 @@ def routing_needed(changed: set[str]) -> bool:
     A skill's description and its prompts are the only inputs to routing, so a
     PR that only edits a reference file or a helper script under a skill does
     not need to pay for a catalog-wide run.
+
+    An unpublished skill's description is not an input either: routing installs
+    the published bundle, so that skill is not in the room to win or lose a
+    prompt. Its dataset still counts, because its near-miss prompts are graded
+    against the skills that are.
     """
     if changed & INFRA_FILES:
         return True
-    return any(
-        path.endswith("/SKILL.md") or path.endswith("/evals/evals.json")
-        for path in changed
-    )
+    published = set(datasets.routing_catalog())
+    for path in changed:
+        if path.endswith("/evals/evals.json"):
+            return True
+        if path.endswith("/SKILL.md"):
+            parts = path.split("/")
+            if len(parts) < 2 or parts[0] != "skills" or parts[1] in published:
+                return True
+    return False
 
 
 def select_from_changes(changed: set[str]) -> list[str]:

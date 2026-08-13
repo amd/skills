@@ -346,6 +346,30 @@ class TestRepositoryDatasets(unittest.TestCase):
             sorted(datasets.catalog_skills()), sorted(datasets.skills_with_datasets())
         )
 
+    def test_the_routing_catalog_is_the_published_bundle(self) -> None:
+        # Not every skill on disk: routing installs what a user installs.
+        catalog = datasets.routing_catalog()
+        self.assertTrue(catalog, "the marketplace bundle lists no skills")
+        self.assertLessEqual(set(catalog), set(datasets.catalog_skills()))
+        marketplace = json.loads(
+            (datasets.REPO_ROOT / ".claude-plugin" / "marketplace.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        listed = [
+            entry.rstrip("/").rsplit("/", 1)[-1]
+            for entry in marketplace["plugins"][0]["skills"]
+        ]
+        self.assertEqual(sorted(catalog), sorted(listed))
+
+    def test_every_published_skill_still_has_routing_prompts(self) -> None:
+        # A published skill with no gradeable prompt would silently drop out of
+        # the score rather than failing.
+        catalog = datasets.routing_catalog()
+        runnable = datasets.routing_cases(datasets.load_all_cases(), catalog)
+        covered = {case.expect_skill for case in runnable if case.expect_skill}
+        self.assertEqual(sorted(covered), sorted(catalog))
+
     def test_hooks_are_importable_and_expose_known_entry_points(self) -> None:
         known = {"setup_session", "setup", "teardown", "check"}
         for skill in datasets.skills_with_datasets():
@@ -721,6 +745,41 @@ class TestCaseFiltering(unittest.TestCase):
     def test_no_match_is_an_error(self) -> None:
         with self.assertRaises(SystemExit):
             datasets.filter_cases(self.cases, "nope")
+
+
+class TestRoutingCaseSelection(unittest.TestCase):
+    """Only prompts the installed bundle could actually satisfy get graded."""
+
+    def cases(self, skill: str) -> list:
+        parsed, _ = parse(
+            {
+                EVALUATIONS_KEY: [
+                    {"id": f"{skill}-yes", TRIGGER_KEY: True, "prompt": "p"},
+                    {"id": f"{skill}-no", TRIGGER_KEY: False, "prompt": "q"},
+                ]
+            },
+            skill=skill,
+        )
+        return parsed
+
+    def test_a_published_skill_keeps_both_kinds(self) -> None:
+        kept = datasets.routing_cases(self.cases("published"), ["published"])
+        self.assertEqual([c.id for c in kept], ["published-yes", "published-no"])
+
+    def test_an_unpublished_positive_is_held_out(self) -> None:
+        # It expects a skill that is not installed, so it would lose by
+        # construction and read as a routing defect.
+        kept = datasets.routing_cases(self.cases("unpublished"), ["published"])
+        self.assertEqual([c.id for c in kept], ["unpublished-no"])
+
+    def test_shared_negatives_survive_any_catalog(self) -> None:
+        shared = datasets.load_shared_negatives()
+        self.assertTrue(shared)
+        self.assertEqual(len(datasets.routing_cases(shared, ["published"])), len(shared))
+
+    def test_an_empty_catalog_keeps_only_negatives(self) -> None:
+        kept = datasets.routing_cases(self.cases("published"), [])
+        self.assertEqual([c.id for c in kept], ["published-no"])
 
 
 if __name__ == "__main__":

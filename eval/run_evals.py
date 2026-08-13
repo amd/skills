@@ -419,7 +419,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args.model = enforce_model_policy(args.model) or args.model
     skills = _selected_skills(args)
-    catalog = datasets.catalog_skills()
+    catalog = datasets.routing_catalog()
 
     if not args.skip_preflight:
         ok, detail = check_api_reachable(args.model)
@@ -430,14 +430,31 @@ def main(argv: list[str] | None = None) -> int:
     started = time.time()
 
     if args.mode in ("routing", "both"):
-        # Always pool every case: skill Y's positives are skill X's negatives,
-        # which is where most of the false-trigger coverage comes from. --skill
-        # narrows what is *reported on*, not what the catalog contains.
+        if not catalog:
+            raise SystemExit(
+                "error: the marketplace bundle lists no skills, so there is "
+                "nothing to install for a routing run. Check "
+                ".claude-plugin/marketplace.json."
+            )
+
+        # Pool every published skill's cases: skill Y's positives are skill X's
+        # negatives, which is where most of the false-trigger coverage comes
+        # from. --skill narrows what is *reported on*, not what is installed.
         cases = datasets.load_all_cases()
+        held_out = sorted(
+            {c.skill for c in cases if c.skill and c.skill not in set(catalog)}
+        )
+        cases = datasets.routing_cases(cases, catalog)
         if args.only:
             cases = datasets.filter_cases(cases, args.only)
         elif args.skill:
             cases = datasets.filter_cases(cases, args.skill)
+        if not cases:
+            raise SystemExit(
+                "error: no routing cases left to run. Prompts that expect an "
+                "unpublished skill are held out, because that skill is not "
+                "installed and so could never win them."
+            )
 
         config = routing.RoutingConfig(
             model=args.model,
@@ -460,6 +477,11 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         print(f"[routing] skills installed per case: {', '.join(catalog)}")
+        if held_out:
+            print(
+                f"[routing] unpublished, so their prompts are not graded here: "
+                f"{', '.join(held_out)}"
+            )
         print(f"[routing] {len(cases)} cases, model={args.model}, jobs={args.jobs}")
         if args.jobs > 1 and len(cases) > 1:
             with ThreadPoolExecutor(max_workers=args.jobs) as pool:
@@ -474,6 +496,7 @@ def main(argv: list[str] | None = None) -> int:
                 "model": args.model,
                 "effort": args.effort,
                 "skills": catalog,
+                "held_out_skills": held_out,
                 "wall_time_s": round(time.time() - started, 1),
                 "max_tool_calls": args.max_tool_calls,
                 "max_inspection_calls": args.max_inspection_calls,
