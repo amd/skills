@@ -1,15 +1,18 @@
-# Evals
+# Skill Evaluation
 
-Structural validation proves a skill is *well-formed*; evals prove it *works*.
-They answer two questions, in order:
+## Testing Pipeline Overview
 
-1. **Routing** — with the published bundle installed side by side, does the agent pick yours? This is where most skills fail, and you cannot test it alone: a skill tested by itself will happily answer prompts that belong to its neighbour.
-2. **Behavior** — once yours is picked, does it do the job?
+A skill reaches the catalog after passing three review stages: an eligibility and compliance check, structural screening, and multi-stage agentic testing.
 
-You write one file, `evals/evals.json` inside your skill folder, and both
-questions are graded from it. It ships with the skill from your repo and is
-vendored into the catalog along with everything else. Copy
-[`eval/TEMPLATE.json`](../eval/TEMPLATE.json) to start.
+* **Stage 1: Eligibility and compliance** (*maintainer review, on first submission*)
+  * Is the skill eligible, and does the submission follow the contribution guide and its recommendations? An AMD-owned source repo, registered in `sources.yml`, the skill authored upstream rather than hand-edited here, and the writing guidance in [best-practices.md](best-practices.md) applied. See [CONTRIBUTING.md](../CONTRIBUTING.md).
+* **Stage 2: Structural screening** (*CI, on every pull request*)
+  * Are the files well-formed? Required files, frontmatter, skill-card sections, eval schema, unique case ids, internal links, and manifests in sync. See [skill-requirements.md](skill-requirements.md).
+* **Stage 3: Agentic testing** (*CI, on every pull request*)
+  * **Routing Testing**: Does the skill trigger when it should, and stay quiet when it shouldn't? Prompts run with the published bundle installed side by side, so a skill only wins the ones it owns. You cannot test this alone: a skill tested by itself will happily answer prompts that belong to its neighbour.
+  * **Behavioral Testing**: Once the skill has triggered, does it do the job? The prompt runs to completion with the skill loaded, and what the agent actually did is graded against the expectations in the dataset.
+
+The rest of this document is the dataset that structural screening and agentic testing read. You write one file, `evals/evals.json`, inside your skill folder. It ships with the skill from your repo and is vendored into the catalog along with everything else. Copy [`eval/TEMPLATE.json`](../eval/TEMPLATE.json) to start.
 
 ## The file
 
@@ -25,9 +28,9 @@ yes if your skill should wake up for it, no if nothing should.
       "prompt": "Serve Llama 3.1 8B on this box with vLLM and zentorch."
     },
     {
-      "id": "vllm-on-nvidia",
+      "id": "vllm-on-non-amd",
       "skill_should_trigger": false,
-      "prompt": "Serve Llama 3.1 70B with vLLM on my NVIDIA H100 cluster."
+      "prompt": "Serve Llama 3.1 70B with vLLM on my non-AMD cluster."
     }
   ]
 }

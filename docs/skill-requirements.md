@@ -90,9 +90,9 @@ clears the validation gate — but it will be generic, so write your own.
 
 ## evals/evals.json
 
-Every skill needs a dataset. The floor is **Tier 0**: at least 3 evaluations
-with `skill_should_trigger: true` and 2 with `false`. CI rejects a skill
-without them.
+Every skill needs a dataset: at least 3 evaluations with
+`skill_should_trigger: true` and 2 with `false`. CI rejects a skill without
+them.
 
 The validator also enforces that the file is parseable and uses only known
 fields (a typo'd key is an error, not a silently dropped expectation), that

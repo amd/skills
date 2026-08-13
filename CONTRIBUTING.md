@@ -15,7 +15,7 @@ Three companion guides hold the detail:
 | --- | --- |
 | [docs/skill-requirements.md](docs/skill-requirements.md) | The rules CI enforces: required files, frontmatter limits, skill cards, the pre-PR checklist |
 | [docs/best-practices.md](docs/best-practices.md) | How to write a skill agents actually reach for: fit, descriptions, body structure, scripts, AMD specifics |
-| [docs/evals.md](docs/evals.md) | How routing and behavior are graded, and what to put in `evals/evals.json` |
+| [docs/evals.md](docs/evals.md) | How structure, routing, and behavior are graded, and what to put in `evals/evals.json` |
 
 For repository structure and the broader catalog model, see the
 [README](README.md).
