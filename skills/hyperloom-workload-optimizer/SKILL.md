@@ -179,7 +179,7 @@ Never copy API keys into chat output.
 | CONC | `--conc` | `64` | client concurrency |
 | ISL / OSL | `--isl` / `--osl` | `1024` / `1024` | input / output seq lengths |
 | PRECISION | `--precision` | `bf16` | match checkpoint; `fp8` for FP8 models |
-| MAX_HOURS | `--max-hours` | CLI `2.0` | skill recommends `8`; `0.5`–`3` for smoke |
+| MAX_HOURS | `--max-hours` | CLI `2.0` | skill recommends `8`; `3` for smoke |
 | TARGET_GAIN | `--target-gain` | `30` | desired % gain |
 
 **Optional:** `--no-kernel`, `--no-explore`, `--no-framework-agent`,
@@ -204,7 +204,7 @@ Launch plan — please confirm:
   TP=1  EP=1  CONC=64
   ISL=1024  OSL=1024
   PRECISION=fp8
-  MAX_HOURS=0.5   TARGET_GAIN=20%
+  MAX_HOURS=3     TARGET_GAIN=20%
   phases        --no-kernel (smoke)
   RUN_MODE      baremetal
 ```
@@ -239,7 +239,7 @@ export CONC=64
 export ISL=1024
 export OSL=1024
 export PRECISION=fp8
-export MAX_HOURS=0.5
+export MAX_HOURS=3
 export TARGET_GAIN=20
 export OPT_FLAGS="--no-kernel"   # optional Phase 2 flags, space-separated; empty if none
 EOF

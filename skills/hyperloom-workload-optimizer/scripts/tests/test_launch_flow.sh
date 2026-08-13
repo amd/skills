@@ -92,7 +92,7 @@ export CONC=64
 export ISL=1024
 export OSL=1024
 export PRECISION=fp8
-export MAX_HOURS=0.5
+export MAX_HOURS=3
 export TARGET_GAIN=20
 export OPT_FLAGS="--no-kernel"
 EOF
