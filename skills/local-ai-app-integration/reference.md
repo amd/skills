@@ -35,7 +35,7 @@ hardware-optimized one at first run after a system probe.
 
 | Recipe | Backend | Hardware | Notes |
 |---|---|---|---|
-| `flm` | `npu` | XDNA2 NPU | Cannot be packaging-time bundled on Linux. |
+| `flm` | `npu` | XDNA2 NPU | Windows only. Cannot be installed on Linux — see below. |
 | `ryzenai-llm` | `npu` | XDNA2 NPU | Windows only. Best for the Hybrid model family. |
 
 ### Speech-to-text
@@ -45,7 +45,16 @@ hardware-optimized one at first run after a system probe.
 | `whispercpp` | `vulkan` | `Whisper-Large-v3-Turbo` | AMD iGPU / dGPU | Windows, Linux |
 | `whispercpp` | `cpu` | `Whisper-Large-v3-Turbo` | x86_64 CPU | Windows, Linux |
 | `whispercpp` | `npu` | `Whisper-Large-v3-Turbo` | XDNA2 NPU | Windows |
-| `flm` | `npu` | `whisper-v3-turbo-FLM` | XDNA2 NPU | Linux (runtime-install only) |
+| `flm` | `npu` | `whisper-v3-turbo-FLM` | XDNA2 NPU | Windows |
+
+> **There is no NPU path through Lemonade on Linux.** Verified at 11.5.2 on a
+> Ryzen AI MAX+ PRO 395 with `devices.amd_npu.available: true`:
+> `whispercpp:npu` and `ryzenai-llm:npu` refuse with *"Requires Windows"*, and
+> `flm:npu` refuses with *"Requires AMD XDNA 2 AMD NPU"* — a device gate that
+> cannot pass, because Linux reports `amd_npu.family: ""`. On Linux, plan for
+> `whispercpp:vulkan` (iGPU) or `whispercpp:cpu`. FastFlowLM can drive the NPU
+> on Linux as a standalone server, but that is a separate process outside
+> lemond's supervision and outside this skill's launcher.
 
 ### Text-to-speech
 
@@ -76,7 +85,7 @@ ship a default and document how to override.
 | Multimodal (vision) chat | `Gemma-4-E2B-it-GGUF` | 2.0 GB | `llamacpp` |
 | Hybrid NPU chat (Ryzen AI) | `Llama-3.2-3B-Instruct-Hybrid` | 2.0 GB | `ryzenai-llm` |
 | Speech-to-text | `Whisper-Large-v3-Turbo` | 1.6 GB | `whispercpp` |
-| NPU speech-to-text (Ryzen AI) | `whisper-v3-turbo-FLM` | 0.6 GB | `flm` |
+| NPU speech-to-text (Ryzen AI, **Windows**) | `whisper-v3-turbo-FLM` | 0.6 GB | `flm` |
 | Text-to-speech | `kokoro-v1` | 0.3 GB | `kokoro` |
 | Image generation | `SDXL-Turbo` | 6.9 GB | `sd-cpp` |
 
@@ -87,13 +96,18 @@ model catalog; it can be stale or incomplete. A model only appears in
 `GET /v1/models` once its backend is installed (see Step 3), so install the
 backend first or the list will look empty/incomplete.
 
-**Catalogued ≠ downloaded.** A model listed by `GET /v1/models` is *available
-to use*, not necessarily present on disk. It must be **pulled**
-(`POST /api/v1/pull {"model":"..."}`) before it can serve — until then,
-inference returns an empty result with HTTP 200, not an error. The surest
-signal that a model is ready is a successful pull, not its presence in the
-catalog. See SKILL.md
-[Step 6](SKILL.md#step-6-health-backend-then-pull-the-model--before-first-inference).
+**`GET /api/v1/models` lists only downloaded models.** For the full registry —
+including everything not yet pulled — use `GET /api/v1/models?show_all=true`.
+The difference is large (23 local vs 145 catalogued on one test host), so
+validating a user-supplied model name against the plain list rejects valid
+models.
+
+**Catalogued ≠ downloaded.** A model listed in the catalog is *available to
+use*, not necessarily present on disk. Pull it explicitly
+(`POST /api/v1/pull {"model":"..."}`) rather than letting the first inference
+trigger the download — see SKILL.md
+[Step 6](SKILL.md#step-6-health-backend-then-pull-the-model--before-first-inference)
+for why that matters for timeouts.
 
 ---
 
@@ -172,7 +186,26 @@ All endpoints require `Authorization: Bearer {key}` when
 | `POST /api/v1/audio/transcriptions` | OpenAI Whisper-style transcription |
 | `POST /api/v1/audio/speech` | OpenAI TTS |
 | `POST /api/v1/images/generations` | OpenAI image generation |
-| `POST /api/v1/messages` | Anthropic Messages API |
+| `POST /api/v1/reranking` | Reranking — **note the spelling**, see below |
+| `POST /v1/messages` | Anthropic Messages API — **not** under `/api/v1`, see below |
+
+**Two routes break the `/api/v1` pattern.** Everywhere else `/api/v1/<route>`
+and `/v1/<route>` are aliases, which makes these two easy to miss:
+
+| Route | Correct path | What 404s |
+|---|---|---|
+| Anthropic Messages | `/v1/messages` | `/api/v1/messages` |
+| Reranking | `/api/v1/reranking` | `/api/v1/rerank`, `/v1/rerank` |
+
+`/v1/rerank` is the spelling used by Jina, Cohere, vLLM, and llama.cpp itself,
+so a retrieval app written against the convention 404s against the proxy.
+Confusingly, the per-model llama.cpp back-port that lemond supervises *does*
+serve `/v1/rerank` — but the proxy on `{port}` does not, and the back-port is
+on a separate, dynamically assigned port.
+
+`GET /api/v1/models` lists only **downloaded** models. Add `?show_all=true` for
+the full catalog; without it, validating a user-supplied model name against the
+plain list produces a false negative for anything not yet pulled.
 
 ### Lifecycle (use these from the launcher / supervisor)
 
