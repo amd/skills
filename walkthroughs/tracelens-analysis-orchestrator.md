@@ -52,6 +52,8 @@ Including capture mode graphs will produce better results but may require patchi
 
 ## Step 2 — Enabling your agent to see `tracelens-analysis-orchestrator`
 
+Run the `npx` commands below in your terminal, not inside Claude.
+
 **Claude Code** — install with the [`skills` CLI](https://github.com/vercel-labs/skills):
 
 ```bash

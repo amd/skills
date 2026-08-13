@@ -38,7 +38,7 @@ cd dictate
 
 ## Step 3 - Enabling claude to see `local-ai-app-integration`
 
-* Install the skill with the [`skills` CLI](https://github.com/vercel-labs/skills):
+* Install the skill with the [`skills` CLI](https://github.com/vercel-labs/skills). Run this in your terminal, not inside Claude:
 
 ```bash
 npx skills add amd/skills --skill local-ai-app-integration --agent claude-code

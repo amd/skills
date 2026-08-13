@@ -17,7 +17,7 @@ JSON, ready for you to register and use.
 claude "Which skills can you see?" --model sonnet
 ```
 
-You should see `lemonade-router-builder` in the list. If not, install it:
+You should see `lemonade-router-builder` in the list. If not, install it from your terminal, not inside Claude:
 
 ```bash
 npx skills add amd/skills --skill lemonade-router-builder --agent claude-code
