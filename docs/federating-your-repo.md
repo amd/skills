@@ -13,8 +13,9 @@ this repo.
 
 ## Prerequisites
 
-- Each skill is a folder with a valid `SKILL.md` and `skill-card.md`.
-  See [CONTRIBUTING.md](../CONTRIBUTING.md) and [skill-cards.md](skill-cards.md).
+- Each skill is a folder with a valid `SKILL.md` and `skill-card.md`. Federated
+  skills are validated against the same rules as in-repo skills; see
+  [skill-requirements.md](skill-requirements.md).
 - Skills live in a known directory in your repo (e.g. `skills/`).
 - Pick a branch to track (e.g. `main` or a release branch).
 
