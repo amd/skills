@@ -3,7 +3,6 @@
     {
       "id": "gemm-01-repeatability",
       "skill_should_trigger": true,
-      "note": "Tier 2. Clones and pip-installs TraceLens, then scores the agent's analysis.md with TraceLens's own workflow_scripted_evals.py. See evals/hooks.py.",
       "prompt": "Run the full standalone TraceLens analysis workflow locally with analysis mode default.\n- trace_path: {trace_path}\n- platform: {platform}\n- output_dir: {output_dir}\n- venv_path: {venv_path}\n- tracelens_dir: {tracelens_dir}\n",
       "files_exist": [
         "analysis_output/analysis.md"
@@ -32,13 +31,11 @@
     {
       "id": "node-event-loop",
       "skill_should_trigger": false,
-      "note": "Profiling vocabulary, no GPU and no PyTorch trace.",
       "prompt": "My Node.js server shows high event loop latency under load. Help me profile it and find the blocking call."
     },
     {
       "id": "cprofile-python-script",
       "skill_should_trigger": false,
-      "note": "A profiler and a hotspot question, on the wrong side of the CPU/GPU line.",
       "prompt": "Profile my Python script with cProfile and tell me which function is eating the most time."
     }
   ]

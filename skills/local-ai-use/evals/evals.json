@@ -3,7 +3,6 @@
     {
       "id": "generate-cat-image",
       "skill_should_trigger": true,
-      "note": "Tier 2. The end-to-end case: needs a reachable Lemonade Server, which the default runners provide.",
       "prompt": "Learn how to generate images locally, then generate an image of a cat and save it to out.png.",
       "expected_behavior": [
         "Install Lemonade Server if it is not already installed",
@@ -42,13 +41,11 @@
     {
       "id": "agent-generates-image-locally",
       "skill_should_trigger": true,
-      "note": "Names a cloud image API and an app-shaped complaint, but the thing going local is the agent, not the user's app.",
       "prompt": "Stop calling DALL-E when I ask you for a picture. Generate images on this machine instead so I stop paying per image."
     },
     {
       "id": "finetune-on-laptop",
       "skill_should_trigger": false,
-      "note": "Local, on-device, and model-shaped, but training is nobody's job here.",
       "prompt": "Fine-tune a small language model on my own dataset using the GPU in my laptop."
     },
     {

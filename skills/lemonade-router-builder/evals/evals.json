@@ -41,7 +41,6 @@
     {
       "id": "llm-as-router",
       "skill_should_trigger": true,
-      "note": "Intent described only by meaning, with no concrete signal to match on, so the router itself has to be a model.",
       "prompt": "I want sensitive queries to go to Qwen3.5-9B-GGUF and everything else to Qwen3.5-9B-NoThinking. Use the local model as the router.",
       "expected_behavior": [
         "Use routing.router block instead of routing.rules",
@@ -56,13 +55,11 @@
     {
       "id": "nginx-load-balance",
       "skill_should_trigger": false,
-      "note": "The word 'routing' with none of the meaning.",
       "prompt": "Set up nginx to load-balance incoming requests across three backend servers."
     },
     {
       "id": "which-lemonade-model",
       "skill_should_trigger": false,
-      "note": "Lemonade, models, and a choice between them, but no policy to author.",
       "prompt": "Which Lemonade model should I download for summarizing long documents on my laptop?"
     }
   ]

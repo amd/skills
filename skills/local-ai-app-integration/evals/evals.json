@@ -3,7 +3,6 @@
     {
       "id": "vendor-lemonade-launcher",
       "skill_should_trigger": true,
-      "note": "The launcher is the core artifact: a random API key, a dynamically bound port, and lemond spawned as a subprocess.",
       "prompt": "Help me add local AI to this Python app so it replaces the OpenAI API with a local backend. Do not download or install anything, just write the launcher module.",
       "workspace": "evals/files/openai-stub",
       "unexpected_behavior": [
@@ -18,7 +17,6 @@
     {
       "id": "lemond-health-check",
       "skill_should_trigger": true,
-      "note": "Readiness has two documented failure modes: scraping stdout, and pre-loading the model at startup.",
       "prompt": "Write a health-check helper for this Python app that waits until the local inference server is ready to serve. Do not download or install anything, just write the code.",
       "workspace": "evals/files/openai-stub",
       "unexpected_behavior": [
@@ -32,7 +30,6 @@
     {
       "id": "repoint-openai-client",
       "skill_should_trigger": true,
-      "note": "The 120-second timeout is the one the skill exists to get right: first-token latency on a cold local model blows past the OpenAI SDK default.",
       "prompt": "Update main.py to point the OpenAI client at a local inference server running on this machine. Do not download or install anything, just edit the file.",
       "workspace": "evals/files/openai-stub",
       "logs_contain": [
@@ -77,13 +74,11 @@
     {
       "id": "rate-limit-openai-calls",
       "skill_should_trigger": false,
-      "note": "Touches an app's OpenAI integration, but wants it to stay in the cloud.",
       "prompt": "Add rate limiting and retry-with-backoff to the OpenAI API calls in my Express server."
     },
     {
       "id": "pyinstaller-packaging",
       "skill_should_trigger": false,
-      "note": "Bundling and shipping an app, with no local inference anywhere in it.",
       "prompt": "Package my Python app as a standalone Windows installer with PyInstaller so users don't need Python."
     }
   ]

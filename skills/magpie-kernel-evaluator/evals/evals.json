@@ -23,19 +23,16 @@
     {
       "id": "benchmark-then-optimize-kernel",
       "skill_should_trigger": true,
-      "note": "Trace-analysis vocabulary shared with tracelens-analysis-orchestrator, but the work is benchmarking and kernel ranking.",
       "prompt": "Benchmark SGLang on this node, then rank two candidate HIP kernels for the biggest bottleneck and validate the winner."
     },
     {
       "id": "write-a-cuda-transpose",
       "skill_should_trigger": false,
-      "note": "Kernel authoring, not kernel evaluation. Shares all the vocabulary and none of the workflow.",
       "prompt": "Write a CUDA kernel that transposes a matrix, and explain the shared-memory tiling."
     },
     {
       "id": "mi300x-spec-question",
       "skill_should_trigger": false,
-      "note": "A datasheet question, not a measurement to run.",
       "prompt": "What is the theoretical peak FP16 throughput of an MI300X on paper?"
     }
   ]

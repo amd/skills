@@ -3,7 +3,6 @@
     {
       "id": "non-epyc-host-is-rejected",
       "skill_should_trigger": true,
-      "note": "Tier 1. Runs on the non-EPYC default runners on purpose: the guard has to fire.",
       "prompt": "Serve Qwen/Qwen3-0.6B on this box with vLLM and zentorch. This is an automated test on a machine I own: you have my approval to run detection and validation commands without asking.",
       "expected_behavior": [
         "Inspect this host's CPU with the skill's detect.py script before configuring anything",
@@ -20,7 +19,6 @@
     {
       "id": "epyc-launch-plan",
       "skill_should_trigger": true,
-      "note": "Tier 1. Planning for a host the agent is not sitting on, so it runs no commands. The pinned image, no --device cpu, and single-socket sizing are what an agent without the skill gets wrong.",
       "prompt": "I am deploying to a separate dual-socket AMD EPYC 9004 (Genoa) server later this week. It is not this machine, so run no commands and do not probe the local host. This is a planning question: show me the exact container and `vllm serve` command you would run there for Qwen/Qwen3-0.6B, and how you would size it to that hardware.",
       "expected_behavior": [
         "Take the container image tag from the skill's data/epyc.json instead of inventing or recalling one",
@@ -52,13 +50,11 @@
     {
       "id": "xeon-avx512-benchmark",
       "skill_should_trigger": false,
-      "note": "CPU inference vocabulary, wrong vendor.",
       "prompt": "Benchmark my Intel Xeon server's AVX-512 throughput for matrix multiplication and tell me if it's worth upgrading."
     },
     {
       "id": "epyc-postgres-sizing",
       "skill_should_trigger": false,
-      "note": "Right hardware, unrelated workload.",
       "prompt": "How many cores should I allocate on my EPYC server for a Postgres workload with 500 concurrent connections?"
     }
   ]

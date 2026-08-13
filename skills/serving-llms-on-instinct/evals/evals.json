@@ -3,7 +3,6 @@
     {
       "id": "serve-tiny-model-on-instinct",
       "skill_should_trigger": true,
-      "note": "Tier 2. Needs an Instinct GPU, ROCm, and Docker; see evals/machine.yml.",
       "prompt": "Serve Qwen/Qwen3-0.6B on this AMD Instinct GPU with vLLM. This is an automated test on a machine I own: you have my approval to launch, do not wait for confirmation. Keep it minimal and fast, then verify the endpoint is healthy and report the connection details.",
       "expected_behavior": [
         "Detect the AMD Instinct GPU before configuring vLLM",
@@ -38,19 +37,16 @@
     {
       "id": "vllm-on-nvidia",
       "skill_should_trigger": false,
-      "note": "Same request, same tool, excluded hardware.",
       "prompt": "Serve Llama 3.1 70B with vLLM on my NVIDIA H100 cluster."
     },
     {
       "id": "consumer-radeon",
       "skill_should_trigger": false,
-      "note": "AMD GPU, but the description rules out the RX/Radeon consumer line.",
       "prompt": "Which quantization should I pick to fit a 13B model into the 16 GB on my Radeon RX 7800 XT?"
     },
     {
       "id": "hbm-vs-gddr",
       "skill_should_trigger": false,
-      "note": "Inference hardware trivia with nothing to deploy.",
       "prompt": "Explain the practical difference between HBM3 and GDDR6 memory bandwidth for inference workloads."
     }
   ]

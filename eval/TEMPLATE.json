@@ -1,53 +1,5 @@
 {
-  "comment": [
-    "Copy this to skills/<your-skill>/evals/evals.json and replace the",
-    "evaluations. Delete this comment block and the `note` fields when done.",
-    "",
-    "Every evaluation is a prompt plus `skill_should_trigger`: true if your",
-    "skill should wake up for it, false if nothing in the catalog should. That",
-    "flag is the only place the expectation is written down -- no evaluation",
-    "names a skill, because the folder already says which one this is.",
-    "",
-    "Write prompts the way a user would actually type them -- copying phrases",
-    "out of your SKILL.md description measures string matching, not routing.",
-    "",
-    "If a prompt should trigger a DIFFERENT skill, put it in that skill's",
-    "dataset with true, rather than in yours with false. Routing installs the",
-    "whole catalog at once, so it is the same assertion either way, and false",
-    "keeps meaning 'nothing should fire'.",
-    "",
-    "An evaluation with false is an id and a prompt. It is graded on one thing",
-    "-- that nothing fired -- so no skill is ever loaded for it and there is",
-    "nothing else to assert.",
-    "",
-    "Tier 0 (required for every skill): at least 3 evaluations with true and 2",
-    "with false.",
-    "",
-    "Tier 1 (required if your skill can be exercised on a generic runner): give",
-    "at least one evaluation an `expected_behavior` / `unexpected_behavior` /",
-    "`logs_contain` / `files_exist` expectation, so something grades what the",
-    "skill did and not just whether it fired.",
-    "",
-    "Tier 2 (hardware or a live service): add skills/<your-skill>/evals/machine.yml",
-    "naming the kind of machine you need -- `runner_type` and/or `os`, nothing",
-    "else. Most skills do not need one.",
-    "",
-    "Check your work without spending tokens:",
-    "    python eval/run_evals.py --validate",
-    "Then run it for real:",
-    "    python eval/run_evals.py --skill <your-skill>"
-  ],
   "evaluations": [
-    {
-      "id": "REPLACE-unique-slug",
-      "skill_should_trigger": true,
-      "prompt": "Something a user would say that should make this skill fire."
-    },
-    {
-      "id": "REPLACE-second-positive",
-      "skill_should_trigger": true,
-      "prompt": "A different phrasing of the same need, with none of the same keywords."
-    },
     {
       "id": "REPLACE-positive-with-expectations",
       "skill_should_trigger": true,
@@ -65,6 +17,16 @@
       "files_exist": [
         "expected-output.txt"
       ]
+    },
+    {
+      "id": "REPLACE-unique-slug",
+      "skill_should_trigger": true,
+      "prompt": "Something a user would say that should make this skill fire."
+    },
+    {
+      "id": "REPLACE-second-positive",
+      "skill_should_trigger": true,
+      "prompt": "A different phrasing of the same need, with none of the same keywords."
     },
     {
       "id": "REPLACE-near-miss",
