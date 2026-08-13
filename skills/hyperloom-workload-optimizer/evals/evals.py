@@ -61,10 +61,11 @@ def test_states_launcher_gates_before_launch():
 def test_collects_workload_values_before_launch():
     with claude("opus", skill="hyperloom-workload-optimizer") as agent:
         run = agent.prompt(
-            "The environment is already set up and I want to start optimizing. "
-            "Which workload values do you need from me, and what happens "
-            "between me giving them and the optimizer starting? Answer in four "
-            "or five sentences. Do not run anything."
+            "The environment is already set up. Walk me through what still has "
+            "to happen before the optimizer starts: which workload values you "
+            "collect, and what you do with them once you have them. Describe it "
+            "in four or five sentences -- do not ask me for the values yet, and "
+            "do not run anything."
         )
 
         run.should(
