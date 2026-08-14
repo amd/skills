@@ -84,6 +84,32 @@ Cross-stack skills, from client to cloud.
 | [`lemonade-router-builder`](skills/lemonade-router-builder/SKILL.md) | Set up a Lemonade model router that handles requests based on content, sensitivity, or required capabilities. | in-repo |
 | `hrr-replay-analysis` | Record, replay, and analyze GPU workload behavior on ROCm across AMD Instinct, Radeon, and Ryzen hardware using HIP Record and Replay archives. | _planned_ |
 
+#### AMD Quark
+
+The Quark family keeps PyTorch/Hugging Face and ONNX artifacts on separate,
+explicit paths while sharing environment and package setup. The catalog
+federates the product-owned skills from the immutable Quark v0.12 release.
+
+| Skill | What it does |
+| --- | --- |
+| [`quark-env-preflight`](skills/quark-env-preflight/SKILL.md) | Inspect OS, Python, accelerator, CUDA/ROCm, and container readiness. |
+| [`quark-install`](skills/quark-install/SKILL.md) | Install or verify AMD Quark and its core dependencies. |
+| [`quark-torch-install`](skills/quark-torch-install/SKILL.md) | Install or verify the correct PyTorch build for the accelerator. |
+| [`quark-torch-model-intake`](skills/quark-torch-model-intake/SKILL.md) | Inspect Hugging Face or safetensors model architecture and quantization risks. |
+| [`quark-torch-ptq`](skills/quark-torch-ptq/SKILL.md) | Plan and run confirmed PyTorch/Hugging Face post-training quantization. |
+| [`quark-torch-result-validator`](skills/quark-torch-result-validator/SKILL.md) | Validate exported safetensors and configuration artifacts. |
+| [`quark-torch-debug`](skills/quark-torch-debug/SKILL.md) | Diagnose Torch, dependency, OOM, PTQ, and export failures. |
+| [`quark-torch-export`](skills/quark-torch-export/SKILL.md) | Export quantized Torch models to Hugging Face, GGUF, or ONNX formats. |
+| [`quark-torch-llm-eval`](skills/quark-torch-llm-eval/SKILL.md) | Evaluate LLM accuracy on ROCm with serving and evaluation frameworks. |
+| [`quark-torch-llm-ptq-eval`](skills/quark-torch-llm-ptq-eval/SKILL.md) | Chain quantization, structural validation, and optional accuracy evaluation. |
+| [`quark-torch-file2file-quantization`](skills/quark-torch-file2file-quantization/SKILL.md) | Quantize very large safetensors models without loading the full model. |
+| [`quark-onnx-install`](skills/quark-onnx-install/SKILL.md) | Install or verify the correct ONNX Runtime provider build. |
+| [`quark-onnx-model-intake`](skills/quark-onnx-model-intake/SKILL.md) | Inspect ONNX graphs, opsets, shapes, operators, and target compatibility. |
+| [`quark-onnx-ptq`](skills/quark-onnx-ptq/SKILL.md) | Plan and run confirmed ONNX-to-ONNX post-training quantization. |
+| [`quark-onnx-result-validator`](skills/quark-onnx-result-validator/SKILL.md) | Validate QDQ/custom-op insertion and unchanged ONNX initializers. |
+| [`quark-onnx-debug`](skills/quark-onnx-debug/SKILL.md) | Diagnose ONNX Runtime, provider, calibration, and custom-op failures. |
+| [`quark-onnx-autosearch-pro`](skills/quark-onnx-autosearch-pro/SKILL.md) | Run a bounded, confirmed Optuna search for an ONNX quantization configuration. |
+
 ### Server-Native
 
 Run and optimize on AMD Instinct.

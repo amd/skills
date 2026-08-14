@@ -1,0 +1,10 @@
+{
+  "source": "amd-quark",
+  "repo": "amd/Quark",
+  "ref": "v0.12",
+  "commit": "1b229f781a1974cc742884e42d8eefc1eebb4f0a",
+  "path": ".claude/skills/quark-onnx-debug",
+  "license": "MIT",
+  "imported_at": "2026-08-05T21:07:39Z",
+  "implementation_path": ".claude/skills-impl/l1-atomic/onnx/quark-onnx-debug"
+}
