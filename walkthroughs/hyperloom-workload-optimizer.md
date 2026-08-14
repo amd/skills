@@ -8,9 +8,9 @@ MI308X / MI325X / MI355X).
 `manifest.json`, `state.json`, benchmark runs under `runs/`, and a final report
 under `reports/` showing validated throughput gain over baseline.
 
-Expect a full optimization run to take hours depending on `--max-hours` and model
-size. This walkthrough covers workspace bootstrap; a short smoke run is possible
-with a small model and `--max-hours 3 --no-kernel`.
+Step 3 gives three ways to run: a 3-hour demo over serving parameters, a 12-hour
+demo that adds kernel rewrites, and a custom run for any other budget or mix.
+Each comes as a ready-to-paste prompt with its flags.
 
 ## Prerequisites
 
@@ -79,14 +79,42 @@ ls hyperloom/inference_optimizer/assets/install.sh
 test -f .env && grep -q HYPERLOOM_SKILL_PATH .env
 ```
 
-## Step 3 — Launch a short optimization
+## Step 3 — Launch an optimization
 
-Provide a local model path and workload when the agent asks, for example:
+There are three ways to run. Paste the prompt that matches, with your own model
+path — the flags in each are a set, so pass them together.
+
+**1. 3-hour demo.** Serving and config parameters only; the kernel agent is off.
+Expect a modest validated gain, or an honest 0% when the workload has none.
 
 ```text
 Optimize /path/to/Qwen3-8B with vLLM on MI300X: TP=1, conc=64, ISL=1024, OSL=1024,
-max-hours 3, no kernel agent. Launch and monitor.
+max-hours 3, serving parameters only: --no-kernel --no-framework-agent
+--no-enable-roofline --explore-force-exit-hours-remaining 0.05
+--explore-force-exit-budget-pct 0.01 --max-minutes-explore-pct 0.46
+--max-minutes-sweep-pct 0.01. Launch and monitor.
 ```
+
+**2. 12-hour demo.** Every lever, kernel rewrites included. The kernel agent
+needs room to profile, rewrite and revalidate hot kernels, which is where the
+larger gains come from.
+
+```text
+Optimize /path/to/Qwen3-8B with vLLM on MI300X: TP=1, conc=64, ISL=1024, OSL=1024,
+max-hours 12, all components enabled, with --max-minutes-framework-pct 0.01
+--max-minutes-explore-pct 0.42 --max-minutes-kernel-pct 0.42. Launch and monitor.
+```
+
+**3. Custom.** Any other budget or mix of levers. Say what you want and the agent
+starts from whichever demo matches the levers, changing only the hours:
+
+```text
+Optimize /path/to/Qwen3-8B with vLLM on MI300X: TP=1, conc=64, ISL=1024, OSL=1024,
+max-hours 6, serving parameters only. Launch and monitor.
+```
+
+Model, framework, TP, concurrency, sequence lengths, precision and target gain
+are asked for during intake in every case, so change those to suit your workload.
 
 Once workload values are resolved, the agent should run `install.sh` (IR-2),
 the GPU preflight (IR-1), launch `hyperloom.inference_optimizer.cli optimize`
@@ -119,5 +147,6 @@ ls "$USER_DATA_PATH"/*/*/reports/
 ## Next steps
 
 - Resume: `Resume the latest Hyperloom session for <model>.`
-- Full run: increase `--max-hours`, enable kernel-agent (drop `--no-kernel`).
+- Ran the quick profile and want kernel rewrites? Start the 12-hour run from
+  Step 3 rather than raising `--max-hours` on the quick flags.
 - Advanced flags: see `reference.md` in the skill folder.

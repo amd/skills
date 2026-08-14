@@ -182,15 +182,44 @@ Never copy API keys into chat output.
 | CONC | `--conc` | `64` | client concurrency |
 | ISL / OSL | `--isl` / `--osl` | `1024` / `1024` | input / output seq lengths |
 | PRECISION | `--precision` | `bf16` | match checkpoint; `fp8` for FP8 models |
-| MAX_HOURS | `--max-hours` | CLI `2.0` | skill recommends `8`; `3` for smoke |
+| MAX_HOURS | `--max-hours` | CLI `2.0` | offer `3` (quick) or `12` (full); see below |
 | TARGET_GAIN | `--target-gain` | `30` | desired % gain |
 
-**Optional:** `--no-kernel`, `--no-explore`, `--no-framework-agent`,
-`--no-enable-conc-sweep`, `--no-enable-roofline`, `--gpu-type`, `--server-args`,
-`--compare-against-gpu`, phase budget percentages, `--quantize` prelude.
+**Optional:** `--no-explore`, `--no-enable-conc-sweep`, `--gpu-type`,
+`--server-args`, `--compare-against-gpu`, `--quantize` prelude.
 
 Infer `PRECISION` from the model name when obvious (e.g. an `FP8` model implies
 `--precision fp8`) and confirm it — do not silently keep the `bf16` default.
+
+### Budget and flags — offer these three
+
+Offer all three and let the user pick one. The flags in each are a set: pass them
+together, and do not ask for a budget and then ask separately which phases to run.
+
+**1. 3-hour demo** — serving and config parameters only, no kernel rewrites.
+Expect a modest validated gain, or an honest 0% when the workload has no
+parameter headroom.
+
+```text
+--max-hours 3 --no-kernel --no-framework-agent --no-enable-roofline
+--explore-force-exit-hours-remaining 0.05 --explore-force-exit-budget-pct 0.01
+--max-minutes-explore-pct 0.46 --max-minutes-sweep-pct 0.01
+```
+
+**2. 12-hour demo** — every lever, kernel rewrites included. The kernel agent
+needs room to profile, rewrite and revalidate, which is where the larger gains
+come from.
+
+```text
+--max-hours 12 --max-minutes-framework-pct 0.01
+--max-minutes-explore-pct 0.42 --max-minutes-kernel-pct 0.42
+```
+
+**3. Custom** — any other budget or phase mix. Ask for the hours and which
+levers to allow, then start from whichever demo above matches those levers and
+change only `--max-hours`. Keep the 3-hour demo's flags for any budget of 3
+hours or less, whichever levers were asked for. Optional flags come from the
+list above; whatever the result, show the full flag list in the launch plan.
 
 ### Confirmation gate (required before Phase 3)
 
@@ -208,7 +237,11 @@ Launch plan — please confirm:
   ISL=1024  OSL=1024
   PRECISION=fp8
   MAX_HOURS=3     TARGET_GAIN=20%
-  phases        --no-kernel (smoke)
+  profile       quick — no kernel, no framework agent, no roofline
+  flags         --no-kernel --no-framework-agent --no-enable-roofline
+                --explore-force-exit-hours-remaining 0.05
+                --explore-force-exit-budget-pct 0.01
+                --max-minutes-explore-pct 0.46 --max-minutes-sweep-pct 0.01
   RUN_MODE      baremetal
 ```
 
@@ -244,7 +277,9 @@ export OSL=1024
 export PRECISION=fp8
 export MAX_HOURS=3
 export TARGET_GAIN=20
-export OPT_FLAGS="--no-kernel"   # optional Phase 2 flags, space-separated; empty if none
+# The whole flag set for the approved profile, space-separated. The quick
+# profile is shown; a 12-hour run swaps in its own set.
+export OPT_FLAGS="--no-kernel --no-framework-agent --no-enable-roofline --explore-force-exit-hours-remaining 0.05 --explore-force-exit-budget-pct 0.01 --max-minutes-explore-pct 0.46 --max-minutes-sweep-pct 0.01"
 EOF
 ```
 
