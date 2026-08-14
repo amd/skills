@@ -215,11 +215,12 @@ come from.
 --max-minutes-explore-pct 0.42 --max-minutes-kernel-pct 0.42
 ```
 
-**3. Custom** — any other budget or phase mix. Ask for the hours and which
-levers to allow, then start from whichever demo above matches those levers and
-change only `--max-hours`. Keep the 3-hour demo's flags for any budget of 3
-hours or less, whichever levers were asked for. Optional flags come from the
-list above; whatever the result, show the full flag list in the launch plan.
+**3. Custom** — the user chooses instead of taking a demo. Walk through the
+fields in the table above and the phase toggles, one question at a time, and
+derive the flags from the answers rather than asking for flags. Whichever levers
+they pick, a budget of 3 hours or less keeps the 3-hour demo's flag set.
+Optional flags come from the list above; show the full flag list in the launch
+plan either way.
 
 ### Confirmation gate (required before Phase 3)
 

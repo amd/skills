@@ -105,16 +105,17 @@ max-hours 12, all components enabled, with --max-minutes-framework-pct 0.01
 --max-minutes-explore-pct 0.42 --max-minutes-kernel-pct 0.42. Launch and monitor.
 ```
 
-**3. Custom.** Any other budget or mix of levers. Say what you want and the agent
-starts from whichever demo matches the levers, changing only the hours:
+**3. Custom.** Ask for a run and let the agent take you through the choices —
+model, framework, TP/EP, concurrency, sequence lengths, precision, budget and
+which phases to allow. You do not supply flags; the agent derives them from your
+answers.
 
 ```text
-Optimize /path/to/Qwen3-8B with vLLM on MI300X: TP=1, conc=64, ISL=1024, OSL=1024,
-max-hours 6, serving parameters only. Launch and monitor.
+Optimize a model with Hyperloom on this host. Walk me through the choices.
 ```
 
-Model, framework, TP, concurrency, sequence lengths, precision and target gain
-are asked for during intake in every case, so change those to suit your workload.
+Whichever of the three you use, the agent shows the full launch plan — every
+resolved value and every flag — and waits for your approval before it starts.
 
 Once workload values are resolved, the agent should run `install.sh` (IR-2),
 the GPU preflight (IR-1), launch `hyperloom.inference_optimizer.cli optimize`
