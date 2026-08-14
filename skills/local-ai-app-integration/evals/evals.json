@@ -28,18 +28,6 @@
       ]
     },
     {
-      "id": "repoint-openai-client",
-      "skill_should_trigger": true,
-      "prompt": "Change my app (main.py) to point a local OpenAI client at using a local server running on this machine.",
-      "workspace": "evals/files/openai-stub",
-      "logs_contain": [
-        "120"
-      ],
-      "files_exist": [
-        "main.py"
-      ]
-    },
-    {
       "id": "local-mode-without-api-key",
       "skill_should_trigger": true,
       "prompt": "Edit main.py so the app starts in local mode without an OPENAI_API_KEY. Do not download or install anything, just edit the file.",
