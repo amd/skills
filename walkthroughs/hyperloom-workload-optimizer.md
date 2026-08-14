@@ -1,8 +1,7 @@
 # AMD Skills Walkthroughs: `hyperloom-workload-optimizer`
 
 This skill teaches your AI agent to set up a Hyperloom workspace and autonomously
-optimize end-to-end LLM inference throughput on AMD Instinct GPUs (MI300X /
-MI308X / MI325X / MI355X).
+optimize end-to-end LLM inference throughput on AMD Instinct GPUs (MI300X / MI325X / MI355X).
 
 **What you'll end up with:** a running Hyperloom optimization session with
 `manifest.json`, `state.json`, benchmark runs under `runs/`, and a final report
@@ -10,25 +9,43 @@ under `reports/` showing validated throughput gain over baseline.
 
 Step 3 gives three ways to run: a 3-hour demo over serving parameters, a 12-hour
 demo that adds kernel rewrites, and a custom run for any other budget or mix.
-Each comes as a ready-to-paste prompt with its flags.
 
 ## Prerequisites
 
-**Hardware**
+Run the agent on the target GPU host. The shell where Cursor, Claude Code runs must be able to see the AMD Instinct GPU and ROCm devices.
 
-- AMD Instinct GPU with ROCm (`/dev/kfd`, `/dev/dri`)
-- Sufficient VRAM for the target model at the chosen TP degree
+Check the things that must already be true:
 
-**Software**
+```bash
+test -e /dev/kfd && test -e /dev/dri
+(amd-smi || rocm-smi) >/dev/null
+python3 --version
+node --version
+```
 
-- Python 3.10+
-- An agentic runner: **Cursor**, **Claude Code**, or **Codex**
-- Anthropic API access (or AMD LLM gateway) for Hyperloom agent backends
-- Docker (recommended) or bare-metal ROCm + serving framework
+You also need:
 
-**Workspace**
-
+- AMD Instinct GPU hardware, such as MI300X / MI325X / MI355X
+- Python 3.10+ for the Hyperloom runtime; Python 3.12 when the setup flow will
+  install vLLM on bare metal
+- Node.js, for the `npx skills add ...` install path
+- An agentic runner: **Cursor** or **Claude Code**
+- Anthropic API access, or AMD LLM gateway access, for Hyperloom agent backends
 - A dedicated empty directory opened as the agent workspace
+
+Use these values for the placeholders in the prompts below:
+
+- `<framework>`: `vllm` or `sglang`
+- `<gpu-type>`: `MI300X`, `MI325X`, or `MI355X`
+
+You do **not** need to decide these before Step 2:
+
+- Docker vs. bare metal — `/hyperloom-setup` asks for the run mode and explains
+  the tradeoff.
+- Model path, TP/EP, concurrency, ISL/OSL, precision, or target gain — those are
+  workload choices collected later.
+- Exact credential variable names — setup writes `.env` and tells you which
+  secret value to fill in.
 
 ## Step 1 — Enable the skill
 
@@ -55,40 +72,50 @@ You should see `hyperloom-workload-optimizer` in the list.
 In the dedicated workspace, ask the agent:
 
 ```text
-Set up Hyperloom and prepare to optimize vLLM throughput on MI300X.
+Install Hyperloom and set up the execution environment for <framework> on <gpu-type>.
 ```
 
-The agent works through four phases in order and should not ask workload
-questions before the environment is ready:
+This step prepares the workspace and execution environment only:
 
 1. **Phase 0 — Bootstrap:** confirm the install directory, install a pinned
    `hyperloom-inference-optimizer` release from PyPI with `pip install --target .`,
    then run `/hyperloom-setup` to write `.env` (credentials + run mode only).
-2. **Phase 1 — Environment prep:** load `hyperloom-custom-advanced` Setup
-   Configuration. On bare metal, confirm the host is ready; in Docker, start a
+2. **Phase 1 — Environment prep:** choose Docker or bare metal, then prepare
+   that environment. On bare metal, confirm the host stack; in Docker, start a
    long-running container and run the in-container setup first.
-3. **Phase 2 — Workload intake:** only now ask for workload parameters (model,
-   framework, TP, conc, ISL/OSL, precision, budget) and confirm a launch plan.
-4. **Phase 3 — Execute:** run `install.sh` (IR-2) and the GPU preflight (IR-1),
-   then launch and monitor.
 
-Verify:
+Choose **Docker** when you want the validated, reproducible ROCm + framework
+stack and can run containers with GPU devices mapped in. Choose **bare metal**
+when the host already has the ROCm/framework stack you want to use, or when
+containers are unavailable. Bare metal is more sensitive to host packages and
+can modify the environment, so prefer Docker for first-time walkthroughs when it
+is available.
+
+Save model selection, workload choices and launch approval for Step 3.
+
+Verify the setup handoff:
 
 ```bash
 ls hyperloom/inference_optimizer/assets/install.sh
-test -f .env && grep -q HYPERLOOM_SKILL_PATH .env
+test -f .env
+grep -E '^(USER_DATA_PATH|HYPERLOOM_RUN_MODE)=' .env
 ```
+
 
 ## Step 3 — Launch an optimization
 
-There are three ways to run. Paste the prompt that matches, with your own model
-path — the flags in each are a set, so pass them together.
+Start this step only after Step 2 has written `.env` and prepared the execution
+environment. Step 3 reuses the Docker or bare-metal run mode recorded in `.env`;
+do not choose it again here.
+
+There are three ways to run. Paste the prompt that matches, replacing
+`<model-path>`, `<framework>` and `<gpu-type>` with your target — the flags in
+each are a set, so pass them together.
 
 **1. 3-hour demo.** Serving and config parameters only; the kernel agent is off.
-Expect a modest validated gain, or an honest 0% when the workload has none.
 
 ```text
-Optimize /path/to/Qwen3-8B with vLLM on MI300X: TP=1, conc=64, ISL=1024, OSL=1024,
+Optimize <model-path> with <framework> on <gpu-type>: TP=1, conc=64, ISL=1024, OSL=1024,
 max-hours 3, serving parameters only: --no-kernel --no-framework-agent
 --no-enable-roofline --explore-force-exit-hours-remaining 0.05
 --explore-force-exit-budget-pct 0.01 --max-minutes-explore-pct 0.46
@@ -100,7 +127,7 @@ needs room to profile, rewrite and revalidate hot kernels, which is where the
 larger gains come from.
 
 ```text
-Optimize /path/to/Qwen3-8B with vLLM on MI300X: TP=1, conc=64, ISL=1024, OSL=1024,
+Optimize <model-path> with <framework> on <gpu-type>: TP=1, conc=64, ISL=1024, OSL=1024,
 max-hours 12, all components enabled, with --max-minutes-framework-pct 0.01
 --max-minutes-explore-pct 0.42 --max-minutes-kernel-pct 0.42. Launch and monitor.
 ```

@@ -8,7 +8,7 @@ description: >-
   parameters and env, framework enablement and source patches, and hot GPU-kernel
   rewrites), benchmarks each candidate, and returns the optimization stack that
   produced the gain. Use when the user wants to make a model serve faster, raise
-  tokens/sec or throughput, optimize or tune vLLM or SGLang on MI300X/MI308X/MI325X/MI355X,
+  tokens/sec or throughput, optimize or tune vLLM or SGLang on MI300X/MI325X/MI355X,
   run Hyperloom, run the kernel-agent, quantize-then-optimize with Quark, set up
   Hyperloom from scratch, or resume a Hyperloom session. Do not use to stand up a
   server for plain serving, diagnose a broken ROCm install, or run a one-off
@@ -34,7 +34,7 @@ Do not manually optimize inside chat unless debugging.
 
 ## Prerequisites
 
-- AMD Instinct GPU host (MI300X / MI308X / MI325X / MI355X) with ROCm
+- AMD Instinct GPU host (MI300X / MI325X / MI355X) with ROCm
 - `/dev/kfd` and `/dev/dri` present; `amd-smi` or `rocm-smi` works
 - Python 3.10+ and network access to install the Hyperloom wheel
 - Anthropic (or compatible) LLM credentials for agent backends
