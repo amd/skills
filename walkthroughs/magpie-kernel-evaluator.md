@@ -58,7 +58,8 @@ magpie --gpu-info
 
 Before installing the AMD skill, ask Claude Code which skills it sees. Then
 install `magpie-kernel-evaluator` with the
-[`skills` CLI](https://github.com/vercel-labs/skills):
+[`skills` CLI](https://github.com/vercel-labs/skills). Run all three commands in
+your terminal; the `npx` one is a shell command, not a Claude prompt:
 
 ```bash
 claude "Which skills can you see?" --model sonnet

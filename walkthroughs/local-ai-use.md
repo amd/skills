@@ -10,7 +10,7 @@ The goal of this skill is to teach your AI agent to use image generation, text g
 
 ## Step 2 - Enabling claude to see `local-ai-use`
 
-* Install the skill with the [`skills` CLI](https://github.com/vercel-labs/skills):
+* Install the skill with the [`skills` CLI](https://github.com/vercel-labs/skills). Run this in your terminal, not inside Claude:
 
 ```bash
 npx skills add amd/skills --skill local-ai-use --agent claude-code
