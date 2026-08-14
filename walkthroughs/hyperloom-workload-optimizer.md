@@ -109,17 +109,20 @@ environment. Step 3 reuses the Docker or bare-metal run mode recorded in `.env`;
 do not choose it again here.
 
 There are three ways to run. Paste the prompt that matches, replacing
-`<model-path>`, `<framework>` and `<gpu-type>` with your target — the flags in
-each are a set, so pass them together.
+`<framework>` and `<gpu-type>` with your target — the flags in each are a set, so
+pass them together. The two demos use the same model and workload as the matching
+Hyperloom demo skill; pick **Custom** to bring your own model or workload.
 
-**1. 3-hour demo.** Serving and config parameters only; the kernel agent is off.
+**1. 3-hour demo.** Serving and config parameters only; the kernel agent is
+off.
 
 ```text
-Optimize <model-path> with <framework> on <gpu-type>: TP=1, conc=64, ISL=1024, OSL=1024,
-max-hours 3, serving parameters only: --no-kernel --no-framework-agent
---no-enable-roofline --explore-force-exit-hours-remaining 0.05
---explore-force-exit-budget-pct 0.01 --max-minutes-explore-pct 0.46
---max-minutes-sweep-pct 0.01. Launch and monitor.
+Optimize Qwen/Qwen3-8B with <framework> on <gpu-type>: TP=1, conc=64, ISL=1024,
+OSL=1024, precision bf16, target-gain 30, max-hours 3, serving parameters only:
+--no-framework-agent --no-kernel --no-enable-conc-sweep --no-enable-roofline
+--max-minutes-explore-pct 0.39 --max-minutes-sweep-pct 0.01
+--explore-force-exit-budget-pct 0.01 --explore-force-exit-hours-remaining 0.05.
+Launch and monitor.
 ```
 
 **2. 12-hour demo.** Every lever, kernel rewrites included. The kernel agent
@@ -127,9 +130,11 @@ needs room to profile, rewrite and revalidate hot kernels, which is where the
 larger gains come from.
 
 ```text
-Optimize <model-path> with <framework> on <gpu-type>: TP=1, conc=64, ISL=1024, OSL=1024,
-max-hours 12, all components enabled, with --max-minutes-framework-pct 0.01
---max-minutes-explore-pct 0.42 --max-minutes-kernel-pct 0.42. Launch and monitor.
+Optimize Qwen/Qwen3-14B-FP8 with <framework> on <gpu-type>: TP=1, conc=64,
+ISL=1024, OSL=1024, precision fp8, target-gain 30, max-hours 12, all components
+enabled:
+--max-minutes-framework-pct 0.01 --max-minutes-explore-pct 0.42
+--max-minutes-kernel-pct 0.42. Launch and monitor.
 ```
 
 **3. Custom.** Ask for a run and let the agent take you through the choices —
@@ -175,6 +180,6 @@ ls "$USER_DATA_PATH"/*/*/reports/
 ## Next steps
 
 - Resume: `Resume the latest Hyperloom session for <model>.`
-- Ran the quick profile and want kernel rewrites? Start the 12-hour run from
-  Step 3 rather than raising `--max-hours` on the quick flags.
+- Ran the 3-hour demo and want kernel rewrites? Start the 12-hour run from
+  Step 3 rather than raising `--max-hours` on the 3-hour demo's flags.
 - Advanced flags: see `reference.md` in the skill folder.

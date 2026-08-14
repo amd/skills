@@ -195,30 +195,39 @@ Infer `PRECISION` from the model name when obvious (e.g. an `FP8` model implies
 
 Offer all three and let the user pick one. The flags in each are a set: pass them
 together, and do not ask for a budget and then ask separately which phases to run.
+The two demos fix the model and the workload to match the Hyperloom demo skill of
+the same budget — take those values as given, skip the table above, and confirm
+them in the launch plan. Only **Custom** collects workload answers.
 
-**1. 3-hour demo** — serving and config parameters only, no kernel rewrites.
-Expect a modest validated gain, or an honest 0% when the workload has no
-parameter headroom.
-
-```text
---max-hours 3 --no-kernel --no-framework-agent --no-enable-roofline
---explore-force-exit-hours-remaining 0.05 --explore-force-exit-budget-pct 0.01
---max-minutes-explore-pct 0.46 --max-minutes-sweep-pct 0.01
-```
-
-**2. 12-hour demo** — every lever, kernel rewrites included. The kernel agent
-needs room to profile, rewrite and revalidate, which is where the larger gains
-come from.
+**1. 3-hour demo** (`hyperloom-qwen3-8b-3h`) — `Qwen/Qwen3-8B`, TP=1, CONC=64,
+ISL=OSL=1024, `--precision bf16`, serving and config parameters only, no kernel
+rewrites. Resolve the model per custom-advanced Model Resolution; download it
+from Hugging Face when it is not already local. Expect a modest validated gain,
+or an honest 0% when the workload has no parameter headroom.
 
 ```text
---max-hours 12 --max-minutes-framework-pct 0.01
---max-minutes-explore-pct 0.42 --max-minutes-kernel-pct 0.42
+--max-hours 3 --precision bf16
+--no-framework-agent --no-kernel --no-enable-conc-sweep --no-enable-roofline
+--max-minutes-explore-pct 0.39 --max-minutes-sweep-pct 0.01
+--explore-force-exit-budget-pct 0.01 --explore-force-exit-hours-remaining 0.05
 ```
 
-**3. Custom** — the user chooses instead of taking a demo. Walk through the
-fields in the table above and the phase toggles, one question at a time, and
-derive the flags from the answers rather than asking for flags. Whichever levers
-they pick, a budget of 3 hours or less keeps the 3-hour demo's flag set.
+**2. 12-hour demo** (`hyperloom-qwen3-14b-fp8-12h`) — `Qwen/Qwen3-14B-FP8`,
+TP=1, CONC=64, ISL=OSL=1024, `--precision fp8`, every lever with kernel rewrites
+included. The kernel agent needs room to profile, rewrite and revalidate, which
+is where the larger gains come from.
+
+```text
+--max-hours 12 --precision fp8
+--max-minutes-framework-pct 0.01 --max-minutes-explore-pct 0.42
+--max-minutes-kernel-pct 0.42
+```
+
+**3. Custom** — the user brings their own model or workload instead of taking a
+demo. Walk through the fields in the table above and the phase toggles, one
+question at a time, and derive the flags from the answers rather than asking for
+flags. Whichever levers they pick, a budget of 3 hours or less keeps the 3-hour
+demo's flag set.
 Optional flags come from the list above; show the full flag list in the launch
 plan either way.
 
@@ -238,11 +247,12 @@ Launch plan — please confirm:
   ISL=1024  OSL=1024
   PRECISION=fp8
   MAX_HOURS=3     TARGET_GAIN=20%
-  profile       quick — no kernel, no framework agent, no roofline
-  flags         --no-kernel --no-framework-agent --no-enable-roofline
-                --explore-force-exit-hours-remaining 0.05
+  profile       3-hour demo — no kernel, no framework agent, no roofline
+  flags         --no-framework-agent --no-kernel --no-enable-conc-sweep
+                --no-enable-roofline
+                --max-minutes-explore-pct 0.39 --max-minutes-sweep-pct 0.01
                 --explore-force-exit-budget-pct 0.01
-                --max-minutes-explore-pct 0.46 --max-minutes-sweep-pct 0.01
+                --explore-force-exit-hours-remaining 0.05
   RUN_MODE      baremetal
 ```
 
@@ -278,9 +288,9 @@ export OSL=1024
 export PRECISION=fp8
 export MAX_HOURS=3
 export TARGET_GAIN=20
-# The whole flag set for the approved profile, space-separated. The quick
-# profile is shown; a 12-hour run swaps in its own set.
-export OPT_FLAGS="--no-kernel --no-framework-agent --no-enable-roofline --explore-force-exit-hours-remaining 0.05 --explore-force-exit-budget-pct 0.01 --max-minutes-explore-pct 0.46 --max-minutes-sweep-pct 0.01"
+# The whole flag set for the approved profile, space-separated. The 3-hour
+# demo is shown; a 12-hour run swaps in its own set.
+export OPT_FLAGS="--no-framework-agent --no-kernel --no-enable-conc-sweep --no-enable-roofline --max-minutes-explore-pct 0.39 --max-minutes-sweep-pct 0.01 --explore-force-exit-budget-pct 0.01 --explore-force-exit-hours-remaining 0.05"
 EOF
 ```
 
