@@ -110,11 +110,13 @@ do not choose it again here.
 
 There are three ways to run. Paste the prompt that matches, replacing
 `<framework>` and `<gpu-type>` with your target — the flags in each are a set, so
-pass them together. The two demos use the same model and workload as the matching
-Hyperloom demo skill; pick **Custom** to bring your own model or workload.
+pass them together. The two demos carry the same workload and flags as the
+matching Hyperloom demo skill; you can point either one at your own model, and
+**Custom** is for changing the workload itself.
 
 **1. 3-hour demo.** Serving and config parameters only; the kernel agent is
-off.
+off. Swap in your own model if you want; with a 3-hour budget keep it at 8B or
+below.
 
 ```text
 Optimize Qwen/Qwen3-8B with <framework> on <gpu-type>: TP=1, conc=64, ISL=1024,

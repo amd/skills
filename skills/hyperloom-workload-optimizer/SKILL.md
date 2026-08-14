@@ -195,15 +195,18 @@ Infer `PRECISION` from the model name when obvious (e.g. an `FP8` model implies
 
 Offer all three and let the user pick one. The flags in each are a set: pass them
 together, and do not ask for a budget and then ask separately which phases to run.
-The two demos fix the model and the workload to match the Hyperloom demo skill of
-the same budget — take those values as given, skip the table above, and confirm
-them in the launch plan. Only **Custom** collects workload answers.
+The two demos take the workload and flags of the Hyperloom demo skill of the same
+budget — treat those as given and skip the table above. The user may name their
+own model instead of the demo's; for the 3-hour demo keep it at 8B or below.
+Confirm everything in the launch plan. Only **Custom** collects workload answers.
 
-**1. 3-hour demo** (`hyperloom-qwen3-8b-3h`) — `Qwen/Qwen3-8B`, TP=1, CONC=64,
-ISL=OSL=1024, `--precision bf16`, serving and config parameters only, no kernel
-rewrites. Resolve the model per custom-advanced Model Resolution; download it
-from Hugging Face when it is not already local. Expect a modest validated gain,
-or an honest 0% when the workload has no parameter headroom.
+**1. 3-hour demo** (`hyperloom-qwen3-8b-3h`) — `Qwen/Qwen3-8B` unless the user
+names another 8B-or-smaller model, TP=1, CONC=64, ISL=OSL=1024,
+`--precision bf16`, serving and config parameters only, no kernel rewrites.
+Resolve the model per custom-advanced Model Resolution; download it from Hugging
+Face when it is not already local. Match `--precision` to the chosen checkpoint.
+Expect a modest validated gain, or an honest 0% when the workload has no
+parameter headroom.
 
 ```text
 --max-hours 3 --precision bf16
@@ -212,10 +215,11 @@ or an honest 0% when the workload has no parameter headroom.
 --explore-force-exit-budget-pct 0.01 --explore-force-exit-hours-remaining 0.05
 ```
 
-**2. 12-hour demo** (`hyperloom-qwen3-14b-fp8-12h`) — `Qwen/Qwen3-14B-FP8`,
-TP=1, CONC=64, ISL=OSL=1024, `--precision fp8`, every lever with kernel rewrites
-included. The kernel agent needs room to profile, rewrite and revalidate, which
-is where the larger gains come from.
+**2. 12-hour demo** (`hyperloom-qwen3-14b-fp8-12h`) — `Qwen/Qwen3-14B-FP8`
+unless the user names another model, TP=1, CONC=64, ISL=OSL=1024,
+`--precision fp8` matched to the chosen checkpoint, every lever with kernel
+rewrites included. The kernel agent needs room to profile, rewrite and
+revalidate, which is where the larger gains come from.
 
 ```text
 --max-hours 12 --precision fp8
