@@ -10,10 +10,10 @@ environment plumbing the dataset format cannot express. The runner calls
 
 The eval runner cleans up the agent's temp workspace but knows nothing about
 Docker, so on a shared MI300X runner we remove the container the agent
-launched. Cleanup also runs *before* the case, because a container left behind
-by an earlier run is a healthy endpoint the agent will reasonably reuse instead
-of launching its own -- which silently turns the launch expectation into a
-failure that looks like a skill regression.
+launched. Cleanup also runs *before* the case, so a run starts from a clean
+machine rather than inheriting a half-dead endpoint from a crashed earlier one.
+A leftover is reported and not fatal: the dataset grades the endpoint the case
+ends with, so an agent that reuses a healthy container still answers correctly.
 """
 
 from __future__ import annotations
@@ -73,13 +73,14 @@ def _cleanup_test_containers() -> None:
 
 
 def setup(workspace, case, ctx) -> None:
-    """Guarantee no pre-existing test container before the agent starts."""
+    """Clear stale test containers so the case starts from a clean machine."""
     _cleanup_test_containers()
     leftover = [cid for cid, text in _docker_rows() if _MODEL_MARKER.search(text)]
     if leftover:
-        raise RuntimeError(
-            f"could not remove pre-existing {MODEL_ID} container(s) {leftover}; "
-            "the agent would reuse the running endpoint instead of launching"
+        print(
+            f"  [cleanup] warning: {MODEL_ID} container(s) {leftover} survived "
+            "removal; the agent may serve this case from the running endpoint",
+            flush=True,
         )
 
 

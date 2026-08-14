@@ -70,6 +70,8 @@ Four optional fields, all arrays, all valid only on a `true` evaluation:
 
 The bottom two are instant and free where a judged expectation costs a second agent call, so reach for them when the thing you want is literal. Never assert your own skill's name in `logs_contain`; triggering is already graded properly.
 
+A `files_exist` entry matches whole path segments anywhere in the workspace, so `plan.md` is satisfied by `examples/plan.md` and `out/report.md` by `run-1/out/report.md`. Name the artifact rather than the directory you hope the agent picks: where a file lands is usually the agent's call, and a plan written beside the fixture it describes should not fail the run. If the location matters, ask for it in the prompt and grade it with `expected_behavior`.
+
 The full field reference is
 [`eval/schema/evals.schema.json`](../eval/schema/evals.schema.json), enforced by
 `python eval/run_evals.py --validate`.

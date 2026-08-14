@@ -71,7 +71,7 @@
         "files_exist": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 },
-          "description": "Workspace-relative paths that must exist as files when the run ends."
+          "description": "Files that must exist when the run ends. Each entry is matched against whole path segments anywhere in the workspace, so `plan.md` is satisfied by `examples/plan.md` and `out/report.md` by `run-1/out/report.md`. Name the artifact, not the directory you hope the agent picks; if the location itself matters, say so in the prompt and grade it as a behavior."
         },
         "workspace": {
           "type": "string",

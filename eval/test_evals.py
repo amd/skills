@@ -545,6 +545,35 @@ class TestRunGrading(unittest.TestCase):
         self.assertTrue(checks[0].passed)
         self.assertFalse(checks[1].passed)
 
+    def test_files_exist_finds_the_artifact_in_a_subdirectory(self) -> None:
+        # Where a plan lands is the agent's call; asking for `plan.md` and
+        # getting `examples/fixture/plan.md` is a pass, not a defect.
+        nested = self.workspace / "examples" / "fixture"
+        nested.mkdir(parents=True)
+        (nested / "plan.md").write_text("x", encoding="utf-8")
+        checks = self.make_run(stream()).evaluate(files_exist=["plan.md"])
+        self.assertTrue(checks[0].passed)
+        self.assertIn("examples/fixture/plan.md", checks[0].detail)
+
+    def test_files_exist_matches_whole_segments_only(self) -> None:
+        (self.workspace / "analyze_plan.md").write_text("x", encoding="utf-8")
+        checks = self.make_run(stream()).evaluate(files_exist=["plan.md"])
+        self.assertFalse(checks[0].passed)
+
+    def test_files_exist_keeps_the_directory_context_it_was_given(self) -> None:
+        deep = self.workspace / "run-1" / "analysis_output"
+        deep.mkdir(parents=True)
+        (deep / "analysis.md").write_text("x", encoding="utf-8")
+        (self.workspace / "analysis.md").write_text("x", encoding="utf-8")
+        run = self.make_run(stream())
+        self.assertTrue(run.evaluate(files_exist=["analysis_output/analysis.md"])[0].passed)
+        self.assertFalse(run.evaluate(files_exist=["other_output/analysis.md"])[0].passed)
+
+    def test_files_exist_ignores_a_directory_of_the_wanted_name(self) -> None:
+        (self.workspace / "out.png").mkdir()
+        checks = self.make_run(stream()).evaluate(files_exist=["out.png"])
+        self.assertFalse(checks[0].passed)
+
     def test_every_expectation_is_reported_not_just_the_first(self) -> None:
         # A run that cost minutes should not have to be repeated to discover
         # the second thing wrong with it.

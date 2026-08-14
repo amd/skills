@@ -221,6 +221,28 @@ def _list_workspace_files(workspace: Path) -> list[str]:
     return files
 
 
+def _find_file(files: list[str], expected: str) -> str | None:
+    """Return the workspace file that satisfies ``expected``, or None.
+
+    An expectation matches anywhere in the tree: ``analyze_plan.md`` is
+    satisfied by ``examples/simple_hip_test/analyze_plan.md``, and
+    ``out/report.md`` by ``run-1/out/report.md``. Only whole path segments
+    count, so ``plan.md`` does not match ``analyze_plan.md``.
+
+    A case asserts that an artifact was produced; which directory the agent
+    chose for it is usually its own call, and a plan written beside the fixture
+    it describes is not a failed run. Pin the location down in the prompt when
+    it matters, and the judged expectations can grade whether it was honored.
+    """
+    wanted = expected.replace("\\", "/").strip("/")
+    if wanted.startswith("./"):
+        wanted = wanted[2:]
+    for rel in files:
+        if rel == wanted or rel.endswith("/" + wanted):
+            return rel
+    return None
+
+
 def _grade_with_llm(
     statement: str, run: "Run", judge_model: str | None, *, must_happen: bool
 ) -> tuple[bool, str]:
@@ -377,9 +399,12 @@ class Run:
             checks.append(Check("logs_contain", text, ok))
 
         for path in files_exist:
-            ok = (self.workspace / path).is_file()
-            detail = "" if ok else f"workspace holds: {self.files or 'nothing'}"
-            checks.append(Check("files_exist", path, ok, detail))
+            found = _find_file(self.files, path)
+            if found is None:
+                detail = f"workspace holds: {self.files or 'nothing'}"
+            else:
+                detail = "" if found == path else f"found at {found}"
+            checks.append(Check("files_exist", path, found is not None, detail))
 
         for statement in expected_behavior:
             ok, reason = _grade_with_llm(statement, self, self.judge_model, must_happen=True)
@@ -406,11 +431,11 @@ class Run:
         return self
 
     def workspace_contains(self, path: str) -> "Run":
-        ok = (self.workspace / path).is_file()
+        found = _find_file(self.files, path)
         detail = f"workspace contains '{path}'"
-        if not ok:
+        if found is None:
             detail += f" (files: {self.files or 'none'})"
-        self._report(ok, "workspace_contains", detail)
+        self._report(found is not None, "workspace_contains", detail)
         return self
 
     def expects(self, statement: str) -> "Run":

@@ -3,11 +3,12 @@
     {
       "id": "serve-tiny-model-on-instinct",
       "skill_should_trigger": true,
+      "note": "Graded on the endpoint that exists at the end, not on how it got there: reusing a healthy container already serving this model is a correct answer on a shared runner, and the model check below is what keeps that from becoming a loophole.",
       "prompt": "Serve Qwen/Qwen3-0.6B on this AMD Instinct GPU with vLLM. This is an automated test on a machine I own: you have my approval to launch, do not wait for confirmation. Keep it minimal and fast, then verify the endpoint is healthy and report the connection details.",
       "expected_behavior": [
         "Detect the AMD Instinct GPU before configuring vLLM",
-        "Launch the model with vLLM inside a Docker container on the AMD GPU",
-        "Verify the vLLM endpoint is healthy after launching"
+        "Leave Qwen/Qwen3-0.6B served by vLLM in a Docker container on the AMD GPU, whether by launching one or by reusing a container already serving that model",
+        "Verify the vLLM endpoint is healthy before reporting the connection details"
       ],
       "unexpected_behavior": [
         "Fall back to a cloud LLM provider or an NVIDIA/CUDA code path",
