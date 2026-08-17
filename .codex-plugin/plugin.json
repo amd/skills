@@ -22,7 +22,8 @@
     "./skills/local-ai-app-integration",
     "./skills/serving-llms-on-instinct",
     "./skills/tracelens-analysis-orchestrator",
-    "./skills/hyperloom-workload-optimizer"
+    "./skills/hyperloom-workload-optimizer",
+    "./skills/optimizing-models-with-quark"
   ],
   "interface": {
     "displayName": "AMD",

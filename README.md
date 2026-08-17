@@ -80,6 +80,7 @@ Cross-stack skills, from client to cloud.
 | [`rocm-doctor`](https://github.com/amd/skills/blob/main/staging/rocm-doctor/SKILL.md) | Diagnose ROCm, HIP, PyTorch, or llama.cpp failures on AMD GPUs (Linux and Windows) against a closed list of known misconfigurations, then fix with consent or route upstream. Thin driver over the `rocm` CLI (`examine`, `diagnose`, or `fix`). | _planned_ |
 | [`lemonade-router-builder`](https://github.com/amd/skills/blob/main/skills/lemonade-router-builder/SKILL.md) | Set up a Lemonade model router that handles requests based on content, sensitivity, or required capabilities. | in-repo |
 | `hrr-replay-analysis` | Record, replay, and analyze GPU workload behavior on ROCm across AMD Instinct, Radeon, and Ryzen hardware using HIP Record and Replay archives. | _planned_ |
+| [`optimizing-models-with-quark`](https://github.com/amd/skills/blob/main/skills/optimizing-models-with-quark/SKILL.md) | Quantize a PyTorch or ONNX model with AMD Quark: fetch Quark's own skill tree on consent, then route to the Torch PTQ, ONNX PTQ, or environment-setup starting point. | in-repo |
 
 ### Server-native
 
