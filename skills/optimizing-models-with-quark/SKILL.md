@@ -73,6 +73,11 @@ Two paths, because two things are needed. `.claude` holds the skills. The
 runs — the pip package does not ship it, and without it that workflow stalls at
 its first step.
 
+This clone brings the skills, not the library. Quark itself comes from PyPI as
+`pip install amd-quark`, driven by the `quark-install` starting point, never
+from `<QUARK_TREE>`: the `quark/` package source is outside the two paths above,
+so no install run from the cache directory can produce a working Quark.
+
 Clone the default branch. Do not pin a branch or tag: the default branch tracks
 the current Quark release, which is what the installed `amd-quark` package will
 match.
@@ -148,6 +153,10 @@ does not read as a failure:
 
 ## Rules
 
+- **The library comes from PyPI, the skills come from git.** `pip install
+  amd-quark`, or the matching pre-built wheel from the AMD package index, is the
+  install path this entry point endorses. `quark-install` also documents a
+  from-source option; take it only when the user explicitly asks for it.
 - **Treat `<QUARK_TREE>` as read-only.** Quark's own skills forbid modifying
   upstream code, examples, and tutorials. Generated quantization scripts, output
   models, and artifacts go in the user's working directory, never in the cache.
