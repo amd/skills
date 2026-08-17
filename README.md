@@ -83,6 +83,7 @@ Cross-stack skills, from client to cloud.
 | `hyperloom-workload-optimizer` | Autonomously optimizes LLM inference on AMD GPUs. | _planned_ |
 | [`lemonade-router-builder`](skills/lemonade-router-builder/SKILL.md) | Set up a Lemonade model router that handles requests based on content, sensitivity, or required capabilities. | in-repo |
 | `hrr-replay-analysis` | Record, replay, and analyze GPU workload behavior on ROCm across AMD Instinct, Radeon, and Ryzen hardware using HIP Record and Replay archives. | _planned_ |
+| [`optimizing-models-with-quark`](skills/optimizing-models-with-quark/SKILL.md) | Quantize a PyTorch or ONNX model with AMD Quark: fetch Quark's own skill tree on consent, then route to the Torch PTQ, ONNX PTQ, or environment-setup starting point. | in-repo |
 
 ### Server-Native
 
