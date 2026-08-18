@@ -1,0 +1,368 @@
+name: evals
+
+# One workflow for both halves of "does this skill work?", reading the same
+# per-skill datasets at skills/<name>/evals/evals.json:
+#
+#   * routing  -- installs every skill at once and checks that each prompt
+#     activates the skill it should, and that the ones which should activate
+#     nothing don't. Catalog-wide by nature: a skill tested alone will happily
+#     answer prompts that belong to its neighbour. Cheap, because each case is
+#     killed the moment the routing decision is observable.
+#   * behavior -- installs one skill, runs the prompt to completion, and grades
+#     what the agent actually did.
+#
+# Selective: routing runs only when a change can move a routing decision (a
+# SKILL.md description or a dataset), and behavior runs only for the skills a
+# change touches. The whole suite runs when the shared engine changes.
+#
+# Which class of machine a skill's behavior job needs is declared by the skill,
+# in skills/<name>/evals/machine.yml, and resolved to labels, gates, and
+# credentials by eval/datasets.py. Nothing here names a skill: a hardcoded list
+# of which skills need which runner lives in the wrong place and drifts from
+# reality the first time a skill is added.
+#
+# Shape mirrors validate.yml: discover -> matrix -> single aggregate gate, so
+# branch protection can require just the `evals` check.
+
+on:
+  pull_request:
+    # `labeled` is here so adding a gate label (e.g. enable_mi_ci) to an open PR
+    # starts that leg. Re-running an existing run would not work: the replayed
+    # event payload is the one from before the label was applied.
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - "skills/**"
+      - "eval/**"
+      - ".github/workflows/evals.yml"
+      - ".github/scripts/select_evals.py"
+      # Publishing a skill changes what routing installs, so the bundle is an
+      # input to this workflow even when no skill file changed.
+      - ".claude-plugin/marketplace.json"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Which grader to run."
+        type: choice
+        options: [both, routing, behavior]
+        default: both
+      skills:
+        description: "Comma-separated skill names (blank = every skill with a dataset)."
+        required: false
+        default: ""
+      only:
+        description: "Comma-separated case ids to run (routing only)."
+        required: false
+        default: ""
+      min_accuracy:
+        description: "Fail the routing run below this accuracy (0-1). 0 reports without gating."
+        required: false
+        default: "0"
+
+concurrency:
+  group: evals-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Secret-free: structural validation, the engine's own unit tests, and a git
+  # diff. All three are free and fast, so a malformed dataset or a broken
+  # runner fails here rather than halfway through a paid run.
+  discover:
+    name: Validate datasets and select runs
+    runs-on: ubuntu-latest
+    outputs:
+      routing: ${{ steps.select.outputs.routing }}
+      default: ${{ steps.select.outputs.default }}
+      default_any: ${{ steps.select.outputs.default_any }}
+      scoped: ${{ steps.select.outputs.scoped }}
+      scoped_any: ${{ steps.select.outputs.scoped_any }}
+      skipped: ${{ steps.select.outputs.skipped }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # Need the merge base so `git diff` can see what the PR changed.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      # Also enforced by validate.yml, which is the always-on structural gate.
+      # Repeated here so an expensive run never starts against a broken
+      # dataset, whatever order the two workflows happen to be scheduled in.
+      - name: Validate every eval dataset
+        run: python eval/run_evals.py --validate
+
+      - name: Select what to run
+        id: select
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          SKILLS: ${{ github.event.inputs.skills }}
+          MODE: ${{ github.event.inputs.mode }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            # A dispatch is already explicit human intent, so gate labels are
+            # not required on top of it.
+            if [ -n "$SKILLS" ]; then
+              plan=$(uv run .github/scripts/select_evals.py --names "$SKILLS" --ignore-gates)
+            else
+              plan=$(uv run .github/scripts/select_evals.py --all --ignore-gates)
+            fi
+            if [ "$MODE" = "behavior" ]; then
+              plan=$(printf '%s' "$plan" | python3 -c \
+                "import sys,json;p=json.load(sys.stdin);p['routing']=False;print(json.dumps(p))")
+            elif [ "$MODE" = "routing" ]; then
+              plan=$(printf '%s' "$plan" | python3 -c \
+                "import sys,json;p=json.load(sys.stdin);p['default']=[];p['scoped']=[];print(json.dumps(p))")
+            fi
+          else
+            plan=$(git diff --name-only \
+              "${{ github.event.pull_request.base.sha }}" \
+              "${{ github.event.pull_request.head.sha }}" \
+              | uv run .github/scripts/select_evals.py --changed --labels "$LABELS")
+          fi
+
+          echo "Plan: $plan"
+          printf '%s' "$plan" | python3 -c '
+          import json, os, sys
+          plan = json.load(sys.stdin)
+          lines = ["routing=" + str(plan["routing"]).lower()]
+          for key in ("default", "scoped", "skipped"):
+              lines.append(key + "=" + json.dumps(plan[key]))
+          for key in ("default", "scoped"):
+              lines.append(key + "_any=" + str(bool(plan[key])).lower())
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write("\n".join(lines) + "\n")
+          '
+
+  # A routing decision is made from skill descriptions alone, so this needs no
+  # GPU and no second platform. It stays on a self-hosted Linux runner only
+  # because that is what can reach the internal LLM gateway.
+  routing:
+    name: Routing (whole catalog)
+    needs: discover
+    if: needs.discover.outputs.routing == 'true'
+    runs-on: [self-hosted, strix_halo, Linux]
+    # Each case is killed as soon as its routing decision is observable, so
+    # this is far shorter than a behavior run; the cap catches a hung agent.
+    timeout-minutes: 40
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
+      ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
+      ANTHROPIC_CUSTOM_HEADERS: |
+        Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
+        user: a1_ucicd
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install the claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      # No pip install: the runner is standard library only.
+      #
+      # By default this reports rather than gates, so a low score shows up as
+      # statistics instead of a red run; set `min_accuracy` on dispatch to make
+      # it a hard bar. It still fails on infrastructure problems (no case
+      # produced a decision, or no skill activated anywhere).
+      - name: Run the routing eval
+        shell: bash
+        env:
+          ONLY: ${{ github.event.inputs.only }}
+          MIN_ACCURACY: ${{ github.event.inputs.min_accuracy || '0' }}
+        run: |
+          set -euo pipefail
+          python eval/run_evals.py \
+            --mode routing \
+            --only "$ONLY" \
+            --min-accuracy "$MIN_ACCURACY" \
+            --output routing-report.json \
+            --keep-logs routing-logs
+
+      - name: Upload routing report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: routing-report
+          path: |
+            routing-report.json
+            routing-logs/
+          if-no-files-found: warn
+
+  # Skills that run on the default runners and use the repo-wide gateway key.
+  behavior:
+    name: Behavior (${{ matrix.skill }} on ${{ matrix.os }})
+    needs: discover
+    if: needs.discover.outputs.default_any == 'true'
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    # Behavior runs install local models and can take a while; cap it so a hung
+    # agent or a stalled model pull fails the job instead of burning minutes.
+    timeout-minutes: 45
+    strategy:
+      # One skill / OS failing should not hide the others' results.
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.default) }}
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
+      ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
+      ANTHROPIC_CUSTOM_HEADERS: |
+        Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
+        user: a1_ucicd
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install the claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run behavior cases for ${{ matrix.skill }}
+        run: python eval/run_evals.py --mode behavior --skill ${{ matrix.skill }}
+
+  # Skills on a runner class that carries its own environment. Those bring
+  # scoped secrets, which is why they cannot share the job above: a job's
+  # credentials are fixed before its matrix expands. The Instinct runner, for
+  # instance, sits outside the AMD network and calls api.anthropic.com directly
+  # with its own budgeted key, so it sets no gateway base URL or headers.
+  behavior-scoped:
+    name: Behavior (${{ matrix.skill }} on ${{ matrix.os }}, ${{ matrix.environment }})
+    needs: discover
+    if: needs.discover.outputs.scoped_any == 'true'
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    timeout-minutes: 45
+    environment:
+      name: ${{ matrix.environment }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.scoped) }}
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Verify the scoped Anthropic key is available
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "ANTHROPIC_API_KEY resolved to an empty value. GitHub withholds" >&2
+            echo "secrets from pull requests opened from forks; re-run this from" >&2
+            echo "a branch in amd/skills, or check that the secret is set on the" >&2
+            echo "'${{ matrix.environment }}' environment." >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install the claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run behavior cases for ${{ matrix.skill }}
+        run: python eval/run_evals.py --mode behavior --skill ${{ matrix.skill }}
+
+  # Single aggregate gate. Mark THIS check required in branch protection.
+  #
+  #   * nothing testable changed -> pass (neutral).
+  #   * testable change          -> pass iff every leg that ran passed.
+  #
+  # A leg held back by a missing gate label is warned about, not failed: the PR
+  # should not be blocked by a test it deliberately did not request.
+  evals-gate:
+    name: evals
+    needs: [discover, routing, behavior, behavior-scoped]
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      DISCOVER: ${{ needs.discover.result }}
+      ROUTING: ${{ needs.routing.result }}
+      BEHAVIOR: ${{ needs.behavior.result }}
+      SCOPED: ${{ needs.behavior-scoped.result }}
+      ROUTING_WANTED: ${{ needs.discover.outputs.routing }}
+      BEHAVIOR_WANTED: ${{ needs.discover.outputs.default_any }}
+      SCOPED_WANTED: ${{ needs.discover.outputs.scoped_any }}
+      SKIPPED: ${{ needs.discover.outputs.skipped }}
+    steps:
+      - name: Verify eval results
+        run: |
+          echo "discover:        $DISCOVER"
+          echo "routing:         $ROUTING (requested: $ROUTING_WANTED)"
+          echo "behavior:        $BEHAVIOR (requested: $BEHAVIOR_WANTED)"
+          echo "behavior-scoped: $SCOPED (requested: $SCOPED_WANTED)"
+          echo "held back:       $SKIPPED"
+
+          # If discovery itself failed, surface that rather than guessing. It
+          # also covers dataset validation, so a malformed evals.json lands
+          # here as a clear failure.
+          if [ "$DISCOVER" != "success" ]; then
+            echo "The discover job did not succeed ($DISCOVER)." >&2
+            exit 1
+          fi
+
+          # Say loudly when a change went out without running on real hardware.
+          if [ "$SKIPPED" != "[]" ]; then
+            echo "::warning::These skills' behavior cases were held back for a" \
+                 "missing gate label and did not run: $SKIPPED"
+          fi
+
+          failed=0
+          if [ "$ROUTING_WANTED" = "true" ] && [ "$ROUTING" != "success" ]; then
+            echo "Routing did not pass ($ROUTING)." >&2
+            failed=1
+          fi
+          if [ "$BEHAVIOR_WANTED" = "true" ] && [ "$BEHAVIOR" != "success" ]; then
+            echo "Behavior cases did not pass ($BEHAVIOR)." >&2
+            failed=1
+          fi
+          if [ "$SCOPED_WANTED" = "true" ] && [ "$SCOPED" != "success" ]; then
+            echo "Scoped-runner behavior cases did not pass ($SCOPED)." >&2
+            failed=1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+
+          if [ "$ROUTING_WANTED" != "true" ] && [ "$BEHAVIOR_WANTED" != "true" ] \
+             && [ "$SCOPED_WANTED" != "true" ]; then
+            echo "No evals affected by this change."
+          else
+            echo "All affected evals passed."
+          fi
+          exit 0

@@ -8,6 +8,7 @@ on:
       - ".github/scripts/**"
       - "**/*.md"
       - "skills/**"
+      - "eval/**"
       - "plugin-metadata.json"
       - ".claude-plugin/**"
       - ".cursor-plugin/**"
@@ -58,6 +59,34 @@ jobs:
       - name: Validate skill
         run: uv run .github/scripts/validate_skills.py --skill "${{ matrix.skill }}"
 
+  # Eval datasets are structural too: they have a schema, a required coverage
+  # bar, and repo-wide unique case ids. Checking them here means a malformed
+  # dataset or a skill with no tests fails in seconds on a free runner, rather
+  # than partway through a run that spends real tokens.
+  validate-evals:
+    name: Validate eval datasets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      # Structure, Tier 0 coverage, repo-wide unique ids, staged workspaces.
+      - name: Validate datasets
+        run: python eval/run_evals.py --validate
+
+      # Guards the machinery itself, including that the JSON Schema still
+      # matches what the parser enforces.
+      - name: Test the eval runner
+        run: uv run --with pyyaml python eval/test_evals.py
+
   # Repo-wide checks that aren't tied to a single skill: the generated plugin
   # manifests and internal markdown references.
   validate-manifests:
@@ -107,17 +136,19 @@ jobs:
   # job results explicitly rather than relying on `needs` short-circuiting.
   validate:
     name: Validate skills and plugin manifests
-    needs: [validate-skill, validate-manifests]
+    needs: [validate-skill, validate-evals, validate-manifests]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Verify all validation jobs passed
         run: |
           echo "validate-skill result: ${{ needs.validate-skill.result }}"
+          echo "validate-evals result: ${{ needs.validate-evals.result }}"
           echo "validate-manifests result: ${{ needs.validate-manifests.result }}"
           if [ "${{ needs.validate-skill.result }}" != "success" ] || \
+             [ "${{ needs.validate-evals.result }}" != "success" ] || \
              [ "${{ needs.validate-manifests.result }}" != "success" ]; then
             echo "One or more validation jobs failed." >&2
             exit 1
           fi
-          echo "All skill and manifest validations passed."
+          echo "All skill, eval, and manifest validations passed."

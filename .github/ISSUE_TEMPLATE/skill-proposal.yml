@@ -8,7 +8,9 @@ body:
     attributes:
       value: |
         Thanks for proposing a skill! Skills earn their keep on **repeated, opinionated AMD workflows**.
-        Before filing, please skim `CONTRIBUTING.md` (especially *"Is this task a good fit for a skill?"* and the two contribution paths) so we can route this proposal quickly.
+        Before filing, please skim `CONTRIBUTING.md` and *"Is this a good fit for a skill?"* in `docs/best-practices.md`, so we can route this proposal quickly.
+
+        Note that we only accept **federated** submissions: the skill is authored in an AMD-owned product repo and vendored into this catalog. We no longer accept skills authored directly under `skills/` here.
 
         Fill out the short fields below, then describe the skill in detail at the end.
 
@@ -46,15 +48,12 @@ body:
     validations:
       required: true
 
-  - type: dropdown
+  - type: input
     id: home
     attributes:
-      label: Where should this skill live?
-      description: See the two contribution paths in `CONTRIBUTING.md`. Path A skills are authored under `skills/` in this repo; Path B skills live in a product repo and are registered here via `.github/scripts/sources.yml`.
-      options:
-        - "Path A: incubated in this repo (may move to a product repo and continbue to be registered here)"
-        - "Path B: authored in a product repo (HIP, ROCm, Ryzen AI, Lemonade, ...) and registered here"
-        - "Not sure yet — needs discussion"
+      label: Which AMD repo will own this skill?
+      description: The AMD-owned repo that will hold the skill folder and act as its source of truth. This catalog vendors a pinned copy from it. If you do not know yet, say so and we will work it out in the discussion.
+      placeholder: e.g. AMD-AGI/MyProject
     validations:
       required: true
 

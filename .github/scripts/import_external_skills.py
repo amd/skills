@@ -30,7 +30,7 @@ For each source, the script:
 5. Synthesizes a minimal `skill-card.md` (Description, Owner, License)
    from the source metadata when the upstream copy doesn't already ship
    one, so the imported skill satisfies the card validation gate (see
-   docs/skill-cards.md).
+   docs/skill-requirements.md).
 6. Adds each imported skill to the bundle's `skills` array in
    `.claude-plugin/marketplace.json` (as a `./skills/<name>` path) so it
    ships in the single AMD plugin.

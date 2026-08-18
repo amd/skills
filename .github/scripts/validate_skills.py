@@ -5,7 +5,7 @@
 # ///
 """Validate AMD skills against the standardized Agent Skills format.
 
-Enforces the rules documented in CONTRIBUTING.md:
+Enforces the rules documented in docs/skill-requirements.md:
 
   - SKILL.md exists at the skill root
   - YAML frontmatter is parseable
@@ -60,7 +60,7 @@ CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 # path of this form, relative to the plugin `source` (the repo root).
 SKILLS_PATH_PREFIX = "./skills/"
 
-# Limits from CONTRIBUTING.md and the standardized Agent Skills format.
+# Limits from docs/skill-requirements.md and the standardized Agent Skills format.
 MAX_NAME_LEN = 64
 MAX_DESCRIPTION_LEN = 1024
 MAX_BODY_LINES = 500
@@ -72,7 +72,7 @@ FRONTMATTER_RE = re.compile(
 )
 RESERVED_NAME_SUBSTRINGS = ("anthropic", "claude")
 
-# Per-skill governance card (see docs/skill-cards.md). Each section must be a
+# Per-skill governance card (see docs/skill-requirements.md). Each section must be a
 # top-level `##` heading followed by some non-empty body text.
 CARD_FILENAME = "skill-card.md"
 REQUIRED_CARD_SECTIONS = ("Description", "Owner", "License")
@@ -179,7 +179,7 @@ def _validate_card(skill_dir: Path, report: SkillReport) -> None:
     card = skill_dir / CARD_FILENAME
     if not card.exists():
         report.errors.append(
-            f"Missing {CARD_FILENAME} (governance card). See docs/skill-cards.md; "
+            f"Missing {CARD_FILENAME} (governance card). See docs/skill-requirements.md; "
             "it needs `## Description`, `## Owner`, and `## License` sections."
         )
         return
@@ -233,7 +233,7 @@ def validate_claude_marketplace(skill_dirs: list[Path]) -> list[str]:
     a real skill under `skills/`. Skills that are not listed are allowed -- they
     are simply unpublished. The plugin's human-readable `description` is
     intentionally allowed to differ from the SKILL.md descriptions (per
-    CONTRIBUTING.md), so this only enforces that names and paths line up.
+    docs/skill-requirements.md), so this only enforces that names and paths line up.
     """
     if not CLAUDE_MARKETPLACE.exists():
         return [

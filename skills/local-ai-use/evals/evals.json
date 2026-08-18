@@ -1,0 +1,57 @@
+{
+  "evaluations": [
+    {
+      "id": "generate-cat-image",
+      "skill_should_trigger": true,
+      "prompt": "Learn how to generate images locally, then generate an image of a cat and save it to out.png.",
+      "expected_behavior": [
+        "Install Lemonade Server if it is not already installed",
+        "Download the SD-Turbo model if the model is not already downloaded",
+        "Add a 'Local AI Use' block to AGENTS.md"
+      ],
+      "unexpected_behavior": [
+        "Pull TTS or STT models for this image generation task",
+        "Reach for a cloud image path instead of local Lemonade"
+      ],
+      "files_exist": [
+        "AGENTS.md",
+        "out.png"
+      ]
+    },
+    {
+      "id": "images-cost",
+      "skill_should_trigger": true,
+      "prompt": "I'm burning way too much money on image generation API calls. Can you make this workspace generate images on my own machine instead?"
+    },
+    {
+      "id": "tts-offline",
+      "skill_should_trigger": true,
+      "prompt": "Stop sending text to a paid cloud TTS service. From now on, I want anything you read aloud synthesized offline on this laptop."
+    },
+    {
+      "id": "transcribe-private",
+      "skill_should_trigger": true,
+      "prompt": "Transcribe meeting.wav for me, and keep the audio on this device instead of uploading it to a transcription service."
+    },
+    {
+      "id": "split-routing",
+      "skill_should_trigger": true,
+      "prompt": "From now on, when using Claude, use local models for generating pictures but keep using the cloud for chat."
+    },
+    {
+      "id": "agent-generates-image-locally",
+      "skill_should_trigger": true,
+      "prompt": "Stop calling DALL-E when I ask you for a picture. Generate images on this machine instead so I stop paying per image."
+    },
+    {
+      "id": "finetune-on-laptop",
+      "skill_should_trigger": false,
+      "prompt": "Fine-tune a small language model on my own dataset using the GPU in my laptop."
+    },
+    {
+      "id": "compare-cloud-image-models",
+      "skill_should_trigger": false,
+      "prompt": "Compare the output quality of DALL-E 3 and Midjourney for product photography and tell me which to buy."
+    }
+  ]
+}

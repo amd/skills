@@ -9,8 +9,5 @@ __pycache__/
 # uv
 .uv-cache/
 
-# Eval run artifacts
+# Eval run artifacts (JSON reports and kept transcripts)
 eval/runs/
-
-# Behavioral matrix results
-eval/behavioral/results/
