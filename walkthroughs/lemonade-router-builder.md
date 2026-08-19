@@ -16,7 +16,7 @@ Install the **latest** Lemonade Server (**v11.5.0 or later**) from
 at least two chat-capable models:
 
 ```bash
-lemonade server start
+lemonade-server serve
 lemonade list
 ```
 
