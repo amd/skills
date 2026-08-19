@@ -23,7 +23,7 @@ try and stays editable in the desktop app's Hybrid Router editor.
 
 ## Prerequisites
 
-- **Lemonade Server v10.1.0+** running locally (`lemonade server start`).
+- **Lemonade Server v11.5.0+** running locally (`lemonade server start`).
   Required only to register and test the generated policy - the skill itself
   (JSON generation + offline validation) works without a live server.
 - **No GPU or ROCm dependency** for authoring. The router policy is a JSON
@@ -225,8 +225,8 @@ curl http://localhost:13305/api/v1/models/<model-id>
 curl -X POST http://localhost:13305/api/v1/pull \
      -H "Content-Type: application/json" --data-binary @router.json
 
-# 3. Route a request and inspect the decision
-curl -X POST http://localhost:13305/api/v1/chat/completions \
+# 3. Route a request and inspect the decision (-i prints response headers)
+curl -i -X POST http://localhost:13305/api/v1/chat/completions \
      -H "Content-Type: application/json" \
      -d '{"model": "<model_name>", "route_trace": true,
           "messages": [{"role": "user", "content": "<test prompt>"}]}'

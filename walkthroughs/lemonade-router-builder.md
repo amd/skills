@@ -3,6 +3,7 @@
 The goal of this skill is to teach your AI agent to turn a plain-English
 description of routing intent into a valid Lemonade `collection.router` policy
 JSON, ready for you to register and use.
+[Documentation on Lemonade Router](https://lemonade-server.ai/docs/dev/router-policy/)
 
 ## Prerequisites
 
@@ -10,8 +11,9 @@ JSON, ready for you to register and use.
 
 ## Step 1 - Install and start Lemonade Server
 
-Install Lemonade Server from <https://lemonade-server.ai/docs/guide/install/>,
-then start it and download at least two chat-capable models:
+Install the **latest** Lemonade Server (**v11.5.0 or later**) from
+<https://lemonade-server.ai/docs/guide/install/>, then start it and download
+at least two chat-capable models:
 
 ```bash
 lemonade server start
@@ -63,8 +65,8 @@ resolves relative to your current working directory, not where the file was save
 curl -X POST http://localhost:13305/api/v1/pull \
      -H "Content-Type: application/json" --data-binary @/path/to/router.json
 
-# Test - should match the keyword rule
-curl -X POST http://localhost:13305/api/v1/chat/completions \
+# Test - Claude should give you the exact command; if not, adapt this one (update <RouterName> and "messages")
+curl -i -X POST http://localhost:13305/api/v1/chat/completions \
      -H "Content-Type: application/json" \
      -d '{"model": "user.<RouterName>", "route_trace": true,
           "messages": [{"role": "user", "content": "How do I fix this bug?"}]}'
