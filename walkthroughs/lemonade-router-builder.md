@@ -12,11 +12,10 @@ JSON, ready for you to register and use.
 ## Step 1 - Install and start Lemonade Server
 
 Install the **latest** Lemonade Server (**v11.5.0 or later**) from
-<https://lemonade-server.ai/docs/guide/install/>, then start it and download
+<https://lemonade-server.ai/docs/guide/install/>, and download
 at least two chat-capable models:
 
-```bash
-lemonade-server serve
+lemonade status
 lemonade list
 ```
 
