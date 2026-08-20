@@ -13,12 +13,18 @@ is unreachable it falls back to an importable local `vllm`. Generation endpoints
 (text + multimodal) are supported; pooling/embedding/reranker and non-LLM
 architectures are not chat/completion endpoints and are rejected.
 
+It also inspects the model repo for a chat template (`chat_template.jinja`, or
+`chat_template` in `tokenizer_config.json`) and picks the client endpoint:
+`/v1/chat/completions` when a usable template is present, else `/v1/completions`
+for raw prompts. A multimodal model with no usable template cannot serve and is
+rejected (`launchable: false`).
+
     check_model.py --model-id Qwen/Qwen3-0.6B
-    check_model.py --model-id <id> --vllm-version 0.22.0
+    check_model.py --model-id <id> --vllm-version 0.25.1
 
 Exit 0 if vLLM serves it as a generation endpoint (or support is undeterminable
--- launch confirms), 1 if it is positively unsupported. JSON to stdout.
-Env: HF_TOKEN for gated models.
+-- launch confirms), 1 if it is positively unsupported OR a multimodal model has
+no usable chat template. JSON to stdout. Env: HF_TOKEN for gated models.
 """
 
 import argparse
@@ -29,10 +35,15 @@ import subprocess
 import sys
 import urllib.request
 import urllib.error
+from pathlib import Path
 
 HF = "https://huggingface.co"
 GH_RAW = "https://raw.githubusercontent.com/vllm-project/vllm"
 REG_PATH = "vllm/model_executor/models/registry.py"
+TOKENIZER_CFG = "tokenizer_config.json"
+CHAT_TEMPLATE_FILE = "chat_template.jinja"
+DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "epyc.json"
+DEFAULT_VLLM_VERSION = json.loads(DATA_PATH.read_text(encoding="utf-8"))["vllm_version"]
 
 # registry.py dict name -> kind we care about
 _SECTIONS = {
@@ -71,6 +82,65 @@ def model_architectures(model, rev, token):
     except ValueError:
         return None, "config.json is not valid JSON"
     return cfg.get("architectures") or [], None
+
+
+def classify_template_field(ct):
+    """Classify a tokenizer_config `chat_template` value (pure).
+
+    Returns (status, selected_name, names):
+    - a non-empty string -> ("present", None, [])
+    - a list of {name, template} -> "present" if it has a single template or a
+      "default", else "ambiguous" (multiple named, no default)
+    - anything else / empty -> ("absent", None, [])
+    """
+    if isinstance(ct, str) and ct.strip():
+        return "present", None, []
+    if isinstance(ct, list) and ct:
+        names = [e.get("name") for e in ct if isinstance(e, dict) and e.get("name")]
+        if "default" in names:
+            return "present", "default", names
+        if len(names) == 1:
+            return "present", names[0], names
+        return "ambiguous", None, names
+    return "absent", None, []
+
+
+def chat_template_info(model, rev, token):
+    """Inspect the model repo for a usable chat template. Returns a dict with
+    `status` (present/ambiguous/absent/unknown), `source`, `selected_name`, `names`.
+
+    A standalone `chat_template.jinja` (Transformers v5) takes precedence over the
+    `chat_template` field in `tokenizer_config.json`. When neither file can be read
+    (gated/offline) the status is `unknown`."""
+    tmpl, terr = _get(f"{HF}/{model}/resolve/{rev}/{CHAT_TEMPLATE_FILE}", token)
+    if tmpl is not None and tmpl.strip():
+        return {"status": "present", "source": CHAT_TEMPLATE_FILE, "selected_name": None, "names": []}
+
+    cfg_text, cerr = _get(f"{HF}/{model}/resolve/{rev}/{TOKENIZER_CFG}", token)
+    if cfg_text is None:
+        return {"status": "unknown", "source": None, "selected_name": None, "names": [],
+                "detail": cerr or terr or "no tokenizer_config.json"}
+    cfg = json.loads(cfg_text) if cfg_text.strip().startswith("{") else {}
+    status, selected, names = classify_template_field(cfg.get("chat_template"))
+    return {"status": status, "source": TOKENIZER_CFG if status != "absent" else None,
+            "selected_name": selected, "names": names}
+
+
+def endpoints_for(kind, template_status):
+    """Pick client endpoints from modality + template status (pure).
+
+    Returns (supported_endpoints, primary_endpoint, needs_template):
+    - multimodal needs a chat template; without one it cannot serve (needs_template).
+    - text with a usable template -> chat preferred, completions also available.
+    - text without an auto-usable template (absent/ambiguous/unknown) -> completions
+      (chat still possible via an explicit --chat-template)."""
+    if kind == "multimodal":
+        if template_status == "present":
+            return ["chat_completions"], "chat_completions", False
+        return [], None, True
+    if template_status == "present":
+        return ["chat_completions", "completions"], "chat_completions", False
+    return ["completions"], "completions", False
 
 
 def registry_from_github(version):
@@ -120,7 +190,11 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model-id", required=True)
     p.add_argument("--revision", default="main")
-    p.add_argument("--vllm-version", default="0.22.0", help="pin the registry to this vLLM version (from data/epyc.json)")
+    p.add_argument(
+        "--vllm-version",
+        default=DEFAULT_VLLM_VERSION,
+        help=f"registry version (default: {DEFAULT_VLLM_VERSION} from data/epyc.json)",
+    )
     a = p.parse_args()
     token = os.environ.get("HF_TOKEN", "")
 
@@ -155,10 +229,36 @@ def main():
 
     if any(k in ("text", "multimodal") for k in known):
         kind = "multimodal" if "multimodal" in known else "text"
-        msg = f"vLLM supports {archs} as a {kind} generation endpoint."
+        tmpl = chat_template_info(a.model_id, a.revision, token)
+        eps, primary, needs_tmpl = endpoints_for(kind, tmpl["status"])
+        out.update(supported=True, kind=kind, chat_template=tmpl,
+                   supported_endpoints=eps, primary_endpoint=primary)
+
+        if kind == "multimodal" and needs_tmpl:
+            out.update(launchable=False,
+                       message=(f"{archs} is a multimodal model but no usable chat template was found "
+                                f"(chat_template.status={tmpl['status']}). vLLM needs a chat template to "
+                                "serve it; pass --chat-template <file> or choose a model that ships one. Stop."))
+            print(json.dumps(out, indent=2))
+            sys.exit(1)
+
+        if primary == "chat_completions":
+            msg = (f"vLLM supports {archs} as a {kind} generation endpoint; a chat template is present "
+                   f"({tmpl['source']}). Serve /v1/chat/completions.")
+        elif tmpl["status"] == "ambiguous":
+            msg = (f"vLLM supports {archs} as a {kind} generation endpoint, but it ships multiple named chat "
+                   f"templates with no 'default' ({tmpl['names']}). /v1/completions works now; for chat, pass "
+                   "--chat-template <file> or select one of those names.")
+        elif tmpl["status"] == "unknown":
+            msg = (f"vLLM supports {archs} as a {kind} generation endpoint, but the chat template could not be "
+                   "read (gated/offline). Defaulting to /v1/completions; if this is an instruct model with a "
+                   "template, /v1/chat/completions will also work.")
+        else:
+            msg = (f"vLLM supports {archs} as a {kind} generation endpoint, but no chat template was found. "
+                   "Serve base text via /v1/completions; for chat, pass --chat-template <file>.")
         if kind == "multimodal":
             msg += " A multimodal arch may still hit a GPU-only kernel on CPU; that surfaces at load (no-retry rule applies)."
-        out.update(supported=True, kind=kind, message=msg)
+        out.update(launchable=True, message=msg)
         print(json.dumps(out, indent=2))
         sys.exit(0)
 
