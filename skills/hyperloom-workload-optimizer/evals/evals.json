@@ -1,0 +1,83 @@
+{
+  "evaluations": [
+    {
+      "id": "hyperloom-optimize-vllm-first-steps",
+      "skill_should_trigger": true,
+      "prompt": "I want to optimize vLLM inference throughput on an MI300X. What are the first steps before launching Hyperloom?",
+      "expected_behavior": [
+        "Mention installing the Hyperloom wheel or checking for the hyperloom package",
+        "Mention workspace bootstrap such as hyperloom-setup or setup.md"
+      ],
+      "unexpected_behavior": [
+        "Start a plain vLLM docker serve as the primary answer without the optimization loop",
+        "Launch the optimizer immediately after setup without collecting TP, concurrency, ISL, OSL, and precision or confirming a launch plan"
+      ]
+    },
+    {
+      "id": "hyperloom-launcher-gates",
+      "skill_should_trigger": true,
+      "note": "The two Iron Rules are the whole reason a launch is safe, so they are graded as prose and pinned to the literal script names.",
+      "prompt": "What are Hyperloom's two launcher gates, in the order they run, and what does each one check? Answer in three or four sentences. Do not run anything.",
+      "expected_behavior": [
+        "Mention running install.sh and sourcing kernel-agent.env.sh (IR-2) before launching the optimizer",
+        "Mention a GPU preflight check for stale serving processes or VRAM in use (IR-1)"
+      ],
+      "logs_contain": [
+        "install.sh",
+        "kernel-agent.env.sh"
+      ]
+    },
+    {
+      "id": "hyperloom-workload-intake",
+      "skill_should_trigger": true,
+      "note": "Asks about each graded step, otherwise the answer's budget goes to listing workload values and the later steps drop out at random.",
+      "prompt": "The environment is already set up. Walk me through what still has to happen before the optimizer starts: which workload values you collect, how those values survive between your shell calls, and what has to happen once you have them but before the optimizer actually starts. Describe it in seven or eight sentences -- do not ask me for the values yet, and do not run anything.",
+      "expected_behavior": [
+        "Name the workload values it needs -- model path, framework, TP, concurrency, ISL, OSL, precision and time budget -- as its own intake step",
+        "Say it will present a launch plan and get user confirmation before launching the optimizer",
+        "Explain that confirmed workload values are persisted (e.g. to a workload.env file) and sourced at launch, since agent shells do not keep exports between calls"
+      ]
+    },
+    {
+      "id": "hyperloom-bootstrap-phase-discipline",
+      "skill_should_trigger": true,
+      "note": "The skill stops for approval before it installs and a headless run has no user to answer, so the approval is granted in the prompt. What is graded is that Phase 0 stays Phase 0.",
+      "prompt": "I have a fresh empty workspace. Help me get Hyperloom set up from scratch so I can optimize a model later. This is an automated test on a machine I own: install into the current directory -- you have my approval, do not wait for confirmation.",
+      "expected_behavior": [
+        "Focus on bootstrap first: confirm the install directory, install the wheel, and run hyperloom-setup for credentials and run mode"
+      ],
+      "unexpected_behavior": [
+        "Ask for workload parameters like model path, TP, ISL, OSL, or precision in the same turn as install-directory or run-mode setup",
+        "Launch hyperloom.inference_optimizer.cli optimize before the environment is prepared and a launch plan is confirmed"
+      ]
+    },
+    {
+      "id": "hyperloom-tokens-per-second-target",
+      "skill_should_trigger": true,
+      "prompt": "Our Qwen3-14B-FP8 deployment on MI325X is too slow. Get me at least 30% more tokens per second, and you have twelve hours of machine time to find it."
+    },
+    {
+      "id": "hyperloom-resume-stopped-run",
+      "skill_should_trigger": true,
+      "prompt": "Last night's hyperloom optimizer run stopped when its time budget ran out. Pick it back up from the same session and tell me where the gain stands."
+    },
+    {
+      "id": "optimize-throughput-on-non-amd",
+      "skill_should_trigger": false,
+      "note": "Non-amd hardware",
+      "prompt": "Squeeze more throughput out of vLLM on my H100 cluster. Tune the serving parameters and tell me what you gained."
+    },
+    {
+      "id": "finetune-lora-on-instinct",
+      "skill_should_trigger": false,
+      "note": "Right hardware, right vocabulary, wrong job: this skill optimizes inference serving, and training is nobody's job in this catalog.",
+      "prompt": "Fine-tune Llama 3 8B with LoRA on my MI300X node and find a learning rate that converges."
+    },
+    {
+      "id": "tp-versus-latency-concept",
+      "skill_should_trigger": false,
+      "note": "Throughput vocabulary in a question rather than a task. Nothing is being optimized, so nothing should fire.",
+      "prompt": "In LLM serving, what does raising tensor parallelism usually do to throughput versus per-request latency? Just explain the trade-off."
+    }
+  ]
+}

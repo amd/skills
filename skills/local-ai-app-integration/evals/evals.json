@@ -1,0 +1,73 @@
+{
+  "evaluations": [
+    {
+      "id": "vendor-lemonade-launcher",
+      "skill_should_trigger": true,
+      "prompt": "Help me add local AI to this Python app so it replaces the OpenAI API with a local backend. Do not download or install anything, just write the launcher module.",
+      "workspace": "evals/files/openai-stub",
+      "unexpected_behavior": [
+        "Hardcode a fixed port instead of binding one dynamically"
+      ],
+      "logs_contain": [
+        "secrets",
+        "socket",
+        "subprocess"
+      ]
+    },
+    {
+      "id": "lemond-health-check",
+      "skill_should_trigger": true,
+      "prompt": "Modify my local cloud app to use Lemonade. For now, simply write a lemond launcher for my app that waits for the server to be ready. Do not download or install anything, just write the code.",
+      "workspace": "evals/files/openai-stub",
+      "unexpected_behavior": [
+        "Read or parse the local server's stdout or stderr to detect readiness",
+        "Call POST /api/v1/load to pre-load the model at startup"
+      ],
+      "logs_contain": [
+        "/api/v1/health"
+      ]
+    },
+    {
+      "id": "local-mode-without-api-key",
+      "skill_should_trigger": true,
+      "prompt": "Edit main.py so the app starts in local mode without an OPENAI_API_KEY. Do not download or install anything, just edit the file.",
+      "workspace": "evals/files/apikey-guard",
+      "expected_behavior": [
+        "Remove or bypass the API-key guard so the app starts in local mode without requiring OPENAI_API_KEY to be set"
+      ],
+      "files_exist": [
+        "main.py"
+      ]
+    },
+    {
+      "id": "electron-offline-mode",
+      "skill_should_trigger": true,
+      "prompt": "My Electron app calls the OpenAI chat completions endpoint. I want to ship an offline mode that bundles the inference engine into the installer so it still works with no internet."
+    },
+    {
+      "id": "swap-anthropic-backend",
+      "skill_should_trigger": true,
+      "prompt": "My Python desktop tool talks to the Anthropic Messages API today. Give it a mode where the model runs on the customer's own PC so their data never leaves the machine."
+    },
+    {
+      "id": "vendor-binary",
+      "skill_should_trigger": true,
+      "prompt": "Can you vendor an inference binary into my app and repoint my existing HTTP client at it instead of the Ollama server I'm hitting now?"
+    },
+    {
+      "id": "in-app-embeddings",
+      "skill_should_trigger": true,
+      "prompt": "I want my app to compute embeddings on the end user's hardware rather than calling a hosted embeddings API. How do I wire that up?"
+    },
+    {
+      "id": "rate-limit-openai-calls",
+      "skill_should_trigger": false,
+      "prompt": "Add rate limiting and retry-with-backoff to the OpenAI API calls in my Express server."
+    },
+    {
+      "id": "pyinstaller-packaging",
+      "skill_should_trigger": false,
+      "prompt": "Package my Python app as a standalone Windows installer with PyInstaller so users don't need Python."
+    }
+  ]
+}

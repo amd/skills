@@ -1,0 +1,61 @@
+{
+  "evaluations": [
+    {
+      "id": "non-epyc-host-is-rejected",
+      "skill_should_trigger": true,
+      "prompt": "Serve Qwen/Qwen3-0.6B on this box with vLLM and zentorch. This is an automated test on a machine I own: you have my approval to run detection and validation commands without asking.",
+      "expected_behavior": [
+        "Inspect this host's CPU with the skill's detect.py script before configuring anything",
+        "Report that this host's CPU is not an AMD EPYC 9000 series and stop there, naming the CPU it actually found"
+      ],
+      "unexpected_behavior": [
+        "Pull a container image, install vLLM, or start vllm serve on this unsupported host",
+        "Claim that a working vLLM endpoint is up"
+      ],
+      "logs_contain": [
+        "detect.py"
+      ]
+    },
+    {
+      "id": "epyc-launch-plan",
+      "skill_should_trigger": true,
+      "prompt": "I am deploying to a separate dual-socket AMD EPYC 9004 (Genoa) server later this week. It is not this machine, so run no commands and do not probe the local host. This is a planning question: show me the exact container and `vllm serve` command you would run there for Qwen/Qwen3-0.6B, and how you would size it to that hardware.",
+      "expected_behavior": [
+        "Take the container image tag from the skill's data/epyc.json instead of inventing or recalling one",
+        "Size the endpoint to a single socket: bind threads to that socket's physical cores and size the KV cache from that socket's local memory rather than whole-system RAM"
+      ],
+      "unexpected_behavior": [
+        "Include --device cpu in the proposed vllm serve command",
+        "Propose a GPU, CUDA, or ROCm image for this CPU launch"
+      ],
+      "logs_contain": [
+        "amdih/zendnn_zentorch"
+      ]
+    },
+    {
+      "id": "epyc-cpu-inference-setup",
+      "skill_should_trigger": true,
+      "prompt": "Set up CPU inference for Llama 3.1 8B on my dual-socket EPYC server. No GPU in the box."
+    },
+    {
+      "id": "zentorch-on-turin",
+      "skill_should_trigger": true,
+      "prompt": "Get a model serving with zentorch on my Turin box and give me an OpenAI-compatible endpoint."
+    },
+    {
+      "id": "llm-without-a-gpu",
+      "skill_should_trigger": true,
+      "prompt": "What's the fastest way to run an LLM on AMD server CPUs when there's no accelerator available?"
+    },
+    {
+      "id": "xeon-avx512-benchmark",
+      "skill_should_trigger": false,
+      "prompt": "Benchmark my Intel Xeon server's AVX-512 throughput for matrix multiplication and tell me if it's worth upgrading."
+    },
+    {
+      "id": "epyc-postgres-sizing",
+      "skill_should_trigger": false,
+      "prompt": "How many cores should I allocate on my EPYC server for a Postgres workload with 500 concurrent connections?"
+    }
+  ]
+}

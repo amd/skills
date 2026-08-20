@@ -1,0 +1,54 @@
+{
+  "evaluations": [
+    {
+      "id": "serve-tiny-model-on-instinct",
+      "skill_should_trigger": true,
+      "note": "Graded on the endpoint that exists at the end, not on how it got there: reusing a healthy container already serving this model is a correct answer on a shared runner, and the model check below is what keeps that from becoming a loophole.",
+      "prompt": "Serve Qwen/Qwen3-0.6B on this AMD Instinct GPU with vLLM. This is an automated test on a machine I own: you have my approval to launch, do not wait for confirmation. Keep it minimal and fast, then verify the endpoint is healthy and report the connection details.",
+      "expected_behavior": [
+        "Detect the AMD Instinct GPU before configuring vLLM",
+        "Leave Qwen/Qwen3-0.6B served by vLLM in a Docker container on the AMD GPU, whether by launching one or by reusing a container already serving that model",
+        "Verify the vLLM endpoint is healthy before reporting the connection details"
+      ],
+      "unexpected_behavior": [
+        "Fall back to a cloud LLM provider or an NVIDIA/CUDA code path",
+        "Serve a different, larger model than the one that was requested"
+      ]
+    },
+    {
+      "id": "qwen-on-mi300x",
+      "skill_should_trigger": true,
+      "prompt": "Get Qwen3 serving on my MI300X box."
+    },
+    {
+      "id": "vllm-rocm-node",
+      "skill_should_trigger": true,
+      "prompt": "I have an 8-GPU AMD Instinct node with ROCm installed. Spin up a vLLM endpoint for DeepSeek and confirm it's actually healthy before you hand it back to me."
+    },
+    {
+      "id": "openai-compatible-mi355x",
+      "skill_should_trigger": true,
+      "prompt": "How do I launch an OpenAI-compatible inference server on MI355X hardware?"
+    },
+    {
+      "id": "deploy-datacenter-gpu",
+      "skill_should_trigger": true,
+      "prompt": "Deploy a language model on my AMD data center GPUs so my team can hit it over HTTP."
+    },
+    {
+      "id": "vllm-on-nvidia",
+      "skill_should_trigger": false,
+      "prompt": "Serve Llama 3.1 70B with vLLM on my NVIDIA H100 cluster."
+    },
+    {
+      "id": "consumer-radeon",
+      "skill_should_trigger": false,
+      "prompt": "Which quantization should I pick to fit a 13B model into the 16 GB on my Radeon RX 7800 XT?"
+    },
+    {
+      "id": "hbm-vs-gddr",
+      "skill_should_trigger": false,
+      "prompt": "Explain the practical difference between HBM3 and GDDR6 memory bandwidth for inference workloads."
+    }
+  ]
+}

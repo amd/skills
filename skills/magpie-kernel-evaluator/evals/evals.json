@@ -1,0 +1,90 @@
+{
+  "evaluations": [
+    {
+      "id": "analyze-simple-hip-kernel",
+      "skill_should_trigger": true,
+      "prompt": "Use Magpie to prepare an analyze run for the existing examples/simple_hip_test/analyze_default.yaml fixture. Inspect the fixture and write analyze_plan.md with the exact command and an explanation of what the testcase validates. Do not compile or execute the kernel, install dependencies, or change the fixture, and do not claim that correctness or performance was measured.",
+      "workspace": "evals/files/analyze-simple-hip",
+      "expected_behavior": [
+        "Use Magpie analyze with examples/simple_hip_test/analyze_default.yaml and explain that the testcase exit code is what validates vector-add correctness"
+      ],
+      "unexpected_behavior": [
+        "Compile or execute the HIP kernel, install dependencies, or claim measured correctness or performance results"
+      ],
+      "logs_contain": [
+        "magpie analyze"
+      ],
+      "files_exist": [
+        "analyze_plan.md"
+      ]
+    },
+    {
+      "id": "compare-hip-variants",
+      "skill_should_trigger": true,
+      "prompt": "Use Magpie to prepare a comparison of these two existing HIP kernels: baseline/vector_add.hip and candidate/vector_add.hip. Write compare.yaml and give each implementation its own working_dir, hipcc compile_command, and testcase_command so Magpie builds and tests two separate binaries. Tell me the exact Magpie command, and treat correctness as a hard gate before any performance ranking. Keep the baseline as a named config entry instead of passing --baseline, because the comparison report does not consume that CLI selection. Do not compile or execute the kernels, and do not name a winner.",
+      "workspace": "evals/files/compare-hip-variants",
+      "expected_behavior": [
+        "Configure two independent Magpie compare candidates with separate working directories, compile commands, and testcase commands",
+        "Require correctness before performance ranking, without relying on the --baseline CLI option"
+      ],
+      "unexpected_behavior": [
+        "Compile or execute either HIP kernel, or claim measured results or a winner"
+      ],
+      "logs_contain": [
+        "magpie compare"
+      ],
+      "files_exist": [
+        "compare.yaml"
+      ]
+    },
+    {
+      "id": "benchmark-optimization-plan",
+      "skill_should_trigger": true,
+      "prompt": "I have a slow vLLM workload on AMD GPUs. Use Magpie to write benchmark_plan.md describing the shortest safe workflow from a clean baseline benchmark to profiling and TraceLens or gap analysis, then kernel analyze/compare, then a final clean benchmark. This environment has no model weights and no runnable benchmark setup, so do not install, download, or execute anything, and do not invent measured results.",
+      "expected_behavior": [
+        "Plan a clean baseline, a separate profiled run with TraceLens or gap analysis, correctness-gated kernel evaluation, and a final clean end-to-end benchmark"
+      ],
+      "unexpected_behavior": [
+        "Run a benchmark, install or download anything, or claim measured results"
+      ],
+      "files_exist": [
+        "benchmark_plan.md"
+      ]
+    },
+    {
+      "id": "benchmark-vllm-ttft",
+      "skill_should_trigger": true,
+      "prompt": "Benchmark vLLM throughput and time-to-first-token for Llama 3 on this box, and capture torch traces while it runs."
+    },
+    {
+      "id": "compare-hip-softmax-kernels",
+      "skill_should_trigger": true,
+      "prompt": "I have two HIP implementations of a softmax kernel. Which one is faster, and is the optimized one still numerically correct?"
+    },
+    {
+      "id": "bottleneck-kernel-to-source",
+      "skill_should_trigger": true,
+      "prompt": "Find the top bottleneck kernels in my inference workload and map the profiler names back to the source that generates them."
+    },
+    {
+      "id": "rank-triton-attention-variants",
+      "skill_should_trigger": true,
+      "prompt": "Rank these three Triton attention kernel variants against each other and validate the winner end to end."
+    },
+    {
+      "id": "benchmark-then-optimize-kernel",
+      "skill_should_trigger": true,
+      "prompt": "Benchmark SGLang on this node, then rank two candidate HIP kernels for the biggest bottleneck and validate the winner."
+    },
+    {
+      "id": "write-a-cuda-transpose",
+      "skill_should_trigger": false,
+      "prompt": "Write a CUDA kernel that transposes a matrix, and explain the shared-memory tiling."
+    },
+    {
+      "id": "mi300x-spec-question",
+      "skill_should_trigger": false,
+      "prompt": "What is the theoretical peak FP16 throughput of an MI300X on paper?"
+    }
+  ]
+}

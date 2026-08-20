@@ -1,0 +1,66 @@
+{
+  "evaluations": [
+    {
+      "id": "keyword-router",
+      "skill_should_trigger": true,
+      "prompt": "Route coding questions - anything mentioning functions, bugs, or stack traces - to Qwen3.5-9B-GGUF. Everything else goes to Qwen3.5-2B-GGUF.",
+      "expected_behavior": [
+        "Produce a collection.router JSON with recipe collection.router",
+        "Include keywords_any condition matching coding-related terms",
+        "Set Qwen3.5-2B-GGUF as default_model",
+        "Run the offline validator scripts/validate.py and report it passed",
+        "Output curl commands for the user to register and test the policy"
+      ],
+      "unexpected_behavior": [
+        "Execute POST /api/v1/pull by making an actual HTTP call with a tool",
+        "Invent model names not provided by the user",
+        "Include a routing.router key anywhere in router.json alongside routing.rules"
+      ],
+      "files_exist": [
+        "router.json"
+      ]
+    },
+    {
+      "id": "pii-regex-router",
+      "skill_should_trigger": true,
+      "prompt": "Any message with a Social Security number or email address must stay on Qwen3.5-9B-GGUF. Everything else can go to Qwen3.5-9B-NoThinking.",
+      "expected_behavior": [
+        "Include a regex condition matching SSN patterns",
+        "Include a regex condition matching email addresses",
+        "Place the PII rule before any other rules",
+        "Run the offline validator and confirm the JSON is ready",
+        "Use routing.rules (not routing.router) to implement this request"
+      ],
+      "unexpected_behavior": [
+        "Execute any live Lemonade server API call by making an actual HTTP call with a tool"
+      ],
+      "files_exist": [
+        "router.json"
+      ]
+    },
+    {
+      "id": "llm-as-router",
+      "skill_should_trigger": true,
+      "prompt": "I want sensitive queries to go to Qwen3.5-9B-GGUF and everything else to Qwen3.5-9B-NoThinking. Use the local model as the router.",
+      "expected_behavior": [
+        "Use routing.router block instead of routing.rules",
+        "Set type to llm inside the router block",
+        "Contain only routing.router with no routing.rules key present in router.json",
+        "Write a routing.router prompt that describes only when to pick each model, with no instruction about reply format or output format"
+      ],
+      "files_exist": [
+        "router.json"
+      ]
+    },
+    {
+      "id": "nginx-load-balance",
+      "skill_should_trigger": false,
+      "prompt": "Set up nginx to load-balance incoming requests across three backend servers."
+    },
+    {
+      "id": "which-lemonade-model",
+      "skill_should_trigger": false,
+      "prompt": "Which Lemonade model should I download for summarizing long documents on my laptop?"
+    }
+  ]
+}

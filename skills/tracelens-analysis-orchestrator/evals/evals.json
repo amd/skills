@@ -1,0 +1,42 @@
+{
+  "evaluations": [
+    {
+      "id": "gemm-01-repeatability",
+      "skill_should_trigger": true,
+      "prompt": "Run the full standalone TraceLens analysis workflow locally with analysis mode default.\n- trace_path: {trace_path}\n- platform: {platform}\n- output_dir: {output_dir}\n- venv_path: {venv_path}\n- tracelens_dir: {tracelens_dir}\n",
+      "files_exist": [
+        "analysis_output/analysis.md"
+      ]
+    },
+    {
+      "id": "analyze-torch-trace",
+      "skill_should_trigger": true,
+      "prompt": "My training step is way slower than I expected. I ran it under the PyTorch profiler and the output is at https://github.com/AMD-AGI/TraceLens/raw/main/tests/traces/mi300/resnet_act_checkpoint.json.gz. Work out where the time is actually going and write it up so I know what to fix first."
+    },
+    {
+      "id": "compare-two-traces",
+      "skill_should_trigger": true,
+      "prompt": "I profiled the same model on two different machines and one is clearly slower, but I can't tell why. The captures are at https://github.com/AMD-AGI/TraceLens/raw/main/tests/traces/mi300/facebook_timesformer-base-finetuned-k400__1016002.json.gz and https://github.com/AMD-AGI/TraceLens/raw/main/tests/traces/h100/facebook_timesformer-base-finetuned-k400__1016002.json.gz. Tell me which GPU kernels are worse on the slow one, worst first, and write it up."
+    },
+    {
+      "id": "agentic-analysis-workflow",
+      "skill_should_trigger": true,
+      "prompt": "Run the agentic analysis workflow on the trace at https://github.com/AMD-AGI/TraceLens/raw/main/tests/traces/mi300/gaunernst_bert-small-uncased__1016001.json.gz and produce analysis.md."
+    },
+    {
+      "id": "kernel-perf-report",
+      "skill_should_trigger": true,
+      "prompt": "I captured a GPU kernel trace from a distributed training run: https://github.com/AMD-AGI/TraceLens/raw/main/tests/traces/mi300/llama_70b_fsdp/rank0_trace_no_pyfn.json.gz. I need a prioritized report of the worst performance offenders that I can show stakeholders."
+    },
+    {
+      "id": "node-event-loop",
+      "skill_should_trigger": false,
+      "prompt": "My Node.js server shows high event loop latency under load. Help me profile it and find the blocking call."
+    },
+    {
+      "id": "cprofile-python-script",
+      "skill_should_trigger": false,
+      "prompt": "Profile my Python script with cProfile and tell me which function is eating the most time."
+    }
+  ]
+}

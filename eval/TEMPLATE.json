@@ -1,0 +1,43 @@
+{
+  "evaluations": [
+    {
+      "id": "REPLACE-positive-with-expectations",
+      "skill_should_trigger": true,
+      "note": "Tier 1. The same prompt grades routing AND what the agent then did.",
+      "prompt": "A task this skill should carry out end to end.",
+      "expected_behavior": [
+        "A thing the agent must do, in plain language, graded by an LLM judge"
+      ],
+      "unexpected_behavior": [
+        "A mistake this skill exists to prevent"
+      ],
+      "logs_contain": [
+        "a-literal-that-must-appear.py"
+      ],
+      "files_exist": [
+        "expected-output.txt"
+      ]
+    },
+    {
+      "id": "REPLACE-unique-slug",
+      "skill_should_trigger": true,
+      "prompt": "Something a user would say that should make this skill fire."
+    },
+    {
+      "id": "REPLACE-second-positive",
+      "skill_should_trigger": true,
+      "prompt": "A different phrasing of the same need, with none of the same keywords."
+    },
+    {
+      "id": "REPLACE-near-miss",
+      "skill_should_trigger": false,
+      "note": "Close to this skill's vocabulary but out of its scope: the wrong hardware, an adjacent domain, a question rather than a task.",
+      "prompt": "Something that sounds like this skill's territory but is not."
+    },
+    {
+      "id": "REPLACE-second-near-miss",
+      "skill_should_trigger": false,
+      "prompt": "Another prompt that must not wake this skill up."
+    }
+  ]
+}
