@@ -57,7 +57,8 @@ Track progress against this checklist. Move on only when each step verifies.
 > log line at each transition, "nothing happened" is indistinguishable from
 > "broke at stage 3." Emit one clear line per stage as you build (see
 > [Step 4](#step-4-add-a-lemond-launcher)); the most common dead-end in this
-> integration — a blank result with no error — is invisible without them.
+> integration — a first request that hangs or comes back blank — is invisible
+> without them.
 
 ---
 
@@ -70,7 +71,7 @@ Find every place the app currently calls a cloud AI API. Search the repo for:
 - `api.openai.com`, `api.anthropic.com`, `localhost:11434` (Ollama)
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`
 
-Record three things before continuing:
+Record four things before continuing:
 
 1. **Client library and language** (e.g., `openai-python`, `openai-node`,
    `@anthropic-ai/sdk`, `go-openai`, raw `fetch`).
@@ -97,7 +98,7 @@ it.
 | Vision / multimodal chat | `Gemma-4-E2B-it-GGUF` | `llamacpp` | Small multimodal default |
 | NPU-first on Ryzen AI | `Llama-3.2-3B-Instruct-Hybrid` | `ryzenai-llm` | XDNA2 NPU on Windows |
 | Speech-to-text (Windows) | `Whisper-Large-v3-Turbo` | `whispercpp` | One model; probe picks NPU → iGPU/dGPU → CPU automatically |
-| Speech-to-text (Linux NPU) | `whisper-v3-turbo-FLM` | `flm` | Linux NPU path; falls back to `whispercpp` iGPU/CPU off-NPU |
+| Speech-to-text (Linux) | `Whisper-Large-v3-Turbo` | `whispercpp` | iGPU (`vulkan`) or CPU. **No NPU path** — see below |
 | Text-to-speech | `kokoro-v1` | `kokoro` | CPU-only, low latency |
 | Image generation | `SDXL-Turbo` | `sd-cpp` | Single-step generation |
 
@@ -116,6 +117,11 @@ the skill will use the NPU backend — otherwise it falls back to `vulkan`.
 > `GET /api/v1/system-info` before committing to it. See
 > [reference.md](reference.md#hardware-probing-with-v1system-info) for
 > per-recipe decision rules.
+
+> **No NPU backend is installable through Lemonade on Linux** — including
+> `flm:npu`, and including hosts whose NPU `system-info` reports as available.
+> Plan Linux around `vulkan` (iGPU) or `cpu`. Details and the exact refusals
+> are in [reference.md](reference.md#speech-to-text).
 
 For more options and tradeoffs, see [reference.md](reference.md).
 
@@ -208,7 +214,8 @@ vendor/lemonade/
 
 > **`server_models.json`:** Do not edit or rely on this file. It can be stale.
 > The only authoritative model list is `GET /api/v1/models` on a running
-> `lemond` instance with the backend already installed.
+> `lemond` instance with the backend already installed. That call returns
+> **downloaded models only** — add `?show_all=true` for the full catalog.
 
 **Bundle decisions: pick deliberately**
 
@@ -267,12 +274,12 @@ supervisor. Its only jobs:
 > [lemond] Healthy on port <port>
 > [lemond] <recipe>:<backend> installed        (or: already installed / install failed)
 > [lemond] Pulling model <name>...             then: Model <name> ready  (or: pull returned <status>)
-> [local]  <modality> result: <value>          (first inference output — empty string here = unpulled model)
+> [local]  <modality> result: <value>          (first inference output verbatim — empty or very slow here = unpulled model)
 > ```
 >
-> Logging the **first inference result verbatim** is what turns the
-> silent-empty failure (Step 6) from a multi-hour mystery into a one-line
-> diagnosis. Route these through the app's normal logging so they can be quieted
+> Logging the **first inference result verbatim**, with its elapsed time, is
+> what turns the unpulled-model failure (Step 6) from a multi-hour mystery into
+> a one-line diagnosis. Route these through the app's normal logging so they can be quieted
 > for release.
 
 > **Dev-mode file watchers:** If the app runs with a file watcher (Tauri,
@@ -295,7 +302,9 @@ hit that `/api/v1/health` path.
 Make **three** changes to the app's existing client construction — all three
 are required, not optional:
 
-1. Set `base_url` to `http://127.0.0.1:{port}/api/v1`
+1. Set `base_url` so the SDK's own path suffix resolves correctly — for
+   OpenAI-compatible clients that is `http://127.0.0.1:{port}/api/v1`; see the
+   table below, the prefix is **not** the same for every client
 2. Set `api_key` to the launcher key
 3. **Set the HTTP timeout to 120 seconds** — this is mandatory, not optional
 
@@ -320,13 +329,24 @@ client = OpenAI(
 
 For other clients:
 
-| Existing client | New `base_url` | New auth | Timeout |
-|---|---|---|---|
-| `openai-python` | `http://127.0.0.1:{port}/api/v1` | `api_key=key` | `httpx.Client(timeout=120)` |
-| `openai-node` | `http://127.0.0.1:{port}/api/v1` | `apiKey: key` | `timeout: 120000` |
-| `@anthropic-ai/sdk` | `http://127.0.0.1:{port}/api/v1` | `apiKey: key` | `timeout: 120000` |
-| Raw `fetch` / `requests` | same | `Authorization: Bearer {key}` | set per-request |
-| Ollama-compatible code | `http://127.0.0.1:{port}/api/v0` | pass key anyway | 120s |
+| Existing client | New `base_url` | Resolves to | New auth | Timeout |
+|---|---|---|---|---|
+| `openai-python` | `http://127.0.0.1:{port}/api/v1` | `/api/v1/chat/completions` | `api_key=key` | `httpx.Client(timeout=120)` |
+| `openai-node` | `http://127.0.0.1:{port}/api/v1` | `/api/v1/chat/completions` | `apiKey: key` | `timeout: 120000` |
+| `@anthropic-ai/sdk` | `http://127.0.0.1:{port}` — **no path suffix** | `/v1/messages` | `apiKey: key` | `timeout: 120000` |
+| Raw `fetch` / `requests` | full path, per the route table | — | `Authorization: Bearer {key}` | set per-request |
+| Ollama-compatible code | `http://127.0.0.1:{port}/api/v0` | `/api/v0/...` | pass key anyway | 120s |
+
+> **Path prefixes are not uniform — do not assume `/api/v1` for everything.**
+> OpenAI-compatible routes live under `/api/v1`, but Anthropic Messages is
+> served at **`/v1/messages`, outside that prefix** (`/api/v1/messages` 404s).
+> `@anthropic-ai/sdk` appends `/v1/messages` to whatever `base_url` you give
+> it, so `.../api/v1` requests `/api/v1/v1/messages` and 404s on the very first
+> call — during the cold-start window where an unpulled model or a short
+> timeout is the more natural suspect. A 404 whose body carries a `path` field
+> is a routing mistake, not a model problem. Verify with one real request
+> before wiring up the rest of the app; see
+> [reference.md](reference.md#app-facing-use-these-from-the-apps-existing-client).
 
 The model identifier on requests stays a Lemonade model name (e.g.
 `Qwen3-4B-GGUF`), not the cloud name.
@@ -365,10 +385,16 @@ step you let lemond do lazily — pulling is not.
 
 ### Pull the model so it exists on disk
 
-Lazy-load only loads weights that are **already downloaded**. If the model was
-never pulled, the first inference does not error — lemond returns an empty /
-blank result with HTTP 200. So after health passes and the backend is
-installed, proactively pull the model:
+If the model was never pulled, the first inference request **blocks until the
+weights finish downloading**. It does not error and it does not return early —
+it just takes as long as the download takes, which on a large model over a slow
+link is minutes. That collides directly with the 120-second timeout Step 5
+makes mandatory: the client gives up mid-download and the user sees a blank UI
+with no error, indistinguishable from a broken integration.
+
+So after health passes and the backend is installed, proactively pull the
+model. Pulling up front is what makes first-run latency **predictable** and
+gives you somewhere to hang a progress indicator:
 
 ```http
 POST /api/v1/pull
@@ -381,16 +407,21 @@ first user-triggered inference) and log the result.
 
 - **Default model** (the one you chose in Step 2): pull it by name as above.
 - **Custom / user-overridden model:** do not assume it exists. Confirm it is a
-  real Lemonade model first via `GET /api/v1/models` (the **only** trusted
-  catalog — see [reference.md](reference.md)), then pull it the same way. A
-  model appearing in the catalog is **not** proof its weights are downloaded;
-  a successful pull is.
+  real Lemonade model first via `GET /api/v1/models?show_all=true` (the **only**
+  trusted catalog — see [reference.md](reference.md); without `show_all` the
+  response lists downloaded models only, so a valid name looks invalid), then
+  pull it the same way. A model appearing in the catalog is **not** proof its
+  weights are downloaded; a successful pull is.
 
-> **Silent-empty is almost always an unpulled model.** If inference returns an
-> empty string / blank output with no HTTP error, the model was not downloaded.
-> Check your pull step before debugging anything else — this is the failure mode
-> that wastes the most time. Log the pull result and the first inference result
-> (see Step 4) so this is diagnosable from the console, not by guesswork.
+> **If the app skips the pull, first inference inherits the download.** Log the
+> pull result and the first inference result (see Step 4) so the console tells
+> you which one you are waiting on. If a first request hangs past the timeout
+> and a later identical request is fast, the first one was downloading.
+>
+> Behaviour here has changed across releases: some versions return an empty
+> string with HTTP 200 for an unpulled model instead of downloading it. Both
+> failure modes are cured by the same explicit pull, which is why it stays a
+> mandatory step rather than something to leave to lemond.
 
 ### Surface the *whole* setup, not just model load
 
@@ -417,16 +448,21 @@ These are the only failure modes worth handling. Do not over-engineer.
 
 | Symptom | Cause | Recovery |
 |---|---|---|
-| **Inference returns empty / blank with HTTP 200, no error** | Model never pulled: backend is installed but weights are absent, so lazy-load has nothing to load | `POST /api/v1/pull` with `{"model":"..."}`, wait for success, retry. Log the pulled result and the first inference result. This is the most common silent failure — see [Step 6](#step-6-health-backend-then-pull-the-model--before-first-inference) |
+| **First inference hangs past the timeout, but a later identical request is fast** | Model was never pulled, so the first request blocked while lemond downloaded the weights | Add the explicit `POST /api/v1/pull` step — see [Step 6](#step-6-health-backend-then-pull-the-model--before-first-inference). Raise the client timeout only as a stopgap; a pull-first setup makes the wait bounded and coverable by a progress indicator |
+| **Inference returns empty / blank with HTTP 200, no error** | Model never pulled: on some lemond versions an unpulled model yields an empty result rather than a download | Same fix — `POST /api/v1/pull` with `{"model":"..."}`, wait for success, retry. Log the pull result and the first inference result |
+| A 404 body contains a `path` field | The **route** does not exist — a client base-URL mistake, not a missing model. Most often `@anthropic-ai/sdk` pointed at `/api/v1`, producing `/api/v1/v1/messages` | Fix `base_url` per the Step 5 table. Anthropic Messages is `/v1/messages`; reranking is `/api/v1/reranking`. A model-not-found 404 has no `path` field |
 | `POST /api/v1/load` returns 404 / model not found | Model not pulled yet (same root cause as the empty-result row above) | `POST /api/v1/pull` with `{"model": "..."}` then retry `/api/v1/load` |
 | `POST /api/v1/load` returns 500 with backend error | Backend not installed for this hardware | `GET /api/v1/system-info`, pick a supported backend, `POST /api/v1/install` with `{"recipe": "...", "backend": "..."}`, retry |
 | Subprocess exits immediately | Port race: another process grabbed the port between `freePort()` and lemond binding | The reference launcher retries with a fresh port automatically (3 attempts) |
 | `/api/v1/health` never returns 200 | First-run backend extraction is slow on cold disk | Extend timeout to 90s on first launch, 30s after |
 | HTTP 401 on every request | Forgot the `Authorization: Bearer` header | Audit the client config because Lemonade rejects unauth'd calls when `LEMONADE_API_KEY` is set |
 
-**Shutdown:** On app exit, `proc.terminate()` (Unix) or
-`proc.kill()` (Windows). `lemond` flushes config and exits cleanly within a
-couple of seconds. Always wait on the process; never orphan it.
+**Shutdown:** On app exit, call `proc.terminate()`, then `proc.wait(timeout=5)`,
+and only fall back to `proc.kill()` if the wait expires. `lemond` flushes config
+and exits cleanly within a couple of seconds, so the wait is the part that
+matters. (On POSIX `terminate()` is SIGTERM and `kill()` is SIGKILL; on Windows
+Python maps both to `TerminateProcess`, so there is no graceful/forceful
+distinction to make there.) Always wait on the process; never orphan it.
 
 **Do not** parse `lemond` stdout to detect readiness; use the HTTP
 `/api/v1/health` probe. Stdout format is not a stable contract.
@@ -442,8 +478,9 @@ The integration is done when **all** of these are true:
 - [ ] `lemond` starts as a subprocess with a fresh API key per launch.
 - [ ] `GET /api/v1/health` returns 200 within the timeout.
 - [ ] The default model is pulled (or bundled) before the first inference; a
-      custom/overridden model is confirmed via `GET /api/v1/models` and then
-      pulled. A blank result with no error means this step was skipped.
+      custom/overridden model is confirmed via `GET /api/v1/models?show_all=true`
+      and then pulled. A first request that hangs for minutes, or returns blank
+      with no error, means this step was skipped.
 - [ ] Each lifecycle stage logs a clear line (spawn, health, backend install,
       model pull, first result) so a failure is diagnosable from the console.
 - [ ] The existing client's chat / image / speech call returns a valid
