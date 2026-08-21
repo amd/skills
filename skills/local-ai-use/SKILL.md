@@ -40,12 +40,12 @@ The skill does three things:
 
 > **Requires modern Lemonade (v10.1.0 or newer).** Modern Lemonade unified
 > everything under one `lemonade` CLI (`lemonade status`, `lemonade pull`, ...)
-> driving an always-on `lemond` service. This skill targets that and installs
-> Lemonade only from the official installers (see below) — never via
-> `pip install lemonade-sdk`, which is a separate, older release line. If an
-> older/incompatible `lemonade` is already on the PATH (from any channel — an
-> old `.msi`/`.deb` or a pip install), it will shadow the modern CLI; uninstall
-> it first (see the removal commands in Step 1a) before running this skill.
+> driving an always-on `lemond` service. `lemonade` is the only valid CLI, and
+> this skill installs Lemonade only from the [official install
+> paths](https://lemonade-server.ai/docs/guide/install/) listed in Step 1a. If
+> an older `lemonade` is already on the `PATH` it will shadow the modern CLI;
+> uninstall it first (see the removal commands in Step 1a) before running this
+> skill.
 
 Models are **not** downloaded during setup. Each default model is pulled
 lazily, on first use, by the routing rule (e.g. the first image request pulls
@@ -69,12 +69,12 @@ instead.
 ## Prerequisites
 
 - **OS:** Windows 11 x64, Ubuntu/Debian x64, or macOS (beta).
-- **Lemonade:** the setup script installs it if missing. It downloads and
-  silently installs the latest version (Windows `lemonade.msi`, the
-  Ubuntu/Debian `ppa:lemonade-team/stable` PPA, or the macOS `.pkg`). The
-  `lemond` service auto-starts after install; the script waits for it rather
-  than launching it. On Linux/macOS the install needs `sudo`. Pass
-  `--no-install` if the user wants to install it themselves instead.
+- **Lemonade:** the setup script installs the latest version if missing, using
+  `winget` on Windows, the `ppa:lemonade-team/stable` PPA on Ubuntu/Debian, and
+  the Homebrew cask on macOS (see Step 1a for the fallbacks). The `lemond`
+  service auto-starts after install; the script waits for it rather than
+  launching it. On Linux the install needs `sudo`. Pass `--no-install` if the
+  user wants to install it themselves instead.
 - **Disk:** ~8 GB free for the three default models (SD-Turbo + Whisper-Tiny
   + kokoro-v1), plus ~0.1 GB for the installer itself.
 - **Network:** required for the install download and the first `lemonade pull`
@@ -119,28 +119,32 @@ so you can do it by hand or debug it:
 **1a. Is a modern `lemonade` CLI installed?** Run `lemonade status`. The check
 is by *capability*, not by name: modern Lemonade prints `Server is running...`
 or `Server is not running`. If instead you get an "invalid choice" / usage
-error, the `lemonade` on `PATH` is an old, incompatible build that predates the
-unified CLI (v10.1.0) — do **not** use it. It could have come from any install
-channel, so remove it based on how it was installed, then re-run this skill (or
-install Lemonade manually):
+error, the `lemonade` on `PATH` is an old build that predates the unified CLI
+(v10.1.0) — do **not** use it. Remove it, then re-run this skill:
 
-| Installed via | Uninstall with |
+| OS | Uninstall the old build with |
 |---|---|
-| Windows `.msi` | `winget uninstall -e --id AMD.LemonadeServer`, or Settings > Apps > Installed apps > Lemonade Server > Uninstall |
-| Ubuntu/Debian apt/PPA | `sudo apt remove lemonade-server` |
-| pip | `pip uninstall lemonade-sdk` |
-| macOS `.pkg` | Delete the installed `Lemonade.app` / remove the package receipt |
+| Windows | `winget uninstall -e --id AMD.LemonadeServer`, or Settings > Apps > Installed apps > Lemonade Server > Uninstall |
+| Ubuntu/Debian | `sudo apt remove lemonade-server` |
+| macOS | `brew uninstall --cask lemonade-server`, or delete the installed `Lemonade.app` and its `.pkg` receipt |
 
 Never try to drive or auto-remove it for the user.
 
 If no `lemonade` is found at all, install the latest version on the user's
-behalf:
+behalf. Use the package manager first; the download is the fallback when the
+package manager is absent. Full matrix, including Arch, Fedora, Debian, Snap,
+and Docker, is in the [install docs](https://lemonade-server.ai/docs/guide/install/).
 
-| OS | Install |
-|---|---|
-| Windows | Download `lemonade.msi` from the [latest release](https://github.com/lemonade-sdk/lemonade/releases/latest/download/lemonade.msi) and run `msiexec /i lemonade.msi /qn` (silent, per-user, no elevation). |
-| Ubuntu/Debian | `sudo add-apt-repository -y ppa:lemonade-team/stable && sudo apt-get update && sudo apt-get install -y lemonade-server` (the apt package is `lemonade-server`; the CLI you then run is `lemonade`) |
-| macOS (beta) | Download the `Lemonade-<ver>-Darwin.pkg` from the latest release and run `sudo installer -pkg Lemonade-<ver>-Darwin.pkg -target /`. |
+| OS | Install | Fallback |
+|---|---|---|
+| Windows | `winget install -e --id AMD.LemonadeServer` | Download [`lemonade.msi`](https://github.com/lemonade-sdk/lemonade/releases/latest/download/lemonade.msi) and run `msiexec /i lemonade.msi /qn` (silent, per-user, no elevation). |
+| Ubuntu | `sudo add-apt-repository -y ppa:lemonade-team/stable && sudo apt-get update && sudo apt-get install -y lemonade-server` | `sudo snap install lemonade-server` |
+| macOS | `brew install --cask lemonade-server` | Download `Lemonade-<ver>-Darwin.pkg` from the [latest release](https://github.com/lemonade-sdk/lemonade/releases/latest) and run `sudo installer -pkg Lemonade-<ver>-Darwin.pkg -target /`. |
+
+The Ubuntu apt package is named `lemonade-server`, but the CLI it installs is
+`lemonade`. The browser UI is served at `http://localhost:13305` with no extra
+package; add `sudo apt install lemonade-desktop` only if the user wants the
+desktop frontend.
 
 After a Windows install the CLI lands in `%LOCALAPPDATA%\lemonade_server` and
 is added to the *user* PATH (new shells only); the setup script probes that
@@ -250,7 +254,7 @@ machine.
 | Symptom | Cause | Recovery |
 |---|---|---|
 | `lemonade: command not found` | CLI not installed | Re-run `python scripts/setup_local_ai.py` (auto-installs the latest version). If it just installed on Windows, open a new shell so the user PATH refreshes, or the script will find it under `%LOCALAPPDATA%\lemonade_server`. |
-| `status` gives an "invalid choice" / usage error | An old, incompatible `lemonade` (pre-v10.1.0, from any install channel) is shadowing the modern CLI | Uninstall it the way it was installed (see the Step 1a table: `winget uninstall -e --id AMD.LemonadeServer` / `sudo apt remove lemonade-server` / `pip uninstall lemonade-sdk`), then re-run the setup script or install Lemonade from the docs link. |
+| `status` gives an "invalid choice" / usage error | An old `lemonade` (pre-v10.1.0) is shadowing the modern CLI | Uninstall it (see the Step 1a table: `winget uninstall -e --id AMD.LemonadeServer` / `sudo apt remove lemonade-server` / `brew uninstall --cask lemonade-server`), then re-run the setup script. |
 | `Server is not running` | `lemond` service stopped | Start it via the OS service manager — `sudo systemctl start lemond` / `systemctl --user start lemond` (Linux), `launchctl load /Library/LaunchDaemons/com.lemonade.server.plist` (macOS), or the tray app / `Start-Service lemond` (Windows). There is no `lemonade serve`. |
 | `POST /v1/images/generations` returns 404 model not found | Image model not downloaded | `lemonade pull SD-Turbo` and retry. |
 | `lemonade pull` keeps printing `Progress: NN%` but never finishes | Download target is a bad path (out of space, no write permission, quota, read-only mount). The write error may surface only in the server log while the console keeps showing progress | Check the target and free space first: `GET /api/v1/system-info` reports `models_dir` and `model_storage.free_bytes`. If a pull stalls, read the recent lines of the server log (typically `lemonade-server.log` in the OS temp dir) for the real error (e.g. a download/write failure like `CURL code 23`, or an out-of-space message), then point the download at a writable disk with room. |
