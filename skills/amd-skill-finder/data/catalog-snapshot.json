@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "repository": "amd/skills",
+  "skills": [
+    {
+      "name": "amd-skill-finder",
+      "description": "Finds and recommends installed AMD skills, current AMD catalog skills, official AMD and ROCm repositories, and reviewed upstream projects for AMD GPU work."
+    },
+    {
+      "name": "local-ai-app-integration",
+      "description": "Converts cloud-LLM applications to use local inference through Lemonade Server on AMD Ryzen AI systems."
+    },
+    {
+      "name": "local-ai-use",
+      "description": "Uses local AI models through Lemonade Server for chat, image generation, transcription, embeddings, and reranking on AMD systems."
+    },
+    {
+      "name": "serving-llms-on-instinct",
+      "description": "Serves AI models on AMD Instinct GPUs using vLLM, including environment validation, model configuration, launch, and health verification."
+    },
+    {
+      "name": "tracelens-analysis-orchestrator",
+      "description": "Analyzes PyTorch and GPU traces, identifies performance bottlenecks, and produces AMD-focused optimization recommendations."
+    }
+  ]
+}
