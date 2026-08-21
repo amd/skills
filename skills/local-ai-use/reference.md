@@ -21,6 +21,11 @@ The default trio (`SD-Turbo`, `kokoro-v1`, `Whisper-Tiny`) is sized for
 "keeps cost savings real on a typical laptop". Override only if the user
 asks for higher quality or has explicit hardware to spare.
 
+Model catalogs move between releases, so treat the IDs below as a starting
+point, not a fixed list. Confirm any ID with `GET /api/v1/models` (add
+`?show_all=true` for the full catalog) before writing it into the rule. Do
+not rely on a stale `server_models.json` snapshot.
+
 ### Image generation (`recipe: sd-cpp`)
 
 | Model | Approx size | When to use | Trade-off |
@@ -63,6 +68,10 @@ Whisper requires 16 kHz mono PCM WAV input. Convert anything else first:
 ```bash
 ffmpeg -i input.mp3 -ar 16000 -ac 1 input.wav
 ```
+
+The HTTP endpoint adds no meaningful overhead over calling `whisper-cli`
+directly on the same engine/backend/model. Throughput is equivalent; use the
+endpoint unless you have a specific reason not to.
 
 For full live coverage, run `lemonade list` after starting the server, or
 browse <https://lemonade-server.ai/models.html>.

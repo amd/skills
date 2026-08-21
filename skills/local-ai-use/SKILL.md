@@ -76,9 +76,16 @@ instead.
   than launching it. On Linux/macOS the install needs `sudo`. Pass
   `--no-install` if the user wants to install it themselves instead.
 - **Disk:** ~8 GB free for the three default models (SD-Turbo + Whisper-Tiny
-  + kokoro-v1), plus ~0.1 GB for the installer itself.
+  + kokoro-v1), plus ~0.1 GB for the installer itself. The first image request
+  also triggers a ~5 GB pull for `SD-Turbo` if it is not already cached; on
+  metered or slow links, consider pulling models eagerly after setup (see
+  `lemonade pull` in `reference.md`).
 - **Network:** required for the install download and the first `lemonade pull`
   of each model. After that, every modality runs offline.
+- **Version:** requires v10.1.0 or newer (the unified `lemonade` CLI this
+  skill targets). Model IDs and `system-info` fields can change between
+  releases; confirm against `lemonade status` and `GET /api/v1/models` on the
+  version actually installed rather than assuming this document is current.
 
 ## The opinionated path
 
@@ -89,6 +96,10 @@ until each step verifies.
 [ ] 1. Ensure Lemonade Server is installed and running (auto-install if missing)
 [ ] 2. Install the routing rule into the workspace AGENTS.md
 ```
+
+On a managed or shared machine where the agent must not run
+`sudo apt-get install`, pass `--no-install` to the setup script and confirm
+Lemonade is already installed before continuing.
 
 The single command that does both steps in one shot is:
 
@@ -114,7 +125,8 @@ each step fails.
 ## Step 1: ensure Lemonade Server is installed and running
 
 `scripts/setup_local_ai.py` handles this end to end, but here is what it does
-so you can do it by hand or debug it:
+so you can do it by hand or debug it. Pass `--no-install` when Lemonade is
+already managed elsewhere and the agent must not attempt a package install.
 
 **1a. Is a modern `lemonade` CLI installed?** Run `lemonade status`. The check
 is by *capability*, not by name: modern Lemonade prints `Server is running...`
@@ -163,6 +175,21 @@ The rest of this skill assumes the endpoint is `http://localhost:13305/api/v1`
 and no API key is required (the system-wide server defaults to no auth on
 loopback). If the user has set `LEMONADE_API_KEY`, the routing rule template
 in `templates/local-ai-rule.md` shows where to add the `Authorization` header.
+
+**1c. Are the backends ready per modality?** Backend health is **per
+modality**. A working chat or image request does not prove transcription will
+work: `auto` picks a different backend per modality and can silently fall back
+for one while having no alternative for another. Before declaring setup
+complete, check the actual per-modality state:
+
+```bash
+lemonade backends --all
+```
+
+Any variant the workspace's routing depends on should read `installed`. If the
+only installed variant for a modality is `rocm`, install the Vulkan variant as
+well so `auto` has somewhere to fall back to (for example,
+`lemonade backends install whispercpp:vulkan`).
 
 ### Default modality models (pulled on first use, not during setup)
 
@@ -236,9 +263,11 @@ message. The rule explicitly tells the agent:
 - **For speech-to-text:** call `POST /api/v1/audio/transcriptions`. Do
   **not** call cloud transcription providers.
 - **Fallback:** only fall back to a cloud API after one local attempt has
-  failed *and* the user has been told the local call failed. Never
-  silently fall back; the whole point of this skill is to keep cost
-  predictable.
+  failed *and* the user has been told the local call failed. Never silently;
+  the whole point of this skill is to keep cost predictable. For
+  speech-to-text, the disclosure must also say the transcript came from a
+  different engine, since mixed-engine transcripts should not be compared or
+  deduplicated.
 
 The agent's own text reasoning continues to use whatever LLM Cursor / Claude
 Code / Codex is configured with. This skill does not redirect chat tokens;
@@ -255,6 +284,7 @@ machine.
 | `POST /v1/images/generations` returns 404 model not found | Image model not downloaded | `lemonade pull SD-Turbo` and retry. |
 | `lemonade pull` keeps printing `Progress: NN%` but never finishes | Download target is a bad path (out of space, no write permission, quota, read-only mount). The write error may surface only in the server log while the console keeps showing progress | Check the target and free space first: `GET /api/v1/system-info` reports `models_dir` and `model_storage.free_bytes`. If a pull stalls, read the recent lines of the server log (typically `lemonade-server.log` in the OS temp dir) for the real error (e.g. a download/write failure like `CURL code 23`, or an out-of-space message), then point the download at a writable disk with room. |
 | Image generation is slow on CPU (~4–5 min) | sd-cpp on CPU backend | Install the GPU backend on supported AMD hardware: `lemonade backends install sd-cpp:rocm`. |
+| Still slow after installing the GPU backend | The backend is installed but not actually engaged; the runtime fell back to CPU silently | An `installed` state in `system-info` and a successful `rocminfo` both still permit a silent CPU fallback. Check real GPU utilisation (`gpu_busy_percent`) during a request, and confirm the host's GPU driver stack rather than re-installing the backend. |
 | `POST /v1/audio/transcriptions` returns 400 unsupported format | Input is not 16 kHz mono WAV | Re-encode with `ffmpeg -i in.* -ar 16000 -ac 1 out.wav`. |
 | `POST /v1/audio/speech` returns 404 | TTS model not downloaded | `lemonade pull kokoro-v1`. |
 | 401 Unauthorized on every request | User has set `LEMONADE_API_KEY` | Add `Authorization: Bearer $LEMONADE_API_KEY` to every request and to the rule block. |
@@ -271,9 +301,12 @@ Mark this skill complete only when **all** of the following are true:
 - [ ] On a follow-up turn, asking the agent to "generate an image of X"
       causes it to POST to `http://localhost:13305/api/v1/images/generations`
       (pulling the model on first use) rather than calling a cloud tool.
+- [ ] `lemonade backends --all` shows `installed` for every backend variant
+      this workspace's routing depends on (see Step 1c). Do not treat a working
+      image or chat path as proof that transcription will work.
 
 If any box is unchecked, the user is still paying cloud cost for at least
-one modality.
+one modality, or a routed modality may fail silently on first use.
 
 ---
 

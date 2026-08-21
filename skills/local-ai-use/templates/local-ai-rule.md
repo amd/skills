@@ -23,7 +23,7 @@ configured LLM. This rule only redirects the multimodal calls.
 
 | Endpoint | Model | Notes |
 |---|---|---|
-| `/v1/images/generations` | `{{IMAGE_MODEL}}` | 4 steps, `cfg_scale: 1.0`, `512x512`, `response_format: "b64_json"`. |
+| `/v1/images/generations` | `{{IMAGE_MODEL}}` | 4 steps, `cfg_scale: 1.0`, `512x512`, `response_format: "b64_json"`. First use pulls several GB if the model is not cached. |
 | `/v1/audio/speech` | `{{TTS_MODEL}}` | Default voice `shimmer`; `response_format: "mp3"`. |
 | `/v1/audio/transcriptions` | `{{STT_MODEL}}` | Input must be 16 kHz mono WAV. Re-encode with `ffmpeg -i in.* -ar 16000 -ac 1 out.wav`. |
 
@@ -94,7 +94,9 @@ curl -sX POST {{LEMONADE_BASE_URL}}/audio/transcriptions \
       to the user rather than waiting through silent retries.
 4. Only after that, ask the user before falling back to a cloud provider.
    Never silently fall back; the whole point of this rule is predictable
-   cost.
+   cost. For speech-to-text specifically, also disclose that the transcript
+   came from a different engine, since mixed-engine transcripts should not
+   be compared or deduplicated.
 
 ### Re-pointing to a different host
 
