@@ -67,6 +67,16 @@ Notes:
   where "can't check" should route to the restricted/local path).
 - A label-less `classifier` entry is legal (single-score models); its rule
   leaves then must not name a `label`.
+- **`labels` on a `classifier` entry cannot be checked offline.**
+  `scripts/validate.py` only verifies internal consistency (rules reference
+  labels you declared) - it has no way to confirm those labels match the
+  model's real output categories, since that requires calling the live model.
+  A mismatched label doesn't error at registration or at request time; it
+  silently scores `0.0` on every request, and with the default
+  `on_error: match_false` the rule permanently falls through with no visible
+  error. Verify by sending a test prompt designed to clearly hit the label and
+  checking the trace `score` - stuck at `0.0` on an obvious match means the
+  label name is wrong, not that the input didn't match.
 - Scores are `{label: score}` with each score in `[0, 1]`.
 - **`llm` classifier wire contract** - the engine appends its own JSON reply
   contract after every `llm` classifier prompt, exactly as it does for
@@ -77,6 +87,8 @@ Notes:
   causes weaker models to output bare `X`, the parser rejects it, the score
   comes back empty, and the rule silently never fires. Describe classification
   intent only (what makes a request COMPLEX vs SIMPLE, SAFE vs RISKY, etc.).
+  If it still never fires after that, this is the same judge-capability limit
+  as `routing.router` (SKILL.md Step 4) - swap in a stronger model.
 
 ## Rules and match expressions
 
@@ -189,6 +201,16 @@ trace[] }` - use it to demonstrate each rule to the user. `version` is always
 for keyword/metadata conditions. Registration errors come back as descriptive
 parser messages (e.g. `routing.default_model 'X' must be listed in
 routing.candidates`); fix the field it names and re-POST.
+
+`default_used: true` + `matched_rule: ""` is the only reliable fallback
+signal - an empty `rationale` alone is not, since a successful Mode A route to
+a non-first candidate commonly returns one too. In Mode A, a non-fallback
+`matched_rule` is a synthetic id (`__route_0`, `__route_1`, … - one per
+`routing.candidates` entry, in declaration order), not an author-given one;
+seeing one of these is expected, not an error. For classifier-backed rules,
+also check the per-condition `score` in `trace[]` - stuck at `0.0` across
+clearly-matching test inputs signals a mismatched `labels` entry, not a
+non-match (see [Classifier entries](#classifier-entries)).
 
 ## Desktop-editor compatibility
 

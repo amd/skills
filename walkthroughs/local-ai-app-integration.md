@@ -23,7 +23,7 @@ This sample app requires the Rust toolchain (install from https://rustup.rs/).
 | 2 | AMD iGPU / dGPU | GPU-accelerated transcription |
 | 3 (fallback) | Any other Windows x64 PC | CPU transcription |
 
-## Step 1 - Get the target app
+## Step 1 — Get the target app
 
 * Clone the cloud-only app you want to upgrade:
 
@@ -32,11 +32,11 @@ git clone https://github.com/danielholanda/dictate.git
 cd dictate
 ```
 
-## Step 2 - Understanding which skills are available
+## Step 2 — Understanding which skills are available
 
 * Run `claude "Which skills can you see?" --model opus`. You should see a list of skills that should *not* include anything related to local AI app integration.
 
-## Step 3 - Enabling claude to see `local-ai-app-integration`
+## Step 3 — Enabling Claude to see `local-ai-app-integration`
 
 * Install the skill with the [`skills` CLI](https://github.com/vercel-labs/skills). Run this in your terminal, not inside Claude:
 
@@ -46,7 +46,7 @@ npx skills add amd/skills --skill local-ai-app-integration --agent claude-code
 
 * Run `claude "Which skills can you see?" --model opus`. You should see a list of skills that includes `local-ai-app-integration`.
 
-## Step 4 - Running the skill
+## Step 4 — Running the skill
 
 Run `claude --model opus` inside the `dictate` repo with this prompt:
 
@@ -75,9 +75,9 @@ Claude should:
    weights are on disk before the first recording. Skipping this makes the very
    first transcription come back blank with no error.
 
-Please note this may take several minutes as this app has a fairly large codebase.
+This may take several minutes, as this app has a fairly large codebase.
 
-## Step 5 - Running the modified app
+## Step 5 — Running the modified app
 
 Dictate is a Tauri (Rust + Node) app. From the repo root:
 
@@ -115,13 +115,13 @@ cloud provider — the text appears where your cursor was last located.
 > now?\n"` on quiet audio are a known Whisper behavior on silence/low-energy
 > input, not an integration bug.
 
-## Step 6 - (Optional) Going beyond
+## Step 6 — (Optional) Going beyond
 
 `local-ai-app-integration` works for any modality, not just speech-to-text. The
 same pattern adds local chat, embeddings, image generation, or text-to-speech to
 any app that already calls into the cloud. You can try using this skill to turn other cloud apps into local apps.
 
-## Step 7 - (Optional) Try to get things done without AMD Skills
+## Step 7 — (Optional) Try to get things done without AMD Skills
 
 Remove the added skill from `.claude/skills/` and rerun the experiment above. This should lead to a high variance in execution length and token usage. Some common issues without the skill include:
 * Model produces a local implementation that does not use NPU acceleration as instructed.

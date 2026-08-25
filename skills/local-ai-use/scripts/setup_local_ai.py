@@ -23,14 +23,12 @@ Performs the setup steps from SKILL.md:
      <workspace>/AGENTS.md, between stable BEGIN/END markers so re-runs
      replace the block in place rather than appending.
 
-Modern Lemonade (v10.1.0+) unified everything under the single `lemonade`
-CLI (subcommands `status`, `pull`, `run`, ...) driving an always-on `lemond`
-service. Older/incompatible builds of `lemonade` -- whichever way they were
-installed (an old .msi/.deb, or the pip `lemonade-sdk` package) -- lack the
-service-control subcommands and are NOT supported here. The CLI check below
-therefore probes *capability* (does `lemonade status` work?) rather than
-trusting the binary name, so an old incompatible CLI on PATH is reported
-clearly instead of being driven into a 90-second dead end.
+Modern Lemonade unified everything under a single `lemonade` CLI (subcommands
+`status`, `pull`, `run`, ...) driving an always-on `lemond` service. That is
+the only CLI this skill supports. An older build left on PATH lacks those
+subcommands, so the check below probes *capability* (does `lemonade status`
+work?) rather than trusting the binary name, and reports a stale CLI clearly
+instead of driving it into a 90-second dead end.
 
 Setup never downloads models: the default image/TTS/STT models are pulled
 on first use, by the installed AGENTS.md rule (see its failure
@@ -65,10 +63,9 @@ from pathlib import Path
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 13305
 
-# The Lite Collection from Lemonade OmniRouter. Picked because each default
-# fits in under ~5 GB and runs on commodity CPU hardware, so the savings vs.
-# cloud calls are real on a typical developer laptop. See SKILL.md for upgrade
-# paths.
+# Picked because each default fits in under ~5 GB and runs on commodity CPU
+# hardware, so the savings vs. cloud calls are real on a typical developer
+# laptop. See SKILL.md for upgrade paths.
 DEFAULT_IMAGE_MODEL = "SD-Turbo"
 DEFAULT_TTS_MODEL = "kokoro-v1"
 DEFAULT_STT_MODEL = "Whisper-Tiny"
@@ -82,10 +79,14 @@ END_MARKER = "<!-- END amd-skills:local-ai-use -->"
 SKILL_DIR = Path(__file__).resolve().parent.parent
 RULE_TEMPLATE = SKILL_DIR / "templates" / "local-ai-rule.md"
 
-# The *full* Windows installer: Lemonade plus the desktop app and the
-# always-on `lemond` service. `releases/latest/download/<asset>` always
-# resolves to the newest published asset of that exact name, so we never have
-# to pin a version.
+# Windows: winget is the current recommended install and keeps Lemonade
+# upgradable in place, so we try it first.
+WINDOWS_WINGET_ID = "AMD.LemonadeServer"
+
+# Fallback when winget is unavailable: the *full* Windows installer, Lemonade
+# plus the desktop app and the always-on `lemond` service.
+# `releases/latest/download/<asset>` always resolves to the newest published
+# asset of that exact name, so we never have to pin a version.
 WINDOWS_MSI_URL = (
     "https://github.com/lemonade-sdk/lemonade/releases/latest/download/lemonade.msi"
 )
@@ -95,6 +96,11 @@ WINDOWS_MSI_URL = (
 WINDOWS_INSTALL_DIR = Path(
     os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
 ) / "lemonade_server"
+
+# macOS: the Homebrew cask is the current recommended install. It also avoids
+# the unauthenticated GitHub API call the .pkg fallback needs, which is rate
+# limited per source IP.
+MACOS_BREW_CASK = "lemonade-server"
 
 # GitHub release metadata, used to resolve the versioned macOS .pkg asset
 # (its filename embeds the version, so there is no stable latest/download URL).
@@ -112,10 +118,9 @@ LINUX_APT_INSTALL = (
     "sudo apt-get install -y lemonade-server"
 )
 
-# Modern Lemonade exposes a single `lemonade` CLI (it drives the always-on
-# `lemond` service). We deliberately do NOT fall back to the deprecated
-# `lemonade-server` CLI or the pip "eval" build; instead we verify the CLI we
-# find is actually the modern one via a capability probe (see find_cli).
+# Modern Lemonade exposes exactly one CLI, `lemonade`, driving the always-on
+# `lemond` service. There is no second binary to fall back to, so instead of
+# trying other names we verify this one is the modern build (see find_cli).
 CLI_NAME = "lemonade"
 
 # Docs URL to point users at when they must install/upgrade Lemonade by hand.
@@ -171,13 +176,11 @@ def is_modern_cli(cli: str) -> bool:
     """True if `cli` is the modern Lemonade CLI (drives the `lemond` service).
 
     Capability probe, not a name check: the modern `lemonade` CLI exposes a
-    `status` subcommand that reports on the service. An older or otherwise
-    incompatible `lemonade` on PATH -- regardless of how it was installed (an
-    old .msi/.deb, or the pip `lemonade-sdk` build) -- does not recognise the
-    subcommand and errors with an argparse "invalid choice" instead. Running
-    `lemonade status` is cheap, does not mutate anything, and tells us both
-    that the CLI is modern AND whether the service is already up, so we reuse
-    it as the single discriminator.
+    `status` subcommand that reports on the service. An older `lemonade` on
+    PATH does not recognise the subcommand and errors with an argparse
+    "invalid choice" instead. Running `lemonade status` is cheap, does not
+    mutate anything, and tells us both that the CLI is modern AND whether the
+    service is already up, so we reuse it as the single discriminator.
 
     A modern CLI prints "Server is running..." or "Server is not running"
     (exiting 0 or 1 accordingly). We key off that phrasing rather than the
@@ -206,8 +209,7 @@ def find_cli() -> tuple[str | None, str | None]:
     Returns ``(modern_cli, stale_cli)``:
 
     - ``(path, None)``  a modern, capable `lemonade` CLI was found -> use it.
-    - ``(None, path)``  a `lemonade` executable exists but is NOT the modern
-                        CLI (old pip "eval" build, or otherwise incompatible)
+    - ``(None, path)``  a `lemonade` executable exists but is an older build
                         -> the caller should guide the user to upgrade.
     - ``(None, None)``  no `lemonade` executable found at all -> install it.
     """
@@ -257,7 +259,25 @@ def _run(cmd: list[str] | str, *, shell: bool = False) -> None:
 
 
 def _install_windows() -> None:
-    """Silently install the full lemonade.msi (server + desktop app)."""
+    """Install with winget, falling back to the signed full MSI."""
+    if shutil.which("winget") is not None:
+        try:
+            _run(
+                [
+                    "winget",
+                    "install",
+                    "-e",
+                    "--id",
+                    WINDOWS_WINGET_ID,
+                    "--accept-package-agreements",
+                    "--accept-source-agreements",
+                    "--disable-interactivity",
+                ]
+            )
+            _print("Lemonade installed.")
+            return
+        except RuntimeError as exc:
+            _print(f"winget install did not complete ({exc}); trying the MSI.")
     msi = Path(tempfile.gettempdir()) / "lemonade.msi"
     _download(WINDOWS_MSI_URL, msi)
     # /qn = silent, per-user (no elevation needed). The MSI registers the CLI
@@ -267,7 +287,7 @@ def _install_windows() -> None:
 
 
 def _install_linux() -> None:
-    """Install the stable PPA server plus the desktop frontend on apt distros."""
+    """Install from the stable PPA on apt distros."""
     if shutil.which("apt-get") is None:
         raise RuntimeError(
             "Automatic install only supports apt-based distros (Ubuntu/Debian). "
@@ -283,7 +303,14 @@ def _install_linux() -> None:
 
 
 def _install_macos() -> None:
-    """Download the latest signed .pkg and install it system-wide."""
+    """Install the Homebrew cask, falling back to the signed .pkg."""
+    if shutil.which("brew") is not None:
+        try:
+            _run(["brew", "install", "--cask", MACOS_BREW_CASK])
+            _print("Lemonade installed.")
+            return
+        except RuntimeError as exc:
+            _print(f"Homebrew install did not complete ({exc}); trying the .pkg.")
     pkg_url = _resolve_macos_pkg_url()
     pkg = Path(tempfile.gettempdir()) / "Lemonade.pkg"
     _download(pkg_url, pkg)
@@ -336,32 +363,21 @@ def service_start_hint() -> str:
 
 
 def uninstall_hint() -> str:
-    """OS-specific ways to remove an old/incompatible Lemonade.
-
-    An incompatible `lemonade` could come from any install channel, so we do
-    not assume pip. We list the removal path for each channel and let the user
-    apply whichever one matches how they installed it.
-    """
+    """OS-specific ways to remove an old Lemonade that shadows the modern CLI."""
     system = platform.system()
     if system == "Linux":
-        return (
-            "remove it however it was installed: `sudo apt remove lemonade-server` "
-            "(apt/PPA) or `pip uninstall lemonade-sdk` (pip)"
-        )
+        return "`sudo apt remove lemonade-server`, or the package manager it came from"
     if system == "Darwin":  # macOS
         return (
-            "remove it however it was installed: delete the installed "
-            "`Lemonade.app`/receipt from a .pkg install, or "
-            "`pip uninstall lemonade-sdk` (pip)"
+            f"`brew uninstall --cask {MACOS_BREW_CASK}`, or delete the installed "
+            "`Lemonade.app` and its .pkg receipt"
         )
     if system == "Windows":
         return (
-            "remove it however it was installed: for an .msi install, run "
-            "`winget uninstall -e --id AMD.LemonadeServer` or uninstall Lemonade "
-            "Server from Settings > Apps > Installed apps; or, if it came from "
-            "pip, `pip uninstall lemonade-sdk`"
+            f"`winget uninstall -e --id {WINDOWS_WINGET_ID}`, or uninstall "
+            "Lemonade Server from Settings > Apps > Installed apps"
         )
-    return "remove the old Lemonade using your platform's package manager or `pip uninstall lemonade-sdk`"
+    return f"remove it with your platform's package manager; see {INSTALL_DOCS_URL}"
 
 
 def wait_for_server(host: str, port: int, timeout_s: float = 90.0) -> bool:
@@ -449,6 +465,7 @@ def upsert_agents_md(
     )
 
     if not target.exists():
+        workspace.mkdir(parents=True, exist_ok=True)
         target.write_text(
             "# Agent instructions\n\n"
             "Project-scoped rules picked up automatically by Cursor, Claude Code,\n"
@@ -524,13 +541,11 @@ def main(argv: list[str] | None = None) -> int:
 
     cli, stale = find_cli()
 
-    # An old/incompatible `lemonade` on PATH shadows the modern CLI. It may
-    # have come from any install channel (old .msi/.deb or pip), so we never
-    # assume one. We also never drive or auto-remove it -- we guide the user,
-    # because a shadowing binary will keep hiding a freshly installed modern
-    # CLI until it is removed.
+    # An old `lemonade` on PATH shadows the modern CLI. We never drive or
+    # auto-remove it -- we guide the user, because a shadowing binary will keep
+    # hiding a freshly installed modern CLI until it is removed.
     if cli is None and stale is not None:
-        _print(f"FAIL: found an old/incompatible Lemonade CLI at {stale}.")
+        _print(f"FAIL: found an old Lemonade CLI at {stale}.")
         _print(
             "It is missing the modern `lemonade status` command, so it predates "
             "the unified CLI (v10.1.0) and cannot be used by this skill."

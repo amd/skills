@@ -47,6 +47,8 @@ exist, and choosing the right one is the first decision:
 - **Candidates**: the models that may *answer* requests. Verbatim model names
   (e.g. `Gemma-3-4b-it-GGUF`). If the user names none, ask - never invent
   model names. `lemonade list` or `GET /api/v1/models` shows what's available.
+  A name the user *did* give may still not exist on the target host - the
+  offline validator can't check that (Step 8b closes the gap).
 - **Default / fallback**: which candidate gets everything that matches nothing.
   If unstated, use the model the user framed as "local", "small", or "safe";
   otherwise the first candidate mentioned.
@@ -99,8 +101,18 @@ chat-capable LLMs - not embedding, classification, or image models.
 }
 ```
 
-- `model` defaults to the smallest candidate (it may be a candidate; it also
-  works as a separate small model).
+- `model` defaults to the **most capable candidate**, not the cheapest one.
+  The router judges every single request that flows through the policy, so a
+  weak judge silently misrouting everything is a worse default than the extra
+  cost of a stronger one. State the choice in the summary you give the user -
+  `router.model: <chosen>` (most capable candidate available; pick a smaller
+  dedicated judge model yourself for lower per-request cost, at the risk of
+  the failure mode below). If the user already named a separate model for
+  this role, use that instead of a candidate.
+- If `default_used` stays `true` across varied test prompts even after fixing
+  the prompt (see the bullet below and Step 9), the fix is a more capable
+  `router.model`, not a further prompt edit - this is a judge-model-capability
+  limit, not something prompt wording alone can solve.
 - **Write intent only - never specify a reply format and never use imperative
   "Pick X" phrasing.** The engine unconditionally appends its own contract
   after your prompt: it lists the candidate names and demands a strict JSON
@@ -142,8 +154,11 @@ Hard constraints (parser-enforced - see `reference.md` for the full matrix):
 
 - `classifier` type: model should be a text-classification model (an
   `onnxruntime` encoder like `Bert-Phishing-ONNX`); `labels` must match the
-  model's actual output labels. A chat LLM here is legal (LLM-as-classifier
-  via chat) but prefer `type: "llm"` for that - it is explicit and prompted.
+  model's actual output labels - unverifiable offline, and a mismatch
+  silently scores `0.0` forever (see `reference.md`'s classifier notes for
+  why, Step 8b for how to catch it). A chat LLM here is legal
+  (LLM-as-classifier via chat) but prefer `type: "llm"` for that - it is
+  explicit and prompted.
 - `semantic_similarity`: `reference_phrases` is `{concept: [phrases...]}`,
   at least one concept, each with at least one phrase. Concept names ARE the
   labels - a `labels` key is **rejected** for this type. Model must be an
@@ -155,7 +170,9 @@ Hard constraints (parser-enforced - see `reference.md` for the full matrix):
   "Reply with exactly one label: SAFE or RISKY" causes weaker models to output
   bare `SAFE`, which the parser rejects - the score comes back empty and the
   rule silently never fires. Describe what makes a request belong to each
-  label; leave the reply format to the engine.
+  label; leave the reply format to the engine. If it still never fires after
+  that, see Step 4's judge-capability note above - the same fix applies here
+  (Step 9 shows how to catch it).
 - `default_label`, when present, must be one of the labels/concepts.
 - Defaults when unspecified: `id` = `clf-1`, `clf-2`, …; `on_error` =
   `"match_false"` (fail-open: a broken classifier doesn't match, so requests
@@ -217,6 +234,11 @@ as plain text for the user to copy and run. This is not optional. Fill in
 that should hit the first rule. Do not execute these with Bash or any tool —
 print them as text only.
 
+`ready: true` from the validator only means the JSON is schema-valid - it
+says nothing about whether these models exist on the target host. Run #1 for
+every candidate/classifier model before #2, or `/pull` will 400 on a policy
+that just passed validation.
+
 ```bash
 # 1. Check a model exists before registering
 curl http://localhost:13305/api/v1/models/<model-id>
@@ -235,7 +257,36 @@ curl -i -X POST http://localhost:13305/api/v1/chat/completions \
 The `x-lemonade-route` response header carries the matched rule id (or
 `default`). With `"route_trace": true` the body also carries
 `x_lemonade_route`: `{ route_to, matched_rule, default_used, outputs,
-trace[] }` - useful for verifying each rule fires as expected.
+trace[] }`.
+
+## Step 9 - Print instructions for the user to verify routing themselves
+
+**This step is mandatory, not optional follow-up.** A policy that passed
+validation and registered cleanly can still send every request to the wrong
+model, or silently score `0.0` forever, with the server returning HTTP 200
+and no error either way - and neither failure is visible from the JSON or
+from Step 8a's validator. Per the skill's design, you never call the live
+server yourself; instead, print the following as text so the user can run it
+and read the result.
+
+Print **two** test curl commands (adapt Step 8b's command #3 for both), one
+phrased to clearly hit a specific rule (or Mode A intent), one phrased to hit
+nothing so it should land on `default_model`. Then print these reading
+instructions immediately after:
+
+- Tell the user to check `x_lemonade_route` in each response, not just the
+  HTTP status.
+- **Check `default_used`, not the rationale.** `"default_used": true` with
+  `"matched_rule": ""` is the fallback signature. An empty `rationale` alone
+  is *not* a fallback signal - a successful route to a non-first candidate
+  commonly returns one too.
+- **For classifier-backed rules, check the per-condition `score` in
+  `trace[]`.** A score stuck at `0.0` on the request designed to clearly hit
+  that label means the declared `labels` entry doesn't match the model's real
+  output categories (Step 5) - not that the input failed to match.
+- If either check fails, the fix is a more capable `router.model` for Mode A
+  misroutes, or a corrected `labels` entry for classifier mismatches - tell
+  the user to report the result back so you can revise and re-validate.
 
 ## Defaults summary
 
@@ -250,6 +301,7 @@ trace[] }` - useful for verifying each rule fires as expected.
 | `min_score` | `0.5` |
 | `outputs` | omit |
 | router prompt | intent only - no reply-format instruction (Step 4) |
+| `router.model` (Mode A) | most capable candidate, not the cheapest (Step 4) |
 
 Worked NL → JSON pairs live in `examples.md`; the full schema, parser error
 matrix, and model-capability table live in `reference.md`; the offline

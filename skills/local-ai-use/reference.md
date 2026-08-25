@@ -21,6 +21,11 @@ The default trio (`SD-Turbo`, `kokoro-v1`, `Whisper-Tiny`) is sized for
 "keeps cost savings real on a typical laptop". Override only if the user
 asks for higher quality or has explicit hardware to spare.
 
+Model catalogs move between releases, so treat the IDs below as a starting
+point, not a fixed list. Confirm any ID with `GET /api/v1/models` (add
+`?show_all=true` for the full catalog) before writing it into the rule. Do
+not rely on a stale `server_models.json` snapshot.
+
 ### Image generation (`recipe: sd-cpp`)
 
 | Model | Approx size | When to use | Trade-off |
@@ -64,6 +69,10 @@ Whisper requires 16 kHz mono PCM WAV input. Convert anything else first:
 ffmpeg -i input.mp3 -ar 16000 -ac 1 input.wav
 ```
 
+The HTTP endpoint adds no meaningful overhead over calling `whisper-cli`
+directly on the same engine/backend/model. Throughput is equivalent; use the
+endpoint unless you have a specific reason not to.
+
 For full live coverage, run `lemonade list` after starting the server, or
 browse <https://lemonade-server.ai/models.html>.
 
@@ -95,8 +104,11 @@ Notable per-endpoint quirks:
   `/v1/models/{id}` are the right values to use as your defaults.
 - **`/v1/images/edits`**: `multipart/form-data` (not JSON). `mask` is
   optional; without one the entire image is the editable region.
-- **`/v1/audio/transcriptions`**: only `wav` input and `json` response are
-  supported today. Non-WAV input must be re-encoded with `ffmpeg`.
+- **`/v1/audio/transcriptions`**: only `wav` input is supported; re-encode
+  anything else with `ffmpeg`. `response_format` accepts `json`,
+  `verbose_json`, `text`, `srt`, and `vtt` — the first two return JSON, the
+  rest return a raw text body (as of Lemonade 11.7.0). Any other value is a
+  400.
 - **`/v1/audio/speech`**: `mp3`, `wav`, `opus`, and `pcm` outputs supported.
   Streaming requires `stream_format: "audio"`, which only emits `pcm`.
 

@@ -58,9 +58,9 @@
       "prompt": "Set up nginx to load-balance incoming requests across three backend servers."
     },
     {
-      "id": "which-lemonade-model",
+      "id": "which-model-download",
       "skill_should_trigger": false,
-      "prompt": "Which Lemonade model should I download for summarizing long documents on my laptop?"
+      "prompt": "Which model should I download for summarizing long documents on my laptop?"
     }
   ]
 }

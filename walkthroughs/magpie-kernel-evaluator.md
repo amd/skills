@@ -116,7 +116,7 @@ magpie benchmark \
 Review request/token throughput, completed requests, TTFT, TPOT, ITL, and
 end-to-end latency. Record the Magpie commit, model revision, image/framework
 version, GPU model and count, tensor parallelism, precision, concurrency,
-input/output lengths, warmup, and profiler state.
+input and output lengths, warmup, and profiler state.
 
 ### Review TraceLens post-processing
 
@@ -404,4 +404,4 @@ a config shape, compare performance before correctness, or omit the structured
 reports needed for review.
 
 For the complete command and configuration reference, read the
-[`magpie-kernel-evaluator` skill](../skills/magpie-kernel-evaluator/SKILL.md).
+[`magpie-kernel-evaluator` skill](https://github.com/amd/skills/blob/main/skills/magpie-kernel-evaluator/SKILL.md).

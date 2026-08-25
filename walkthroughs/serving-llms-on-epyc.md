@@ -6,24 +6,24 @@ validating the environment, checking the model fits, sizing the runtime to the
 hardware, launching, and verifying the endpoint responds.
 
 **What you'll end up with:** a running `vllm serve` endpoint on your EPYC box (in a
-Docker/Podman container, or a conda env), sized to a single socket and ready to answer
-OpenAI requests via `/v1/chat/completions` for instruct/chat models (those that ship a
+Docker or Podman container, or a conda env), sized to a single socket and ready to answer
+OpenAI requests through `/v1/chat/completions` for instruct/chat models (those that ship a
 chat template) or `/v1/completions` for base models.
 
 ## Prerequisites
 
-- A supported **AMD EPYC™ 9000-series server CPU with AVX-512**: **Genoa** (9004), **Turin** (9005), or **6th Gen Venice** (9006). `detect.py` reports both `is_supported_epyc` and `avx512`; both must be true. Other EPYC parts (Bergamo, Siena, the AM5 EPYC 4004/4005) may expose AVX-512 but are outside this skill's current 9000-series scope and are treated as unsupported. This is CPU serving; a GPU is not required, but a host may also contain AMD Instinct GPUs.
+- A supported **AMD EPYC™ 9000-series server CPU with AVX-512**: **Genoa** (9004), **Turin** (9005), or **6th Gen Venice** (9006). `detect.py` reports both `is_supported_epyc` and `avx512`; both must be true. Other EPYC parts (Bergamo, Siena, the AM5 EPYC 4004/4005) might expose AVX-512 but are outside this skill's current 9000-series scope and are treated as unsupported. This is CPU serving; a GPU is not required, but a host may also contain AMD Instinct GPUs.
 - A container runtime (**Docker** or **Podman**), or a conda env with `vllm` + `zentorch` installed.
 - Enough host RAM for the model (weights + KV cache both live in RAM on CPU).
 - A HuggingFace token in `HF_TOKEN` **only** for gated models (Llama, Gemma). The default model (Qwen3) needs none.
-- **Node.js ≥ 18**, required by the `skills` CLI used in Step 2 (`npx skills ...`). Check with `node -v`; on older hosts install a newer Node (e.g. `conda create -n node20 -c conda-forge 'nodejs>=20'`).
+- **Node.js ≥ 18**, required by the `skills` CLI used in Step 2 (`npx skills ...`). Check with `node -v`; on older hosts install a newer Node (for example, `conda create -n node20 -c conda-forge 'nodejs>=20'`).
 
-## Step 1 - Understanding which skills are available
+## Step 1 — Understanding which skills are available
 
 * Start in a clean scratch directory, then run `claude "Which skills can you see?" --model sonnet`. You should see a list of skills that does **not** include anything about serving LLMs on EPYC / CPU.
 * Confirm the scratch directory has no `AGENTS.md`, `CLAUDE.md`, `.claude/skills`, or `.agents/skills`. Existing agent instructions or installed skill copies can change discovery and invalidate the before/after comparison. Do not delete instructions from a real project; use a clean scratch directory instead.
 
-## Step 2 - Enabling claude to see `serving-llms-on-epyc`
+## Step 2 — Enabling Claude to see `serving-llms-on-epyc`
 
 * Install the skill with the [`skills` CLI](https://github.com/vercel-labs/skills). Run this in your terminal, not inside Claude:
 
@@ -33,7 +33,7 @@ npx skills add amd/skills --skill serving-llms-on-epyc --agent claude-code
 
 * Run `claude "Which skills can you see?" --model sonnet`. You should see a list of skills that now includes `serving-llms-on-epyc`.
 
-## Step 3 - Running the skill
+## Step 3 — Running the skill
 
 Run `claude --model sonnet` on your EPYC host with this prompt:
 
@@ -53,7 +53,7 @@ Claude should:
 
 On any failure it reports the cause + logs and **stops**; it does not retry or start a debugging loop.
 
-## Step 4 - Talk to the endpoint
+## Step 4 — Talk to the endpoint
 
 Once Claude reports the endpoint is healthy, use the **base URL, served-model name,
 and endpoint from Claude's connection table** (it uses port `8000` by default). Qwen3
@@ -94,13 +94,13 @@ print(r.choices[0].message.content)
 served `--max-model-len`. Set `temperature` (0 for deterministic) and `stream=True`
 to stream tokens.
 
-## Step 5 - (Optional) Going beyond
+## Step 5 — (Optional) Going beyond
 
-* **A real workload:** ask for a larger model once the flow is proven, e.g. *"Serve Qwen/Qwen3-8B ..."*. Claude re-checks the RAM fit and re-sizes.
+* **A real workload:** ask for a larger model once the flow is proven, for example *"Serve Qwen/Qwen3-8B ..."*. Claude re-checks the RAM fit and re-sizes.
 * **Gated models:** `export HF_TOKEN=...` (and accept the model license on HuggingFace), then ask for `meta-llama/Llama-3.1-8B-Instruct`.
 * **Pick a socket:** on a dual-socket box Claude picks a free socket by load; you can steer it (*"serve it on socket 1"*).
 
-## Step 6 - (Optional) Try to get things done without AMD Skills
+## Step 6 — (Optional) Try to get things done without AMD Skills
 
 Remove the added skill and rerun the experiment above. The `skills` CLI installs a
 copy under **both** `.claude/skills/serving-llms-on-epyc` **and**
