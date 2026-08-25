@@ -32,11 +32,13 @@ ready to answer OpenAI requests via `/v1/chat/completions`.
 npx skills add amd/skills --skill serving-llms-on-instinct --agent claude-code
 ```
 
-* Run `claude "Which skills can you see?" --model sonnet`. You should see a list of skills that now includes `serving-llms-on-instinct`.
+* Run `claude "Which skills can you see?"`. You should see a list of skills that now includes `serving-llms-on-instinct`.
 
 ## Step 3 - Running the skill
 
-Run `claude --model sonnet` on your Instinct host with this prompt:
+> You can run this skill directly on the Instinct host if Claude is installed there. Otherwise if the host is reachable over SSH, provide its server address so Claude can connect to it and run the skill remotely.
+
+Run `claude` on your Instinct host with this prompt:
 
 ```
 Serve Qwen/Qwen3.5-9B on this AMD Instinct GPU with vLLM.
@@ -59,33 +61,13 @@ higher decode latency. That is a bounded, known-cause retry, not a debugging loo
 
 ## Step 4 - Talk to the endpoint
 
-Once Claude reports the endpoint is healthy, use the **base URL, served-model name, and
-port from Claude's connection table** (it uses port `8000` by default):
+Once Claude reports that the endpoint is healthy, follow the terminal instructions it provides to verify and use it. The exact curl command may vary depending on the model and serving configuration, so do not run the example below; use the command provided by Claude instead
 
 ```bash
 curl -s http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"Qwen/Qwen3.5-9B","messages":[{"role":"user","content":"Hello"}],"max_tokens":128}'
 ```
-
-Prefer Python? Point the OpenAI SDK at the local server (`base_url` ends in `/v1`;
-the SDK needs a non-empty key, so use any placeholder when there is no auth):
-
-```python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://localhost:8000/v1", api_key="EMPTY")
-model = client.models.list().data[0].id
-r = client.chat.completions.create(
-    model=model,
-    messages=[{"role": "user", "content": "Hello"}],
-    max_tokens=128,
-)
-print(r.choices[0].message.content)
-```
-
-`max_tokens` caps the output and `prompt_tokens + max_tokens` must stay within the served
-`--max-model-len`. Set `temperature` (0 for deterministic) and `stream=True` to stream tokens.
 
 To stop the endpoint: `docker rm -f <container name from the connection table>`.
 
