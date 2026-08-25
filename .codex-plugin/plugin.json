@@ -1,6 +1,6 @@
 {
   "name": "amd-skills",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Agent Skills for AMD-optimized workflows.",
   "author": {
     "name": "AMD"
@@ -21,12 +21,13 @@
     "./skills/local-ai-use",
     "./skills/local-ai-app-integration",
     "./skills/serving-llms-on-instinct",
-    "./skills/tracelens-analysis-orchestrator"
+    "./skills/tracelens-analysis-orchestrator",
+    "./skills/hyperloom-workload-optimizer"
   ],
   "interface": {
     "displayName": "AMD Skills",
     "shortDescription": "Agent Skills for AMD-optimized workflows.",
-    "longDescription": "AMD's verified Agent Skills in one plugin: route image/audio through local AI on Ryzen AI, serve LLMs on AMD Instinct GPUs with vLLM, and analyze GPU kernel and PyTorch trace performance.",
+    "longDescription": "AMD's verified Agent Skills in one plugin: route image/audio through local AI on Ryzen AI, serve LLMs on AMD Instinct GPUs with vLLM, optimize inference throughput with Hyperloom, and analyze GPU kernel and PyTorch trace performance.",
     "developerName": "AMD",
     "category": "Developer Tools",
     "capabilities": [

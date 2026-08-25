@@ -30,7 +30,7 @@
     {
       "id": "local-mode-without-api-key",
       "skill_should_trigger": true,
-      "prompt": "Edit main.py so the app starts in local mode without an OPENAI_API_KEY. Do not download or install anything, just edit the file.",
+      "prompt": "Edit main.py so my app works with local llms (without a cloud OPENAI_API_KEY). Do not download or install anything, just edit the file.",
       "workspace": "evals/files/apikey-guard",
       "expected_behavior": [
         "Remove or bypass the API-key guard so the app starts in local mode without requiring OPENAI_API_KEY to be set"

@@ -73,8 +73,9 @@ INFRA_FILES = {
     "eval/negatives.json",
     ".github/scripts/select_evals.py",
     ".github/workflows/evals.yml",
-    # Publishing or unpublishing a skill changes who competes for every prompt,
-    # so it re-scores the whole catalog rather than just the skill it names.
+}
+
+ROUTING_INPUTS = {
     ".claude-plugin/marketplace.json",
 }
 
@@ -125,7 +126,7 @@ def routing_needed(changed: set[str]) -> bool:
     prompt. Its dataset still counts, because its near-miss prompts are graded
     against the skills that are.
     """
-    if changed & INFRA_FILES:
+    if changed & (INFRA_FILES | ROUTING_INPUTS):
         return True
     published = set(datasets.routing_catalog())
     for path in changed:
