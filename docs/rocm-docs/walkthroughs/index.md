@@ -12,5 +12,5 @@ Choose a skill to get started.
 - [local-ai-app-integration](local-ai-app-integration.md): Add a local AI mode to a cloud-only app.
 - [hyperloom-workload-optimizer](hyperloom-workload-optimizer.md): Set up Hyperloom and autonomously optimize LLM inference throughput on AMD Instinct GPUs.
 - [magpie-kernel-evaluator](magpie-kernel-evaluator.md): Benchmark inference, identify bottlenecks, and analyze, compare, and revalidate optimized GPU kernels with Magpie.
-- [serving-llms-on-epyc](serving-llms-on-epyc.md): Bring up a vLLM + zentorch LLM endpoint on an AMD EPYC™ CPU.
+- [serving-llms-on-epyc](serving-llms-on-epyc.md): Bring up a vLLM + zentorch LLM endpoint on an AMD EPYC CPU.
 - [tracelens-analysis-orchestrator](tracelens-analysis-orchestrator.md): Run agentic PyTorch profiler trace analysis and produce a prioritized performance report.

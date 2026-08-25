@@ -1,6 +1,6 @@
-# AMD Skills Walkthroughs: `magpie-kernel-evaluator`
+# AMD Skills walkthroughs: `magpie-kernel-evaluator`
 
-Magpie connects model-serving benchmarks to GPU kernel optimization. This
+Magpie connects model-serving benchmarks to graphics processing unit (GPU) kernel optimization. This
 walkthrough follows the complete workflow:
 
 ```mermaid
@@ -29,13 +29,15 @@ the skill triggers and uses Magpie correctly.
 
 ## Prerequisites
 
+Before you start, confirm your environment meets these requirements.
+
 - A Linux system with a Magpie-supported AMD GPU and ROCm installation
 - Python 3.10 or later, Git, Node.js, and `npx`
 - Claude Code installed and authenticated
 - Docker or a prepared local model-serving environment
 - Enough GPU memory and disk space for the selected workload
-- `HF_TOKEN` when the model is gated
-- `hipcc` for HIP kernel work
+- `HF_TOKEN` when the model is gated. Set `export HF_TOKEN=your_huggingface_token`, where `your_huggingface_token` is your Hugging Face access token.
+- `hipcc` for Heterogeneous-computing Interface for Portability (HIP) kernel work
 - Optional: `rocprof-compute` for kernel profiling and ranking
 
 Confirm the basic GPU toolchain:
@@ -45,7 +47,7 @@ rocminfo | head
 hipcc --version
 ```
 
-## Step 1 — Install Magpie and the skill
+## Step 1: Install Magpie and the skill
 
 ```bash
 git clone https://github.com/AMD-AGI/Magpie.git
@@ -69,7 +71,7 @@ claude "Which skills can you see?" --model sonnet
 
 The second response should include `magpie-kernel-evaluator`.
 
-## Step 2 — Benchmark, run TraceLens, and identify bottleneck kernels
+## Step 2: Benchmark, run TraceLens, and identify bottleneck kernels
 
 Magpie benchmark configs live under `examples/benchmarks/`. Select a config for
 the available framework, model, GPU count, memory, and container. Before running
@@ -113,8 +115,8 @@ magpie benchmark \
   --output-dir ./results/walkthrough-benchmark-profiled
 ```
 
-Review request/token throughput, completed requests, TTFT, TPOT, ITL, and
-end-to-end latency. Record the Magpie commit, model revision, image/framework
+Review request and token throughput, completed requests, time to first token (TTFT), time per output token (TPOT), inter-token latency (ITL), and
+end-to-end latency. Record the Magpie commit, model revision, image or framework
 version, GPU model and count, tensor parallelism, precision, concurrency,
 input and output lengths, warmup, and profiler state.
 
@@ -148,7 +150,7 @@ The full reports live under stage directories such as
 evidence; use gap analysis next to rank concrete kernel names and map them to
 source.
 
-Magpie's integrated TraceLens stage produces CSV/Excel artifacts, not an
+Magpie's integrated TraceLens stage produces CSV or Excel artifacts, not an
 agent-written `analysis.md`. For a separate prioritized agentic report, pass the
 captured trace to `tracelens-analysis-orchestrator` when that skill is installed
 and label its output as downstream analysis rather than a Magpie-native report.
@@ -181,9 +183,9 @@ candidates that cannot be mapped or tested safely.
 ```
 
 Prefer a kernel with high total GPU contribution, a confident source mapping,
-and a deterministic correctness test—not one selected from call count alone.
+and a deterministic correctness test, not one selected from call count alone.
 
-## Step 3 — Analyze the baseline kernel
+## Step 3: Analyze the baseline kernel
 
 Use the mapped `source_file`, `test_file`, and `test_cmd` fields when available.
 Create a Magpie kernel config that pins representative shapes, dtypes, target
@@ -212,7 +214,7 @@ Review `analyze_report.json` for correctness before interpreting performance.
 > finite; it does not prove numerical equivalence. Require a representative
 > testcase before accepting an optimized implementation.
 
-## Step 4 — Create and analyze optimization candidates
+## Step 4: Create and analyze optimization candidates
 
 Ask the agent for a small number of changes tied to the measured bottleneck.
 Examples include tile shape, memory access, occupancy, launch geometry, fusion,
@@ -243,7 +245,7 @@ Review generated code and commands before execution, especially device
 selection, build flags, environment variables, and edits outside the selected
 kernel.
 
-## Step 5 — Compare the correct candidates
+## Step 5: Compare the correct candidates
 
 Build one `kernels:` config containing the baseline and only candidates that
 passed analyze:
@@ -278,7 +280,7 @@ ranking, winner, variance, and measurement caveats. Never select an incorrect
 implementation, even if it is faster. Repeat noisy measurements before
 declaring a winner.
 
-## Step 6 — Integrate the winner and repeat the benchmark
+## Step 6: Integrate the winner and repeat the benchmark
 
 Integrate only the winning correct candidate into the framework or library used
 by the original benchmark. Rebuild the environment with only the changes needed
@@ -287,7 +289,7 @@ to load that candidate.
 ```text
 Integrate the winning correct candidate and rerun the original clean Magpie
 benchmark. Keep the model, precision, GPU allocation, tensor parallelism,
-concurrency, input/output lengths, warmup, and all unrelated software versions
+concurrency, input and output lengths, warmup, and all unrelated software versions
 identical. Write the result under ./results/walkthrough-benchmark-optimized and
 compare it with the immutable clean baseline. Report kernel-level and
 end-to-end changes, run-to-run variance, regressions, and paths to every Magpie
@@ -312,7 +314,7 @@ Do not claim success from isolated kernel speedup alone. The result must preserv
 correctness and improve the equivalent clean end-to-end benchmark beyond normal
 run-to-run noise.
 
-## Step 7 — Review the outputs
+## Step 7: Review the outputs
 
 Each `--output-dir` is a base directory. Magpie creates a timestamped workspace
 inside it, so the end-to-end walkthrough should produce a structure like:
@@ -362,7 +364,7 @@ A successful run demonstrates that the agent:
 4. Compared candidates under equivalent conditions.
 5. Revalidated the winner in the original clean workload.
 
-## Step 8 — Run a lightweight smoke test (optional)
+## Step 8: Run a lightweight smoke test (optional)
 
 When a model-serving environment is unavailable, use Magpie's included HIP
 `vector_add` example to verify skill triggering and structured reports.
@@ -396,7 +398,7 @@ agent should also produce a temporary `kernels:` compare config for the O2 and
 O3 binaries and a `compare_report.json`. This small input validates the workflow
 but is not evidence of a production speedup.
 
-## Step 9 — Try the same task without the skill (optional)
+## Step 9: Try the same task without the skill (optional)
 
 Remove `magpie-kernel-evaluator`, start a fresh agent session, and repeat the
 smoke test. Without the skill, an agent is more likely to bypass Magpie, invent

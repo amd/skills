@@ -79,7 +79,7 @@ Cross-stack skills, from client to cloud.
 
 | Skill | What it does | Source |
 | --- | --- | --- |
-| [`rocm-doctor`](https://github.com/amd/skills/blob/main/staging/rocm-doctor/SKILL.md) | Diagnose ROCm / HIP / PyTorch / llama.cpp failures on AMD GPUs (Linux and Windows) against a closed list of known misconfigurations, then fix with consent or route upstream. Thin driver over the `rocm` CLI (`examine` / `diagnose` / `fix`). | _planned_ |
+| [`rocm-doctor`](https://github.com/amd/skills/blob/main/staging/rocm-doctor/SKILL.md) | Diagnose ROCm, HIP, PyTorch, or llama.cpp failures on AMD GPUs (Linux and Windows) against a closed list of known misconfigurations, then fix with consent or route upstream. Thin driver over the `rocm` CLI (`examine`, `diagnose`, or `fix`). | _planned_ |
 | `hyperloom-workload-optimizer` | Autonomously optimizes LLM inference on AMD GPUs. | _planned_ |
 | [`lemonade-router-builder`](https://github.com/amd/skills/blob/main/skills/lemonade-router-builder/SKILL.md) | Set up a Lemonade model router that handles requests based on content, sensitivity, or required capabilities. | in-repo |
 | `hrr-replay-analysis` | Record, replay, and analyze GPU workload behavior on ROCm across AMD Instinct, Radeon, and Ryzen hardware using HIP Record and Replay archives. | _planned_ |
@@ -90,9 +90,9 @@ Run and optimize on AMD Instinct.
 
 | Skill | What it does | Source |
 | --- | --- | --- |
-| [`serving-llms-on-instinct`](https://github.com/amd/skills/blob/main/skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine/backend selection in later phases. | in-repo |
-| [`serving-llms-on-epyc`](https://github.com/amd/skills/blob/main/skills/serving-llms-on-epyc/SKILL.md) | Serve LLMs on AMD EPYC CPUs with vLLM + zentorch, in a container (Docker/Podman) or conda. Handles CPU detection, runtime/env validation, vLLM model-support and RAM-fit checks, hardware-sized threads/KV, launch, and health verification. Single instance; reports and stops on failure. | in-repo |
-| [`magpie-kernel-evaluator`](https://github.com/amd/skills/blob/main/skills/magpie-kernel-evaluator/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM / SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
+| [`serving-llms-on-instinct`](https://github.com/amd/skills/blob/main/skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine or backend selection in later phases. | in-repo |
+| [`serving-llms-on-epyc`](https://github.com/amd/skills/blob/main/skills/serving-llms-on-epyc/SKILL.md) | Serve LLMs on AMD EPYC CPUs with vLLM and zentorch, in a container (Docker or Podman) or conda. Handles CPU detection, runtime and env validation, vLLM model-support and RAM-fit checks, hardware-sized threads and KV, launch, and health verification. Single instance; reports and stops on failure. | in-repo |
+| [`magpie-kernel-evaluator`](https://github.com/amd/skills/blob/main/skills/magpie-kernel-evaluator/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM or SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
 | [`tracelens-analysis-orchestrator`](https://github.com/amd/skills/blob/main/skills/tracelens-analysis-orchestrator/SKILL.md) | Orchestrate modular PyTorch profiler trace analysis with TraceLens: generate perf reports, run system-level and compute-kernel subagents in parallel, and write a prioritized stakeholder report. | [TraceLens](https://github.com/AMD-AGI/TraceLens) |
 
 ## What is a skill?
@@ -153,13 +153,13 @@ cp -r amd-skills/skills/local-ai-use <agent-skills-dir>/
 
 | Agent | Skills directory (personal / project) |
 | --- | --- |
-| Cursor | `~/.cursor/skills/` / `.cursor/skills/` |
-| Claude Code | `~/.claude/skills/` / `.claude/skills/` |
-| Codex | `$HOME/.agents/skills` / `$REPO_ROOT/.agents/skills` |
+| Cursor | `~/.cursor/skills/` or `.cursor/skills/` |
+| Claude Code | `~/.claude/skills/` or `.claude/skills/` |
+| Codex | `$HOME/.agents/skills` or `$REPO_ROOT/.agents/skills` |
 
 ## Contributing
 
-We welcome contributions from AMD engineers and selected partners.
+Contributions are welcome from AMD engineers and selected partners.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the step-by-step instructions, then
 [docs/skill-requirements.md](docs/skill-requirements.md) for the rules CI enforces,
