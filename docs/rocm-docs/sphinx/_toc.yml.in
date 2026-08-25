@@ -16,6 +16,7 @@ subtrees:
               - file: walkthroughs/local-ai-app-integration
               - file: walkthroughs/local-ai-use
               - file: walkthroughs/magpie-kernel-evaluator
+              - file: walkthroughs/serving-llms-on-instinct
               - file: walkthroughs/serving-llms-on-epyc
               - file: walkthroughs/tracelens-analysis-orchestrator
   - caption: Reference
