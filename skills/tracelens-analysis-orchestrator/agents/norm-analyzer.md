@@ -161,4 +161,4 @@ print('PASS: Findings file is valid')
 " '<output_dir>/category_findings/<cat>_findings.md' 'compute' '<comparison_scope>'
 ```
 
-If validation fails, fix the findings file and re-run. Max 2 retries.
+If validation fails, fix the findings file and re-run. Max 3 retries.
