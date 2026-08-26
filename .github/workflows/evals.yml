@@ -15,6 +15,10 @@ name: evals
 # SKILL.md description or a dataset), and behavior runs only for the skills a
 # change touches. The whole suite runs when the shared engine changes.
 #
+# A skill may also ship evals/extended_evals.json, in the same format and with
+# no coverage requirement of its own. Whether those prompts run is the
+# RUN_EXTENDED_EVALS knob below; the required evals.json always runs.
+#
 # Which class of machine a skill's behavior job needs is declared by the skill,
 # in skills/<name>/evals/machine.yml, and resolved to labels, gates, and
 # credentials by eval/datasets.py. Nothing here names a skill: a hardcoded list
@@ -65,6 +69,15 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Whether a skill's optional skills/<name>/evals/extended_evals.json is run
+  # alongside the required evals.json. Off here: this catalog grades the
+  # required dataset only, and a product repo's extra prompts are that repo's
+  # bill to pay. A repo vendoring this harness sets this to "true" -- which is
+  # also what eval/run_evals.py does when nobody passes the flag. Either way
+  # extended datasets are still structurally validated.
+  RUN_EXTENDED_EVALS: "false"
+
 jobs:
   # Secret-free: structural validation, the engine's own unit tests, and a git
   # diff. All three are free and fast, so a malformed dataset or a broken
@@ -74,6 +87,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       routing: ${{ steps.select.outputs.routing }}
+      # The runner flag, resolved once here so selection and every run job
+      # agree on whether extended datasets are in play.
+      extended: ${{ steps.select.outputs.extended }}
       default: ${{ steps.select.outputs.default }}
       default_any: ${{ steps.select.outputs.default_any }}
       scoped: ${{ steps.select.outputs.scoped }}
@@ -110,13 +126,19 @@ jobs:
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
           set -euo pipefail
+          # The harness default is on, so only an explicit "false" turns it off.
+          if [ "${RUN_EXTENDED_EVALS:-true}" = "false" ]; then
+            extended=--no-extended
+          else
+            extended=--extended
+          fi
           if [ "$EVENT" = "workflow_dispatch" ]; then
             # A dispatch is already explicit human intent, so gate labels are
             # not required on top of it.
             if [ -n "$SKILLS" ]; then
-              plan=$(uv run .github/scripts/select_evals.py --names "$SKILLS" --ignore-gates)
+              plan=$(uv run .github/scripts/select_evals.py --names "$SKILLS" --ignore-gates "$extended")
             else
-              plan=$(uv run .github/scripts/select_evals.py --all --ignore-gates)
+              plan=$(uv run .github/scripts/select_evals.py --all --ignore-gates "$extended")
             fi
             if [ "$MODE" = "behavior" ]; then
               plan=$(printf '%s' "$plan" | python3 -c \
@@ -129,14 +151,19 @@ jobs:
             plan=$(git diff --name-only \
               "${{ github.event.pull_request.base.sha }}" \
               "${{ github.event.pull_request.head.sha }}" \
-              | uv run .github/scripts/select_evals.py --changed --labels "$LABELS")
+              | uv run .github/scripts/select_evals.py --changed --labels "$LABELS" "$extended")
           fi
 
           echo "Plan: $plan"
           printf '%s' "$plan" | python3 -c '
           import json, os, sys
           plan = json.load(sys.stdin)
-          lines = ["routing=" + str(plan["routing"]).lower()]
+          lines = [
+              "routing=" + str(plan["routing"]).lower(),
+              # Emitted as the flag itself: every run job passes it through
+              # verbatim rather than re-deriving the same boolean.
+              "extended=" + ("--extended" if plan["extended"] else "--no-extended"),
+          ]
           for key in ("default", "scoped", "skipped"):
               lines.append(key + "=" + json.dumps(plan[key]))
           for key in ("default", "scoped"):
@@ -190,12 +217,14 @@ jobs:
         env:
           ONLY: ${{ github.event.inputs.only }}
           MIN_ACCURACY: ${{ github.event.inputs.min_accuracy || '0' }}
+          EXTENDED: ${{ needs.discover.outputs.extended }}
         run: |
           set -euo pipefail
           python eval/run_evals.py \
             --mode routing \
             --only "$ONLY" \
             --min-accuracy "$MIN_ACCURACY" \
+            "$EXTENDED" \
             --output routing-report.json \
             --keep-logs routing-logs
 
@@ -247,7 +276,9 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Run behavior cases for ${{ matrix.skill }}
-        run: python eval/run_evals.py --mode behavior --skill ${{ matrix.skill }}
+        env:
+          EXTENDED: ${{ needs.discover.outputs.extended }}
+        run: python eval/run_evals.py --mode behavior --skill ${{ matrix.skill }} "$EXTENDED"
 
   # Skills on a runner class that carries its own environment. Those bring
   # scoped secrets, which is why they cannot share the job above: a job's
@@ -296,7 +327,9 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Run behavior cases for ${{ matrix.skill }}
-        run: python eval/run_evals.py --mode behavior --skill ${{ matrix.skill }}
+        env:
+          EXTENDED: ${{ needs.discover.outputs.extended }}
+        run: python eval/run_evals.py --mode behavior --skill ${{ matrix.skill }} "$EXTENDED"
 
   # Single aggregate gate. Mark THIS check required in branch protection.
   #

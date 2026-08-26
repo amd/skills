@@ -15,6 +15,14 @@ true once it has::
       "prompt": "Serve Llama 3.1 8B with zentorch."
     }
 
+A skill may ship a second dataset in the same format at
+``skills/<name>/evals/extended_evals.json``. It is optional, it carries no
+coverage requirement of its own -- the tier-0 bar below is counted over
+``evals.json`` alone -- and whether it runs at all is the caller's decision
+(``extended=True`` here, ``--extended`` on the runner). It is where a product
+repo keeps the prompts it wants graded in its own CI without every consumer of
+the catalog paying for them.
+
 There are two run modes to satisfy:
 
   * **routing** -- the published bundle is installed side by side and only the
@@ -72,6 +80,9 @@ CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 
 # One dataset per skill, beside the skill it describes.
 DATASET_RELPATH = Path("evals") / "evals.json"
+# The optional second dataset: same format, no coverage bar, only run when the
+# caller asks for it.
+EXTENDED_DATASET_RELPATH = Path("evals") / "extended_evals.json"
 HOOKS_RELPATH = Path("evals") / "hooks.py"
 MACHINE_RELPATH = Path("evals") / "machine.yml"
 
@@ -166,6 +177,9 @@ class Case:
     # Directory (relative to the skill root) whose contents seed the workspace.
     workspace: str | None = None
     note: str = ""
+    # Came from `evals/extended_evals.json` rather than the required dataset,
+    # so it does not count towards our requirements bar and only runs when asked for.
+    extended: bool = False
 
     @property
     def expect_skill(self) -> str | None:
@@ -201,6 +215,10 @@ class Case:
 
 def dataset_path(skill: str) -> Path:
     return SKILLS_DIR / skill / DATASET_RELPATH
+
+
+def extended_dataset_path(skill: str) -> Path:
+    return SKILLS_DIR / skill / EXTENDED_DATASET_RELPATH
 
 
 def hooks_path(skill: str) -> Path:
@@ -281,7 +299,13 @@ def routing_cases(cases: list[Case], catalog: list[str]) -> list[Case]:
     return [case for case in cases if case.expect_skill is None or case.expect_skill in installed]
 
 
-def _parse_case(entry: object, skill: str | None, label: str, errors: list[str]) -> Case | None:
+def _parse_case(
+    entry: object,
+    skill: str | None,
+    label: str,
+    errors: list[str],
+    extended: bool = False,
+) -> Case | None:
     """Turn one array element into a Case, appending any problems found."""
     if not isinstance(entry, dict):
         errors.append(f"{label} must be an object.")
@@ -366,10 +390,17 @@ def _parse_case(entry: object, skill: str | None, label: str, errors: list[str])
         files_exist=lists["files_exist"],
         workspace=workspace.strip() if isinstance(workspace, str) else None,
         note=note,
+        extended=extended,
     )
 
 
-def _parse_cases(payload: object, skill: str | None, source: Path, errors: list[str]) -> list[Case]:
+def _parse_cases(
+    payload: object,
+    skill: str | None,
+    source: Path,
+    errors: list[str],
+    extended: bool = False,
+) -> list[Case]:
     """Turn one parsed dataset file into cases, appending any problems found."""
     where = source.name
 
@@ -388,26 +419,47 @@ def _parse_cases(payload: object, skill: str | None, source: Path, errors: list[
 
     cases: list[Case] = []
     for index, entry in enumerate(raw):
-        case = _parse_case(entry, skill, f"{where}: {EVALUATIONS_KEY}[{index}]", errors)
+        case = _parse_case(
+            entry, skill, f"{where}: {EVALUATIONS_KEY}[{index}]", errors, extended
+        )
         if case is not None:
             cases.append(case)
     return cases
 
 
-def load_dataset(skill: str, errors: list[str] | None = None) -> list[Case]:
-    """Cases from one skill's dataset. Raises SystemExit on error unless collecting."""
+def _read_dataset(
+    skill: str, path: Path, collected: list[str], extended: bool
+) -> list[Case]:
+    """Parse one dataset file, reporting a read or JSON problem as an error."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        collected.append(f"{skill}/{path.name}: invalid JSON: {exc}")
+        return []
+    return _parse_cases(payload, skill, path, collected, extended)
+
+
+def load_dataset(
+    skill: str, errors: list[str] | None = None, *, extended: bool = False
+) -> list[Case]:
+    """Cases for one skill. Raises SystemExit on error unless collecting.
+
+    The required dataset always, plus ``evals/extended_evals.json`` when
+    `extended` and the skill ships one. An absent extended dataset is the
+    common case and not a problem: the file is optional by design.
+    """
     collected: list[str] = [] if errors is None else errors
     path = dataset_path(skill)
     if not path.is_file():
         collected.append(f"{skill}: missing {DATASET_RELPATH.as_posix()}.")
         cases: list[Case] = []
     else:
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            collected.append(f"{skill}/{path.name}: invalid JSON: {exc}")
-            payload = None
-        cases = _parse_cases(payload, skill, path, collected) if payload is not None else []
+        cases = _read_dataset(skill, path, collected, False)
+
+    if extended:
+        extra = extended_dataset_path(skill)
+        if extra.is_file():
+            cases.extend(_read_dataset(skill, extra, collected, True))
 
     if errors is None and collected:
         raise SystemExit("error: " + "\n       ".join(collected))
@@ -431,7 +483,7 @@ def load_shared_negatives(errors: list[str] | None = None) -> list[Case]:
     return cases
 
 
-def load_all_cases(errors: list[str] | None = None) -> list[Case]:
+def load_all_cases(errors: list[str] | None = None, *, extended: bool = False) -> list[Case]:
     """Every case in the repo: each skill's dataset plus the shared pool.
 
     Routing grades against this whole set at once, which is where the coverage
@@ -441,7 +493,7 @@ def load_all_cases(errors: list[str] | None = None) -> list[Case]:
     """
     cases: list[Case] = []
     for skill in skills_with_datasets():
-        cases.extend(load_dataset(skill, errors))
+        cases.extend(load_dataset(skill, errors, extended=extended))
     cases.extend(load_shared_negatives(errors))
     return cases
 
@@ -469,7 +521,7 @@ def validate_all() -> list[str]:
     seconds rather than halfway through a paid run.
     """
     errors: list[str] = []
-    cases = load_all_cases(errors)
+    cases = load_all_cases(errors, extended=True)
     catalog = set(catalog_skills())
 
     for case_id in duplicate_ids(cases):
@@ -489,12 +541,17 @@ def validate_all() -> list[str]:
                 )
 
     for skill in catalog:
-        errors.extend(tier0_errors(skill, [c for c in cases if c.skill == skill]))
+        errors.extend(
+            tier0_errors(skill, [c for c in cases if c.skill == skill and not c.extended])
+        )
     return errors
 
 
 def tier0_errors(skill: str, cases: list[Case]) -> list[str]:
-    """Whether `skill` meets the mandatory coverage bar."""
+    """Whether `skill` meets the mandatory coverage bar.
+
+    Counted over the required dataset alone (evals.json).
+    """
     if not dataset_path(skill).is_file():
         return [
             f"{skill}: no eval dataset. Every skill needs "

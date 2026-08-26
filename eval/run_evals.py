@@ -15,6 +15,11 @@ runner reads those datasets and grades them in two modes:
     / ``files_exist``. Only runs evaluations that assert something beyond the
     routing decision.
 
+A skill may also ship ``skills/<name>/evals/extended_evals.json``, in the same
+format and under no coverage requirement of its own. Both modes include it by
+default; ``--no-extended`` grades the required dataset alone, which is what a
+repo that only owes the required tier passes.
+
 The prompt is written once and both modes read it, which is the whole point:
 the old split had a central routing prompt set and a separate per-skill pytest
 file that re-asserted routing with a substring match on the transcript.
@@ -27,9 +32,9 @@ Usage::
     # structural checks only: no agent, no tokens, instant
     python eval/run_evals.py --validate
 
-    # what CI runs
-    python eval/run_evals.py --mode routing --min-accuracy 0.9
-    python eval/run_evals.py --mode behavior --skill local-ai-use
+    # what CI runs (this repo grades the required datasets only)
+    python eval/run_evals.py --mode routing --min-accuracy 0.9 --no-extended
+    python eval/run_evals.py --mode behavior --skill local-ai-use --no-extended
 
     # one case, keeping the raw transcript
     python eval/run_evals.py --only qwen-on-mi300x --keep-logs eval-logs
@@ -338,6 +343,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--only", default="", help="Comma-separated case ids to run.")
     parser.add_argument(
+        "--extended",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Also run each skill's optional evals/extended_evals.json, when it "
+            "has one. On by default; `--no-extended` grades the required "
+            "evals.json alone."
+        ),
+    )
+    parser.add_argument(
         "--validate",
         action="store_true",
         help="Check every dataset structurally and exit. No agent, no tokens.",
@@ -410,7 +425,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.validate:
         skills = datasets.skills_with_datasets()
-        cases = datasets.load_all_cases()
+        # Extended datasets are validated regardless of --extended, so count
+        # them here too rather than reporting fewer cases than were checked.
+        cases = datasets.load_all_cases(extended=True)
         print(
             f"[evals] OK: {len(cases)} case(s) across {len(skills)} skill(s) "
             f"plus {len(datasets.load_shared_negatives())} shared negative(s)."
@@ -440,7 +457,7 @@ def main(argv: list[str] | None = None) -> int:
         # Pool every published skill's cases: skill Y's positives are skill X's
         # negatives, which is where most of the false-trigger coverage comes
         # from. --skill narrows what is *reported on*, not what is installed.
-        cases = datasets.load_all_cases()
+        cases = datasets.load_all_cases(extended=args.extended)
         held_out = sorted(
             {c.skill for c in cases if c.skill and c.skill not in set(catalog)}
         )
@@ -497,6 +514,7 @@ def main(argv: list[str] | None = None) -> int:
                 "effort": args.effort,
                 "skills": catalog,
                 "held_out_skills": held_out,
+                "extended": args.extended,
                 "wall_time_s": round(time.time() - started, 1),
                 "max_tool_calls": args.max_tool_calls,
                 "max_inspection_calls": args.max_inspection_calls,
@@ -531,7 +549,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.mode in ("behavior", "both"):
         cases = []
         for skill in skills:
-            cases.extend(datasets.load_dataset(skill))
+            cases.extend(datasets.load_dataset(skill, extended=args.extended))
         if args.only:
             cases = datasets.filter_cases(cases, args.only)
         gradable = [c for c in cases if c.has_behavior]
@@ -551,6 +569,7 @@ def main(argv: list[str] | None = None) -> int:
                     "model": args.model,
                     "effort": args.effort,
                     "skills": skills,
+                    "extended": args.extended,
                     "wall_time_s": round(time.time() - started, 1),
                     "github_run_id": os.environ.get("GITHUB_RUN_ID"),
                 },
