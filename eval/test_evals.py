@@ -34,13 +34,16 @@ TRIGGERING = "triggeringEvaluation"
 NON_TRIGGERING = "nonTriggeringEvaluation"
 
 
-def parse(payload: dict, skill: str | None = "demo-skill") -> tuple[list, list[str]]:
+def parse(
+    payload: dict, skill: str | None = "demo-skill", extended: bool = False
+) -> tuple[list, list[str]]:
     """Run the dataset parser over an in-memory payload."""
     errors: list[str] = []
     with tempfile.TemporaryDirectory() as tmp:
-        source = Path(tmp) / "evals.json"
+        name = "extended_evals.json" if extended else "evals.json"
+        source = Path(tmp) / name
         source.write_text(json.dumps(payload), encoding="utf-8")
-        cases = datasets._parse_cases(payload, skill, source, errors)
+        cases = datasets._parse_cases(payload, skill, source, errors, extended)
     return cases, errors
 
 
@@ -333,6 +336,72 @@ class TestTier0(unittest.TestCase):
         errors = datasets.tier0_errors("no-such-skill", [])
         self.assertEqual(len(errors), 1)
         self.assertIn("no eval dataset", errors[0])
+
+
+class TestExtendedDataset(unittest.TestCase):
+    """The optional second dataset: same format, no bar, opt-in run."""
+
+    def write(self, payload: dict) -> Path:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "extended_evals.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def load(self, payload: dict | None, *, extended: bool) -> list:
+        """Load `local-ai-use` with `payload` standing in for its extended file."""
+        path = self.write(payload) if payload is not None else Path("no-such-file")
+        original = datasets.extended_dataset_path
+        datasets.extended_dataset_path = lambda skill: path
+        try:
+            return datasets.load_dataset("local-ai-use", extended=extended)
+        finally:
+            datasets.extended_dataset_path = original
+
+    def payload(self) -> dict:
+        return {
+            EVALUATIONS_KEY: [
+                {
+                    "id": "extended-one",
+                    TRIGGER_KEY: True,
+                    "prompt": "p",
+                    "expected_behavior": ["do the thing"],
+                }
+            ]
+        }
+
+    def test_cases_are_added_only_when_asked_for(self) -> None:
+        required = {c.id for c in self.load(self.payload(), extended=False)}
+        both = {c.id for c in self.load(self.payload(), extended=True)}
+        self.assertNotIn("extended-one", required)
+        self.assertEqual(both - required, {"extended-one"})
+
+    def test_extended_cases_are_marked_and_others_are_not(self) -> None:
+        cases = {c.id: c for c in self.load(self.payload(), extended=True)}
+        self.assertTrue(cases["extended-one"].extended)
+        self.assertFalse(any(c.extended for c in cases.values() if c.id != "extended-one"))
+
+    def test_a_missing_file_is_not_an_error(self) -> None:
+        self.assertTrue(self.load(None, extended=True))
+
+    def test_extended_cases_do_not_count_towards_tier0(self) -> None:
+        # Otherwise a skill could clear the mandatory bar with prompts this
+        # repo never runs.
+        cases, errors = parse(
+            {EVALUATIONS_KEY: [{"id": c, TRIGGER_KEY: True, "prompt": "p"} for c in "abc"]
+             + [{"id": c, TRIGGER_KEY: False, "prompt": "p"} for c in "de"]},
+            skill="local-ai-use",
+            extended=True,
+        )
+        self.assertEqual(errors, [])
+        self.assertTrue(all(c.extended for c in cases))
+        self.assertTrue(datasets.tier0_errors("local-ai-use", [c for c in cases if not c.extended]))
+
+    def test_the_format_is_the_same_one(self) -> None:
+        # No separate parser, so an extended dataset is rejected for the same
+        # reasons the required one is.
+        _, errors = parse(triggers(prompt="p"), extended=True)
+        self.assertTrue(any("`id`" in e for e in errors), errors)
 
 
 class TestRepositoryDatasets(unittest.TestCase):

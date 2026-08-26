@@ -57,6 +57,10 @@ Every evaluation is a prompt plus `skill_should_trigger`: `true` if your skill s
 - At least **1** of the `true` evaluations carries `expected_behavior` or
   `unexpected_behavior`, so something beyond triggering is graded
 
+### Extended validation
+
+`evals/evals.json` is the only dataset we require, and the only one this repo runs. A skill may ship a second file beside it, `evals/extended_evals.json`, which runs as part of the product repo for extended validation.
+
 ### Evaluation criteria and optional fields
 
 Four optional fields, all arrays, all valid only on a `true` evaluation:

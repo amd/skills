@@ -9,6 +9,7 @@ Emits one JSON object on stdout::
 
     {
       "routing": true,
+      "extended": false,
       "default": [
         {"skill": "local-ai-use", "os": "Linux",
          "runner": "[\\"self-hosted\\",\\"strix_halo\\",\\"Linux\\"]", "gate": ""}
@@ -34,6 +35,12 @@ The split is by credentials, not by hardware: a runner class with its own
 ``environment`` reads that environment's scoped secrets, and one without uses
 the repo-wide key for AMD's internal gateway. They are separate jobs because a
 job's credentials have to be fixed before its matrix expands.
+
+``extended`` echoes back whether the optional ``evals/extended_evals.json``
+datasets are in play, so the workflow decides that once and every job reads the
+same answer. It has to match what the runner is passed: selecting a skill whose
+only graded prompts live in a dataset the run then ignores schedules a job with
+nothing to do.
 
 ``skipped`` holds legs whose gate label is missing from the pull request. A
 gate comes with the runner class -- the Instinct pool always requires
@@ -62,6 +69,12 @@ sys.path.insert(0, str(REPO_ROOT / "eval"))
 
 import datasets  # noqa: E402
 
+# The two dataset files a change can touch, as `git diff --name-only` spells
+# them. Derived rather than written out, so renaming one here is not a silent
+# way to stop selecting runs for it.
+DATASET_SUFFIX = "/" + datasets.DATASET_RELPATH.as_posix()
+EXTENDED_SUFFIX = "/" + datasets.EXTENDED_DATASET_RELPATH.as_posix()
+
 # Touching any of these changes the shared engine rather than one skill, so
 # every skill is re-run rather than guessing at the blast radius. Repo-root
 # relative with forward slashes, to match `git diff --name-only`.
@@ -80,20 +93,25 @@ ROUTING_INPUTS = {
 }
 
 
-def has_behavior_cases(skill: str) -> bool:
+def has_behavior_cases(skill: str, extended: bool = True) -> bool:
     """Whether this skill asserts anything a behavior run could grade."""
-    return any(case.has_behavior for case in datasets.load_dataset(skill))
+    return any(
+        case.has_behavior for case in datasets.load_dataset(skill, extended=extended)
+    )
 
 
 def matrix_entries(
-    skills: list[str], labels: set[str], ignore_gates: bool = False
+    skills: list[str],
+    labels: set[str],
+    ignore_gates: bool = False,
+    extended: bool = True,
 ) -> tuple[list[dict], list[dict]]:
     """Split `skills` into matrix legs to run and legs held back by a gate."""
     include: list[dict] = []
     skipped: list[dict] = []
 
     for skill in skills:
-        if not has_behavior_cases(skill):
+        if not has_behavior_cases(skill, extended):
             continue
         plan = datasets.machine_plan(skill)
         gate = plan["gate"]
@@ -114,7 +132,7 @@ def matrix_entries(
     return include, skipped
 
 
-def routing_needed(changed: set[str]) -> bool:
+def routing_needed(changed: set[str], extended: bool = True) -> bool:
     """Whether the change can move a routing decision.
 
     A skill's description and its prompts are the only inputs to routing, so a
@@ -124,13 +142,16 @@ def routing_needed(changed: set[str]) -> bool:
     An unpublished skill's description is not an input either: routing installs
     the published bundle, so that skill is not in the room to win or lose a
     prompt. Its dataset still counts, because its near-miss prompts are graded
-    against the skills that are.
+    against the skills that are. An extended dataset counts only where it runs:
+    editing prompts this repo never grades should not buy a catalog-wide run.
     """
     if changed & (INFRA_FILES | ROUTING_INPUTS):
         return True
     published = set(datasets.routing_catalog())
     for path in changed:
-        if path.endswith("/evals/evals.json"):
+        if path.endswith(DATASET_SUFFIX):
+            return True
+        if extended and path.endswith(EXTENDED_SUFFIX):
             return True
         if path.endswith("/SKILL.md"):
             parts = path.split("/")
@@ -165,6 +186,13 @@ def main(argv: list[str] | None = None) -> int:
         "--ignore-gates", action="store_true",
         help="Run gated skills without their label. For workflow_dispatch, which is already explicit human intent.",
     )
+    parser.add_argument(
+        "--extended", action=argparse.BooleanOptionalAction, default=True,
+        help=(
+            "Count each skill's optional evals/extended_evals.json as a run "
+            "input. On by default; must match the flag the runner is given."
+        ),
+    )
     args = parser.parse_args(argv)
 
     available = datasets.skills_with_datasets()
@@ -187,15 +215,18 @@ def main(argv: list[str] | None = None) -> int:
             if line.strip()
         }
         skills = select_from_changes(changed)
-        routing = routing_needed(changed)
+        routing = routing_needed(changed, args.extended)
 
     labels = {token.strip() for token in args.labels.split(",") if token.strip()}
-    include, skipped = matrix_entries(skills, labels, ignore_gates=args.ignore_gates)
+    include, skipped = matrix_entries(
+        skills, labels, ignore_gates=args.ignore_gates, extended=args.extended
+    )
 
     print(
         json.dumps(
             {
                 "routing": routing,
+                "extended": args.extended,
                 "default": [leg for leg in include if "environment" not in leg],
                 "scoped": [leg for leg in include if "environment" in leg],
                 "skipped": skipped,
