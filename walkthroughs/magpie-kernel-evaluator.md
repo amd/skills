@@ -36,7 +36,7 @@ Before you start, confirm your environment meets these requirements.
 - Claude Code installed and authenticated
 - Docker or a prepared local model-serving environment
 - Enough GPU memory and disk space for the selected workload
-- `HF_TOKEN` when the model is gated. Set `export HF_TOKEN=your_huggingface_token`, where `your_huggingface_token` is your Hugging Face access token.
+- `HF_TOKEN` set to your Hugging Face token if you choose to evaluate a gated model
 - `hipcc` for Heterogeneous-computing Interface for Portability (HIP) kernel work
 - Optional: `rocprof-compute` for kernel profiling and ranking
 

@@ -27,8 +27,6 @@ This sample app requires the Rust toolchain (install from https://rustup.rs/).
 
 ## Step 1: Get the target app
 
-Clone the sample app you will upgrade.
-
 * Clone the cloud-only app you want to upgrade:
 
 ```

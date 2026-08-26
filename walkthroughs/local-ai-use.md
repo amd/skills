@@ -4,10 +4,7 @@ The goal of this skill is to teach your AI agent to use image generation, text g
 
 ## Prerequisites
 
-Before you start, confirm the following:
-
 - Claude Code installed and authenticated.
-- No `local-ai-use` skill installed yet (you install it in Step 2).
 
 ## Step 1: Check which skills are available
 
@@ -17,8 +14,6 @@ Confirm that local AI skills are not yet visible to your agent.
 * Make sure there is no `AGENTS.md` file on your local folder.
 
 ## Step 2: Enable Claude to see `local-ai-use`
-
-Install and verify the skill.
 
 * Install the skill with the [`skills` CLI](https://github.com/vercel-labs/skills). Run this in your terminal, not inside Claude:
 

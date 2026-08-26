@@ -17,7 +17,7 @@ Before you start, confirm your host meets these requirements.
 - A supported **AMD EPYC 9000-series server CPU with AVX-512**: **Genoa** (9004), **Turin** (9005), or **6th Gen Venice** (9006). `detect.py` reports both `is_supported_epyc` and `avx512`; both must be true. Other EPYC parts (Bergamo, Siena, the AM5 EPYC 4004 or 4005) might expose AVX-512 but are outside this skill's current 9000-series scope and are treated as unsupported. This is CPU serving; a GPU is not required, but a host may also contain AMD Instinct GPUs.
 - A container runtime (**Docker** or **Podman**), or a conda env with `vllm` and `zentorch` installed.
 - Enough host RAM for the model (weights and key-value (KV) cache both live in RAM on CPU).
-- A HuggingFace token in `HF_TOKEN` **only** for gated models (Llama, Gemma). The default model (Qwen3) needs none. For gated models, set `export HF_TOKEN=your_huggingface_token`, where `your_huggingface_token` is your Hugging Face access token.
+- `HF_TOKEN` set to your Hugging Face token if you choose to serve a gated model (Llama, Gemma). The default model (Qwen3) needs none.
 - **Node.js ≥ 18**, required by the `skills` CLI used in Step 2 (`npx skills ...`). Check with `node -v`; on older hosts install a newer Node (for example, `conda create -n node20 -c conda-forge 'nodejs>=20'`).
 
 ## Step 1: Check which skills are available
