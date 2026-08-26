@@ -51,6 +51,12 @@ CODEX_MARKETPLACE = ROOT / ".agents" / "plugins" / "marketplace.json"
 # Codex-specific catalog taxonomy and install policy. These describe how the
 # bundle presents in Codex-facing catalogs rather than vendor-neutral identity,
 # so they live here instead of plugin-metadata.json.
+#
+# Codex caps the install-surface title and blurb at 30 characters, which the
+# vendor-neutral `displayName` and `description` both exceed. Claude and Cursor
+# have no such cap and keep the longer copy, so these two are Codex-only.
+DISPLAY_NAME = "AMD"
+SHORT_DESCRIPTION = "Enable AMD's skills ecosystem"
 CATEGORY = "Developer Tools"
 # The bundled skills read files/config and can write files, install packages,
 # and launch local services; declare both surfaces so install prompts are
@@ -133,7 +139,8 @@ def build_codex_plugin(metadata: dict, bundle: dict) -> dict:
     Identity and discovery fields come from plugin-metadata.json; the curated
     `skills` list and the human-readable long description come from the Claude
     bundle entry so Codex publishes exactly the same skills as the other
-    ecosystems.
+    ecosystems. The install-surface title and blurb are the Codex-specific
+    constants above, since Codex length-caps them.
     """
     author = metadata.get("author") or {}
     developer_name = author.get("name") if isinstance(author, dict) else None
@@ -152,8 +159,8 @@ def build_codex_plugin(metadata: dict, bundle: dict) -> dict:
         # unpublished skills under skills/ out of the shipped bundle.
         "skills": list(bundle.get("skills", [])),
         "interface": {
-            "displayName": metadata.get("displayName", metadata["name"]),
-            "shortDescription": metadata["description"],
+            "displayName": DISPLAY_NAME,
+            "shortDescription": SHORT_DESCRIPTION,
             "longDescription": bundle.get("description", metadata["description"]),
             "developerName": developer_name or metadata["name"],
             "category": CATEGORY,
