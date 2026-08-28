@@ -3,9 +3,17 @@
     {
       "id": "gemm-01-repeatability",
       "skill_should_trigger": true,
-      "prompt": "Run the full standalone TraceLens analysis workflow locally with analysis mode default.\n- trace_path: {trace_path}\n- platform: {platform}\n- output_dir: {output_dir}\n- venv_path: {venv_path}\n- tracelens_dir: {tracelens_dir}\n",
+      "prompt": "Run the full standalone TraceLens analysis workflow on locally with the default analysis mode, and write everything to analysis_output/ in the current directory. The trace ships inside https://github.com/AMD-AGI/TraceLens/raw/main/agent_evals/Analysis/analysis_tests/unit_tests_standalone.tar.gz. Unpack that and analyze agent_evals/Analysis/analysis_tests/unit_tests_standalone/gemm/gemm_01_compute_few_tiles_analysis_output/gemm_01_compute_few_tiles.json.",
       "files_exist": [
-        "analysis_output/analysis.md"
+        "analysis_output/analysis.md",
+        "analysis_output/perf_report.xlsx",
+        "analysis_output/category_data/category_manifest.json",
+        "analysis_output/priority_data.json",
+        "analysis_output/metadata/model_info.json",
+        "analysis_output/perf_improvement.png"
+      ],
+      "expected_behavior": [
+        "Filled the Executive Summary of analysis.md with measured numbers, leaving no template placeholders such as 'X ms', 'Y%' or '<Brief Title>' behind"
       ]
     },
     {
