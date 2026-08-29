@@ -21,11 +21,6 @@ The default trio (`SD-Turbo`, `kokoro-v1`, `Whisper-Tiny`) is sized for
 "keeps cost savings real on a typical laptop". Override only if the user
 asks for higher quality or has explicit hardware to spare.
 
-Model catalogs move between releases, so treat the IDs below as a starting
-point, not a fixed list. Confirm any ID with `GET /api/v1/models` (add
-`?show_all=true` for the full catalog) before writing it into the rule. Do
-not rely on a stale `server_models.json` snapshot.
-
 ### Image generation (`recipe: sd-cpp`)
 
 | Model | Approx size | When to use | Trade-off |
@@ -69,10 +64,6 @@ Whisper requires 16 kHz mono PCM WAV input. Convert anything else first:
 ffmpeg -i input.mp3 -ar 16000 -ac 1 input.wav
 ```
 
-The HTTP endpoint adds no meaningful overhead over calling `whisper-cli`
-directly on the same engine/backend/model. Throughput is equivalent; use the
-endpoint unless you have a specific reason not to.
-
 For full live coverage, run `lemonade list` after starting the server, or
 browse <https://lemonade-server.ai/models.html>.
 
@@ -107,8 +98,7 @@ Notable per-endpoint quirks:
 - **`/v1/audio/transcriptions`**: only `wav` input is supported; re-encode
   anything else with `ffmpeg`. `response_format` accepts `json`,
   `verbose_json`, `text`, `srt`, and `vtt` — the first two return JSON, the
-  rest return a raw text body (as of Lemonade 11.7.0). Any other value is a
-  400.
+  rest return a raw text body (as of Lemonade 11.7.0).
 - **`/v1/audio/speech`**: `mp3`, `wav`, `opus`, and `pcm` outputs supported.
   Streaming requires `stream_format: "audio"`, which only emits `pcm`.
 
@@ -235,14 +225,24 @@ read `examples/lemonade_tools.py` in the upstream lemonade-sdk repo.
 Lemonade can run on another machine (a workstation with a Ryzen AI NPU,
 say) while the agent runs on the laptop. To point this skill at it:
 
-1. Set `LEMONADE_HOST` and `LEMONADE_PORT` (or pass `--host` / `--port` to
-   `setup_local_ai.py`).
-2. Re-run `python scripts/setup_local_ai.py` so the rule block is rewritten
+1. Find it with `lemonade scan --duration 5`, which lists the UDP beacons
+   Lemonade servers broadcast on the local network as
+   `<hostname> at http://<ip>:<port>/api/v1/`.
+2. Set `LEMONADE_HOST` and `LEMONADE_PORT` from that beacon (or pass
+   `--host` / `--port` to `setup_local_ai.py`). Set **both**: the script
+   otherwise discovers the port via `lemonade status`, which speaks only for
+   the service on this machine, so a remote host alone keeps port 13305.
+3. Re-run `python scripts/setup_local_ai.py` so the rule block is rewritten
    with the new endpoint baked in.
-3. Make sure the remote server is bound to a non-loopback interface
+4. Make sure the remote server is bound to a non-loopback interface
    (`lemonade config set host 0.0.0.0`) and that firewall rules allow
-   inbound 13305. Setting `host` to `0.0.0.0` exposes the server; pair it
-   with `LEMONADE_API_KEY` so it isn't open to the LAN.
+   inbound connections on the port it listens on. Setting `host` to
+   `0.0.0.0` exposes the server; pair it with `LEMONADE_API_KEY` so it
+   isn't open to the LAN.
+
+A server `scan` cannot see is not necessarily down: beacons are UDP, only go
+out on RFC1918 networks, and can be disabled (`--no-broadcast`). Ask the user
+for the host and port in that case.
 
 ---
 
