@@ -7,11 +7,13 @@
       "prompt": "Serve Qwen/Qwen3-0.6B on this AMD Instinct GPU with vLLM. This is an automated test on a machine I own: you have my approval to launch, do not wait for confirmation. Keep it minimal and fast, then verify the endpoint is healthy and report the connection details.",
       "expected_behavior": [
         "Detect the AMD Instinct GPU before configuring vLLM",
+        "Verify recipe cache freshness before selecting the vLLM image and arguments, and surface a refresh failure rather than silently treating stale bundled data as current",
         "Leave Qwen/Qwen3-0.6B served by vLLM in a Docker container on the AMD GPU, whether by launching one or by reusing a container already serving that model",
         "Verify the vLLM endpoint is healthy before reporting the connection details"
       ],
       "unexpected_behavior": [
         "Fall back to a cloud LLM provider or an NVIDIA/CUDA code path",
+        "Describe a stale or failed-to-refresh recipe cache as the latest supported configuration",
         "Serve a different, larger model than the one that was requested"
       ]
     },
