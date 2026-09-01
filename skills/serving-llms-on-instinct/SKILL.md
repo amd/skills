@@ -97,11 +97,16 @@ Before selecting a model, image, precision, or arguments, check the writable
 runtime cache:
 
 ```bash
+# Refresh only when the existing cache is missing, invalid, or stale.
 python3 scripts/sync_recipes.py --check || python3 scripts/sync_recipes.py
+
+# Reopen the cache from disk, confirm it is fresh, and print its path.
 python3 scripts/sync_recipes.py --check
 ```
 
-The first successful refresh shallow-clones `vllm-project/recipes`, resolves
+The final check is intentional: it validates the file written by a refresh,
+rather than trusting the refresh command's exit status. A successful refresh
+shallow-clones `vllm-project/recipes`, resolves
 the highest stable vLLM ROCm image and immutable manifest digest, and writes a
 runtime cache outside the installed skill package. Read the `cache` path from
 the JSON output and use that file in the remaining steps.

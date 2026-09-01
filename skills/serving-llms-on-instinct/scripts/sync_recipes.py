@@ -41,15 +41,25 @@ DOCKERHUB_URL = "https://hub.docker.com/v2/repositories/vllm/vllm-openai-rocm/ta
 
 SKILL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BUNDLED_CACHE_FILE = os.path.join(SKILL_DIR, "data", "recipes_cache.json")
-DEFAULT_CACHE_FILE = os.environ.get(
-    "AMD_SKILLS_RECIPE_CACHE",
-    os.path.join(
-        tempfile.gettempdir(), "amd-skills", "serving-llms-on-instinct",
-        "recipes_cache.json",
-    ),
+DEFAULT_CACHE_FILE = os.path.join(
+    tempfile.gettempdir(), "amd-skills", "serving-llms-on-instinct",
+    "recipes_cache.json",
 )
 DEFAULT_MAX_AGE_HOURS = 24.0
+MAX_DOCKERHUB_PAGES = 100
 _STABLE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+
+
+def _resolve_cache_file(path):
+    """Expand user/environment syntax and return an absolute cache path."""
+    return os.path.abspath(os.path.expandvars(os.path.expanduser(path)))
+
+
+def _runtime_cache_file():
+    """Resolve the environment override at call time, not module import time."""
+    return _resolve_cache_file(
+        os.environ.get("AMD_SKILLS_RECIPE_CACHE", DEFAULT_CACHE_FILE)
+    )
 
 
 def _log(msg, verbose):
@@ -155,16 +165,35 @@ def _select_docker_tag(tags):
 def _fetch_docker_tag(verbose=False):
     """Fetch the highest stable vLLM ROCm tag and digest from Docker Hub."""
     _log("Fetching Docker Hub tags...", verbose)
-    url = f"{DOCKERHUB_URL}?page_size=50&ordering=last_updated"
-    r = subprocess.run(
-        ["curl", "-sf", "--max-time", "5", url],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10,
-    )
-    if r.returncode != 0:
-        raise RuntimeError(f"Docker Hub request failed: {r.stderr[:200]}")
+    url = f"{DOCKERHUB_URL}?page_size=100&ordering=last_updated"
+    tags = []
+    for page in range(1, MAX_DOCKERHUB_PAGES + 1):
+        r = subprocess.run(
+            ["curl", "-sf", "--max-time", "5", url],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            timeout=10,
+        )
+        if r.returncode != 0:
+            raise RuntimeError(
+                f"Docker Hub request failed on page {page}: {r.stderr[:200]}"
+            )
 
-    data = json.loads(r.stdout)
-    return _select_docker_tag(data.get("results", []))
+        data = json.loads(r.stdout)
+        results = data.get("results", [])
+        if not isinstance(results, list):
+            raise RuntimeError(f"Docker Hub returned invalid results on page {page}")
+        tags.extend(results)
+
+        next_url = data.get("next")
+        if not next_url:
+            return _select_docker_tag(tags)
+        if not isinstance(next_url, str) or not next_url.startswith(DOCKERHUB_URL):
+            raise RuntimeError("Docker Hub returned an invalid pagination URL")
+        url = next_url
+
+    raise RuntimeError(
+        f"Docker Hub pagination exceeded {MAX_DOCKERHUB_PAGES} pages"
+    )
 
 
 def _cache_status(cache_file, max_age_hours=DEFAULT_MAX_AGE_HOURS, now=None):
@@ -200,19 +229,23 @@ def _write_cache(cache_file, cache):
     """Atomically replace a cache so interruption cannot leave partial JSON."""
     cache_dir = os.path.dirname(os.path.abspath(cache_file))
     os.makedirs(cache_dir, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(prefix=".recipes-cache-", suffix=".tmp",
-                                    dir=cache_dir)
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", prefix=".recipes-cache-", suffix=".tmp",
+        dir=cache_dir, delete=False,
+    )
+    tmp_path = tmp.name
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(cache, f, indent=2, default=str)
-            f.write("\n")
+        with tmp:
+            json.dump(cache, tmp, indent=2, default=str)
+            tmp.write("\n")
         os.replace(tmp_path, cache_file)
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
 
-def sync(verbose=False, cache_file=DEFAULT_CACHE_FILE):
+def sync(verbose=False, cache_file=None):
+    cache_file = _resolve_cache_file(cache_file or _runtime_cache_file())
     if not HAS_YAML:
         raise RuntimeError(
             "PyYAML is required to sync recipes; install it with "
@@ -264,19 +297,24 @@ def main():
                         help="exit nonzero unless the cache is fresh")
     parser.add_argument("--max-age-hours", type=float,
                         default=DEFAULT_MAX_AGE_HOURS)
-    parser.add_argument("--cache-file", default=DEFAULT_CACHE_FILE)
+    parser.add_argument("--cache-file")
     args = parser.parse_args()
+    cache_file = (
+        _resolve_cache_file(args.cache_file)
+        if args.cache_file
+        else _runtime_cache_file()
+    )
 
     if args.check:
-        status, fresh = _cache_status(args.cache_file, args.max_age_hours)
+        status, fresh = _cache_status(cache_file, args.max_age_hours)
         print(json.dumps(status))
         return 0 if fresh else 1
 
     try:
-        cache = sync(verbose=args.verbose, cache_file=args.cache_file)
+        cache = sync(verbose=args.verbose, cache_file=cache_file)
         print(json.dumps({
             "status": "ok",
-            "cache": os.path.abspath(args.cache_file),
+            "cache": cache_file,
             "recipes_commit": cache["recipes_commit"],
             "docker_image": cache["docker_image_pinned"],
         }))
@@ -286,7 +324,7 @@ def main():
         print(json.dumps({
             "status": "failed",
             "error": str(e),
-            "cache": os.path.abspath(args.cache_file),
+            "cache": cache_file,
             "bundled_fallback": os.path.abspath(BUNDLED_CACHE_FILE),
         }))
         return 1

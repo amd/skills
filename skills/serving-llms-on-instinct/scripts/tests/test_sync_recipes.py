@@ -4,11 +4,16 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
+import os
+import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "sync_recipes.py"
@@ -58,6 +63,56 @@ class CacheStatusTests(unittest.TestCase):
         self.assertEqual(status["status"], "invalid")
 
 
+class CachePathTests(unittest.TestCase):
+    def test_environment_cache_path_is_resolved_at_runtime(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {
+                "AMD_SKILLS_RECIPE_CACHE": "$RECIPE_CACHE_ROOT/env-cache.json",
+                "RECIPE_CACHE_ROOT": tmp,
+            }
+            with mock.patch.dict(os.environ, env, clear=False):
+                resolved = sync_recipes._runtime_cache_file()
+        self.assertEqual(resolved, str(Path(tmp, "env-cache.json").resolve()))
+
+    def test_cache_file_cli_override_wins_and_expands_variables(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            explicit = "$RECIPE_CACHE_ROOT/cli-cache.json"
+            expected = str(Path(tmp, "cli-cache.json").resolve())
+            env = {
+                "AMD_SKILLS_RECIPE_CACHE": str(Path(tmp, "env-cache.json")),
+                "RECIPE_CACHE_ROOT": tmp,
+            }
+            argv = ["sync_recipes.py", "--check", "--cache-file", explicit]
+            with (
+                mock.patch.dict(os.environ, env, clear=False),
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(
+                    sync_recipes,
+                    "_cache_status",
+                    return_value=({"status": "fresh"}, True),
+                ) as cache_status,
+                redirect_stdout(io.StringIO()),
+            ):
+                result = sync_recipes.main()
+
+        self.assertEqual(result, 0)
+        cache_status.assert_called_once_with(
+            expected, sync_recipes.DEFAULT_MAX_AGE_HOURS
+        )
+
+
+class CacheWriteTests(unittest.TestCase):
+    def test_cache_is_replaced_and_temporary_file_is_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_file = Path(tmp, "recipes.json")
+            sync_recipes._write_cache(str(cache_file), {"fetched_at": "now"})
+            written = json.loads(cache_file.read_text(encoding="utf-8"))
+            leftovers = list(Path(tmp).glob(".recipes-cache-*.tmp"))
+
+        self.assertEqual(written, {"fetched_at": "now"})
+        self.assertEqual(leftovers, [])
+
+
 class RecipeParsingTests(unittest.TestCase):
     @unittest.skipUnless(sync_recipes.HAS_YAML, "PyYAML is not installed")
     def test_yaml_is_read_as_utf8(self):
@@ -91,6 +146,37 @@ class DockerTagTests(unittest.TestCase):
             sync_recipes._select_docker_tag([
                 {"name": "latest", "digest": "sha256:latest"}
             ])
+
+    def test_fetch_follows_pagination_before_selecting(self):
+        next_url = f"{sync_recipes.DOCKERHUB_URL}?page=2"
+        responses = [
+            sync_recipes.subprocess.CompletedProcess(
+                args=[], returncode=0,
+                stdout=json.dumps({
+                    "results": [{"name": "v0.22.0", "digest": "sha256:old"}],
+                    "next": next_url,
+                }),
+                stderr="",
+            ),
+            sync_recipes.subprocess.CompletedProcess(
+                args=[], returncode=0,
+                stdout=json.dumps({
+                    "results": [{"name": "v0.28.0", "digest": "sha256:new"}],
+                    "next": None,
+                }),
+                stderr="",
+            ),
+        ]
+        with mock.patch.object(
+            sync_recipes.subprocess, "run", side_effect=responses
+        ) as run:
+            tag, _, digest = sync_recipes._fetch_docker_tag()
+
+        self.assertEqual(tag, "v0.28.0")
+        self.assertEqual(digest, "sha256:new")
+        self.assertEqual(run.call_count, 2)
+        self.assertIn("page_size=100", run.call_args_list[0].args[0][-1])
+        self.assertEqual(run.call_args_list[1].args[0][-1], next_url)
 
 
 if __name__ == "__main__":
