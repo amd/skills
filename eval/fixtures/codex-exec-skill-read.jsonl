@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"<redacted>"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I am using the local-ai-use skill and will read its instructions first."}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"Get-Content -Raw \"<CODEX_HOME>/plugins/cache/amd-skills/amd-skills/0.2.0/skills/local-ai-use/SKILL.md\"","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"Get-Content -Raw \"<CODEX_HOME>/plugins/cache/amd-skills/amd-skills/0.2.0/skills/local-ai-use/SKILL.md\"","aggregated_output":"---\nname: local-ai-use\n---","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"The first step is to confirm the local service is installed and running."}}
+{"type":"turn.completed","usage":{"input_tokens":0,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0}}

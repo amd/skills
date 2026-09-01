@@ -39,7 +39,11 @@ Usage::
     # one case, keeping the raw transcript
     python eval/run_evals.py --only qwen-on-mi300x --keep-logs eval-logs
 
-Reports go to stdout as markdown, to ``$GITHUB_STEP_SUMMARY`` under Actions,
+    # run the same routing dataset through Codex
+    python eval/run_evals.py --agent codex --mode routing --no-extended
+
+Claude is the default backend; ``--agent codex`` selects Codex. Reports go to
+stdout as markdown, to ``$GITHUB_STEP_SUMMARY`` under Actions,
 and to a JSON artifact under ``eval/runs/``.
 """
 
@@ -64,11 +68,13 @@ sys.path.insert(0, str(EVAL_DIR))
 
 import datasets  # noqa: E402
 import routing  # noqa: E402
+import codex_backend  # noqa: E402
 from agent import (  # noqa: E402
     Check,
     check_api_reachable,
     claude,
     enforce_model_policy,
+    session as agent_session,
 )
 from datasets import Case  # noqa: E402
 
@@ -135,7 +141,13 @@ def _expand(text: str, ctx: dict) -> str:
 
 
 def run_behavior_case(
-    case: Case, ctx: dict, hooks: ModuleType | None, model: str, effort: str
+    case: Case,
+    ctx: dict,
+    hooks: ModuleType | None,
+    model: str,
+    effort: str,
+    agent_name: str = "claude",
+    codex_home: Path | None = None,
 ) -> BehaviorOutcome:
     """Stage one skill, run the prompt to completion, grade what happened."""
     assert case.skill is not None
@@ -146,7 +158,15 @@ def run_behavior_case(
     error: str | None = None
 
     try:
-        with claude(model, skill=case.skill, effort=effort, seed=seed) as session:
+        factory = claude if agent_name == "claude" else agent_session
+        kwargs = {"skill": case.skill, "effort": effort, "seed": seed}
+        if agent_name == "codex":
+            session_ctx = factory(
+                agent_name, model, codex_home=codex_home, **kwargs
+            )
+        else:
+            session_ctx = factory(model, **kwargs)
+        with session_ctx as session:
             workspace = session.workspace
             assert workspace is not None
             if hooks is not None and hasattr(hooks, "setup"):
@@ -193,7 +213,13 @@ def run_behavior_case(
     )
 
 
-def run_behavior(skills: list[str], cases: list[Case], model: str, effort: str) -> list[BehaviorOutcome]:
+def run_behavior(
+    skills: list[str],
+    cases: list[Case],
+    model: str,
+    effort: str,
+    agent_name: str = "claude",
+) -> list[BehaviorOutcome]:
     """Run every behavior case, grouped by skill so session setup happens once."""
     outcomes: list[BehaviorOutcome] = []
     for skill in skills:
@@ -201,20 +227,36 @@ def run_behavior(skills: list[str], cases: list[Case], model: str, effort: str) 
         if not skill_cases:
             continue
 
-        hooks = _load_hooks(skill)
-        ctx: dict = {}
-        cache_dir: Path | None = None
-        if hooks is not None and hasattr(hooks, "setup_session"):
-            cache_dir = Path(tempfile.mkdtemp(prefix=f"evalcache-{skill}-"))
-            print(f"[behavior] {skill}: running evals/hooks.py setup_session()", flush=True)
-            ctx.update(hooks.setup_session(cache_dir) or {})
+        codex_install = codex_backend.install([skill]) if agent_name == "codex" else None
+        codex_home = codex_install.__enter__() if codex_install is not None else None
         try:
-            print(f"[behavior] {skill}: {len(skill_cases)} case(s)", flush=True)
-            for case in skill_cases:
-                outcomes.append(run_behavior_case(case, ctx, hooks, model, effort))
+            hooks = _load_hooks(skill)
+            ctx: dict = {}
+            cache_dir: Path | None = None
+            if hooks is not None and hasattr(hooks, "setup_session"):
+                cache_dir = Path(tempfile.mkdtemp(prefix=f"evalcache-{skill}-"))
+                print(f"[behavior] {skill}: running evals/hooks.py setup_session()", flush=True)
+                ctx.update(hooks.setup_session(cache_dir) or {})
+            try:
+                print(f"[behavior] {skill}: {len(skill_cases)} case(s)", flush=True)
+                for case in skill_cases:
+                    outcomes.append(
+                        run_behavior_case(
+                            case,
+                            ctx,
+                            hooks,
+                            model,
+                            effort,
+                            agent_name,
+                            codex_home,
+                        )
+                    )
+            finally:
+                if cache_dir is not None:
+                    shutil.rmtree(cache_dir, ignore_errors=True)
         finally:
-            if cache_dir is not None:
-                shutil.rmtree(cache_dir, ignore_errors=True)
+            if codex_install is not None:
+                codex_install.__exit__(None, None, None)
     return outcomes
 
 
@@ -245,12 +287,14 @@ def summarize_behavior(outcomes: list[BehaviorOutcome], meta: dict) -> dict:
 def render_behavior_markdown(summary: dict) -> str:
     totals = summary["totals"]
     meta = summary["meta"]
+    model = meta.get("model") or "CLI default"
+    agent = meta.get("agent", "claude")
     lines = [
         "## Skill behavior",
         "",
         f"**{totals['passed']}/{totals['cases']} cases passed** "
         f"({totals['checks_passed']}/{totals['checks']} individual expectations) "
-        f"on `{meta['model']}` (effort `{meta['effort']}`).",
+        f"with `{agent}` on `{model}` (effort `{meta['effort']}`).",
         "",
         "| Skill | Cases | Passed | Expectations | Met |",
         "| --- | --- | --- | --- | --- |",
@@ -331,6 +375,12 @@ def build_parser() -> argparse.ArgumentParser:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
+        "--agent",
+        default="claude",
+        choices=["claude", "codex"],
+        help="Agent CLI to evaluate. Default: claude.",
+    )
+    parser.add_argument(
         "--mode",
         default="both",
         choices=["routing", "behavior", "both"],
@@ -358,7 +408,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Check every dataset structurally and exit. No agent, no tokens.",
     )
     parser.add_argument("--list-skills", action="store_true", help="Print skills that have a dataset, as JSON.")
-    parser.add_argument("--model", default="opus", help="Model alias. CI pins this to opus. Default: opus.")
+    parser.add_argument(
+        "--model",
+        default="",
+        help="Model alias. Default: opus for Claude; the Codex CLI default for Codex.",
+    )
     parser.add_argument(
         "--effort", default="high", choices=["low", "medium", "high", "max"],
         help="Reasoning effort. Default: high.",
@@ -395,7 +449,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--max-budget-usd", type=float, default=0.75,
-        help="Per-case routing spend cap enforced by the CLI. 0 disables. Default: 0.75.",
+        help=(
+            "Per-case Claude routing spend cap enforced by that CLI. Codex "
+            "relies on early termination instead. 0 disables. Default: 0.75."
+        ),
     )
     parser.add_argument("--output", default="", help="Write the JSON report here. Default: eval/runs/<mode>-<timestamp>.json.")
     parser.add_argument("--summary", default="", help="Write the markdown report here (defaults to $GITHUB_STEP_SUMMARY when set).")
@@ -434,14 +491,41 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    args.model = enforce_model_policy(args.model) or args.model
+    if not args.model:
+        args.model = "opus" if args.agent == "claude" else os.environ.get("CODEX_EVAL_MODEL", "")
+    if args.agent == "claude":
+        args.model = enforce_model_policy(args.model) or args.model
     skills = _selected_skills(args)
     catalog = datasets.routing_catalog()
+    routing_codex_install = None
+    routing_codex_home = None
 
     if not args.skip_preflight:
-        ok, detail = check_api_reachable(args.model)
+        if args.agent == "codex":
+            if args.mode in ("routing", "both") and catalog:
+                # Reuse the catalog installation for the routing run below.
+                routing_codex_install = codex_backend.install(catalog)
+                try:
+                    routing_codex_home = routing_codex_install.__enter__()
+                    ok, detail = codex_backend.check_api_reachable(
+                        routing_codex_home, args.model or None, args.effort
+                    )
+                except BaseException:
+                    routing_codex_install.__exit__(None, None, None)
+                    raise
+                if not ok:
+                    routing_codex_install.__exit__(None, None, None)
+                    routing_codex_install = None
+                    routing_codex_home = None
+            else:
+                with codex_backend.install([skills[0]]) as preflight_home:
+                    ok, detail = codex_backend.check_api_reachable(
+                        preflight_home, args.model or None, args.effort
+                    )
+        else:
+            ok, detail = check_api_reachable(args.model)
         if not ok:
-            raise SystemExit(f"error: claude API not reachable -- {detail}")
+            raise SystemExit(f"error: {args.agent} API not reachable -- {detail}")
 
     failed = False
     started = time.time()
@@ -473,20 +557,28 @@ def main(argv: list[str] | None = None) -> int:
                 "installed and so could never win them."
             )
 
+        if args.agent == "codex":
+            codex_install = routing_codex_install or codex_backend.install(catalog)
+            codex_home = routing_codex_home or codex_install.__enter__()
+        else:
+            codex_install = None
+            codex_home = None
         config = routing.RoutingConfig(
             model=args.model,
             effort=args.effort,
             timeout=args.timeout,
             max_tool_calls=args.max_tool_calls,
             max_inspection_calls=args.max_inspection_calls,
-            max_budget_usd=args.max_budget_usd,
+            max_budget_usd=args.max_budget_usd if args.agent == "claude" else 0,
             keep_logs=args.keep_logs,
             available_flags=routing.supported_flags(
-                ["--no-session-persistence", "--max-budget-usd"]
+                ["--no-session-persistence", "--max-budget-usd"], args.agent
             ),
-            isolate_config=routing.can_isolate_config(),
+            isolate_config=(args.agent == "codex" or routing.can_isolate_config()),
+            agent=args.agent,
+            codex_home=codex_home,
         )
-        if not config.isolate_config:
+        if args.agent == "claude" and not config.isolate_config:
             print(
                 "[routing] warning: ANTHROPIC_API_KEY is not set, so the runner's "
                 "own config dir is used and any user-level skill in it joins the "
@@ -499,18 +591,26 @@ def main(argv: list[str] | None = None) -> int:
                 f"[routing] unpublished, so their prompts are not graded here: "
                 f"{', '.join(held_out)}"
             )
-        print(f"[routing] {len(cases)} cases, model={args.model}, jobs={args.jobs}")
-        if args.jobs > 1 and len(cases) > 1:
-            with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-                outcomes = list(pool.map(lambda c: routing.run_case(c, catalog, config), cases))
-        else:
-            outcomes = [routing.run_case(case, catalog, config) for case in cases]
+        print(
+            f"[routing] {len(cases)} cases, agent={args.agent}, "
+            f"model={args.model or 'default'}, jobs={args.jobs}"
+        )
+        try:
+            if args.jobs > 1 and len(cases) > 1:
+                with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+                    outcomes = list(pool.map(lambda c: routing.run_case(c, catalog, config), cases))
+            else:
+                outcomes = [routing.run_case(case, catalog, config) for case in cases]
+        finally:
+            if codex_install is not None:
+                codex_install.__exit__(None, None, None)
 
         summary = routing.summarize(
             outcomes,
             catalog,
             {
                 "model": args.model,
+                "agent": args.agent,
                 "effort": args.effort,
                 "skills": catalog,
                 "held_out_skills": held_out,
@@ -519,12 +619,13 @@ def main(argv: list[str] | None = None) -> int:
                 "max_tool_calls": args.max_tool_calls,
                 "max_inspection_calls": args.max_inspection_calls,
                 "isolated_config_dir": config.isolate_config,
-                "max_budget_usd": args.max_budget_usd,
+                "max_budget_usd": config.max_budget_usd,
                 "optional_cli_flags_used": sorted(config.available_flags),
                 "github_run_id": os.environ.get("GITHUB_RUN_ID"),
             },
         )
-        _write_report(summary, routing.render_markdown(summary), args, "routing")
+        routing_label = "routing" if args.agent == "claude" else "codex-routing"
+        _write_report(summary, routing.render_markdown(summary), args, routing_label)
 
         totals = summary["totals"]
         if totals["graded"] == 0:
@@ -562,11 +663,12 @@ def main(argv: list[str] | None = None) -> int:
                 "`files_exist` to a triggering evaluation."
             )
         else:
-            outcomes = run_behavior(skills, gradable, args.model, args.effort)
+            outcomes = run_behavior(skills, gradable, args.model, args.effort, args.agent)
             summary = summarize_behavior(
                 outcomes,
                 {
                     "model": args.model,
+                    "agent": args.agent,
                     "effort": args.effort,
                     "skills": skills,
                     "extended": args.extended,
@@ -574,7 +676,8 @@ def main(argv: list[str] | None = None) -> int:
                     "github_run_id": os.environ.get("GITHUB_RUN_ID"),
                 },
             )
-            _write_report(summary, render_behavior_markdown(summary), args, "behavior")
+            behavior_label = "behavior" if args.agent == "claude" else "codex-behavior"
+            _write_report(summary, render_behavior_markdown(summary), args, behavior_label)
             if summary["totals"]["passed"] != summary["totals"]["cases"]:
                 failed = True
 

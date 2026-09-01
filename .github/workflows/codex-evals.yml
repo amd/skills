@@ -1,0 +1,115 @@
+name: codex-evals
+
+# Codex is a second consumer of the same per-skill datasets used by evals.yml.
+# Keep this signal advisory while the repository establishes a baseline. It is
+# deliberately separate from the required `evals` aggregate gate.
+
+on:
+  pull_request:
+    paths:
+      - "skills/**"
+      - "eval/**"
+      - ".codex-plugin/plugin.json"
+      - ".agents/plugins/marketplace.json"
+      - ".github/workflows/codex-evals.yml"
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Comma-separated routing case ids (blank = all required cases)."
+        required: false
+        default: ""
+      model:
+        description: "Codex model override (blank = CLI default)."
+        required: false
+        default: ""
+      min_accuracy:
+        description: "Optional routing accuracy floor (0-1)."
+        required: false
+        default: "0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codex-evals-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  routing:
+    name: Codex routing (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check whether Codex credentials are available
+        id: auth
+        shell: bash
+        run: |
+          if [ -n "${OPENAI_API_KEY:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::OPENAI_API_KEY is unavailable; Codex evals are skipped."
+            echo "Fork pull requests do not receive repository secrets." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Set up Python
+        if: steps.auth.outputs.available == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        if: steps.auth.outputs.available == 'true'
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Node
+        if: steps.auth.outputs.available == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Codex CLI
+        if: steps.auth.outputs.available == 'true'
+        run: npm install -g @openai/codex
+
+      - name: Record Codex CLI version
+        if: steps.auth.outputs.available == 'true'
+        run: codex --version
+
+      - name: Run Codex routing evals
+        if: steps.auth.outputs.available == 'true'
+        env:
+          ONLY: ${{ github.event.inputs.only }}
+          MODEL: ${{ github.event.inputs.model }}
+          MIN_ACCURACY: ${{ github.event.inputs.min_accuracy || '0' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          model_args=()
+          if [ -n "${MODEL:-}" ]; then
+            model_args=(--model "$MODEL")
+          fi
+          uv run --with pyyaml python eval/run_evals.py \
+            --agent codex \
+            --mode routing \
+            --no-extended \
+            --only "${ONLY:-}" \
+            --min-accuracy "$MIN_ACCURACY" \
+            "${model_args[@]}" \
+            --output codex-routing-report.json \
+            --keep-logs codex-routing-logs
+
+      - name: Upload Codex routing report
+        if: always() && steps.auth.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-routing-report
+          path: |
+            codex-routing-report.json
+            codex-routing-logs/
+          if-no-files-found: warn

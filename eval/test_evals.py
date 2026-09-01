@@ -16,15 +16,19 @@ quietly drifted from what the runner enforces is worse than no schema at all.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 EVAL_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(EVAL_DIR))
 
 import agent  # noqa: E402
+import codex_backend  # noqa: E402
 import datasets  # noqa: E402
 import routing  # noqa: E402
 import run_evals  # noqa: E402
@@ -32,6 +36,16 @@ from datasets import EVALUATIONS_KEY, TRIGGER_KEY  # noqa: E402
 
 TRIGGERING = "triggeringEvaluation"
 NON_TRIGGERING = "nonTriggeringEvaluation"
+CODEX_EXEC_FIXTURE = EVAL_DIR / "fixtures" / "codex-exec-skill-read.jsonl"
+
+
+def codex_exec_fixture() -> list[dict]:
+    """Load the sanitized JSONL captured from a live Codex CLI run."""
+    return [
+        json.loads(line)
+        for line in CODEX_EXEC_FIXTURE.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def parse(
@@ -492,6 +506,21 @@ class TestRoutingClassification(unittest.TestCase):
             routing.PASSING_VERDICTS, {"correct_trigger", "true_negative"}
         )
 
+    def test_codex_retry_notice_is_not_terminal(self) -> None:
+        self.assertIsNone(
+            routing._terminal_failure(
+                {"type": "error", "message": "Reconnecting... 2/5"}
+            )
+        )
+
+    def test_codex_turn_failure_is_terminal(self) -> None:
+        self.assertEqual(
+            routing._terminal_failure(
+                {"type": "turn.failed", "error": {"message": "request failed"}}
+            ),
+            "request failed",
+        )
+
 
 class TestActivationDetection(unittest.TestCase):
     SKILLS = ["local-ai-use", "local-ai-app-integration", "serving-llms-on-instinct"]
@@ -505,6 +534,13 @@ class TestActivationDetection(unittest.TestCase):
     def test_skill_tool_call_is_an_activation(self) -> None:
         event = self.event("Skill", {"command": "local-ai-use"})
         self.assertEqual(routing.detect_activation(event, self.SKILLS), "local-ai-use")
+
+    def test_live_codex_skill_read_is_an_activation(self) -> None:
+        # Captured with Codex CLI 0.150.0-alpha.12.2. The CLI represented skill
+        # activation as command_execution reading the installed SKILL.md; IDs,
+        # paths, output, prose, and usage were sanitized in the fixture.
+        hits = [routing.detect_activation(event, self.SKILLS) for event in codex_exec_fixture()]
+        self.assertEqual([hit for hit in hits if hit], ["local-ai-use", "local-ai-use"])
 
     def test_longest_name_wins_when_one_is_a_prefix_of_another(self) -> None:
         event = self.event("Skill", {"command": "local-ai-app-integration"})
@@ -553,6 +589,28 @@ class TestActivationDetection(unittest.TestCase):
         self.assertFalse(routing._is_catalog_inspection('{"path": "src/main.py"}', self.SKILLS))
 
 
+class TestRoutingTermination(unittest.TestCase):
+    def test_terminate_stops_the_process_group(self) -> None:
+        spawn = (
+            {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+            if os.name == "nt"
+            else {"start_new_session": True}
+        )
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            **spawn,
+        )
+        try:
+            routing._terminate(proc)
+            self.assertIsNotNone(proc.poll())
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+
+
 class TestPromptTemplating(unittest.TestCase):
     def test_placeholders_are_substituted(self) -> None:
         self.assertEqual(
@@ -597,6 +655,20 @@ class TestRunGrading(unittest.TestCase):
         self.assertIn("Bash", run.tool_names)
         self.assertIn("detect.py", run.logs)
         self.assertEqual(run.result_text, "done")
+
+    def test_live_codex_transcript_and_final_message_are_captured(self) -> None:
+        run = agent.Run(
+            workspace=self.workspace,
+            events=codex_exec_fixture(),
+            judge_model=None,
+            backend="codex",
+        )
+        self.assertIn("command_execution", run.tool_names)
+        self.assertIn("skills/local-ai-use/SKILL.md", run.command_text)
+        self.assertEqual(
+            run.result_text,
+            "The first step is to confirm the local service is installed and running.",
+        )
 
     def test_logs_contain_is_case_insensitive(self) -> None:
         run = self.make_run(stream(("Bash", {"command": "python DETECT.py"})))
@@ -658,6 +730,87 @@ class TestRunGrading(unittest.TestCase):
         (staged / "SKILL.md").write_text("x", encoding="utf-8")
         (self.workspace / "out.png").write_bytes(b"x")
         self.assertEqual(self.make_run(stream()).files, ["out.png"])
+
+
+class TestCodexBackend(unittest.TestCase):
+    def test_exec_command_is_noninteractive_ephemeral_and_sandboxed(self) -> None:
+        with mock.patch.object(codex_backend.shutil, "which", return_value="codex"):
+            cmd = codex_backend.exec_command(
+                Path("workspace"),
+                model="gpt-test",
+                effort="high",
+                sandbox="read-only",
+            )
+        self.assertEqual(cmd[:2], ["codex", "exec"])
+        self.assertIn("--json", cmd)
+        self.assertIn("--ephemeral", cmd)
+        self.assertIn("read-only", cmd)
+        self.assertIn("gpt-test", cmd)
+        self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", cmd)
+        self.assertEqual(cmd[-1], "-")
+
+    def test_behavior_command_uses_workspace_write_with_approval_review(self) -> None:
+        with mock.patch.object(codex_backend.shutil, "which", return_value="codex"):
+            cmd = codex_backend.exec_command(
+                Path("workspace"), model=None, effort=None, sandbox="workspace-write"
+            )
+        self.assertIn("workspace-write", cmd)
+        self.assertIn("--approve-for-me", cmd)
+
+
+class TestCodexMainFlow(unittest.TestCase):
+    def test_routing_preflight_reuses_the_catalog_install(self) -> None:
+        cases, errors = parse(
+            triggers(id="one-case", prompt="route this"), skill="local-ai-use"
+        )
+        self.assertEqual(errors, [])
+        install_context = mock.MagicMock()
+        install_context.__enter__.return_value = Path("isolated-codex-home")
+        install = mock.Mock(return_value=install_context)
+        summary = {
+            "totals": {
+                "graded": 1,
+                "activations": 1,
+                "activations_expected": 1,
+                "accuracy": 1.0,
+            }
+        }
+
+        with (
+            mock.patch.object(datasets, "validate_all", return_value=[]),
+            mock.patch.object(
+                datasets, "skills_with_datasets", return_value=["local-ai-use"]
+            ),
+            mock.patch.object(
+                datasets, "routing_catalog", return_value=["local-ai-use"]
+            ),
+            mock.patch.object(datasets, "load_all_cases", return_value=cases),
+            mock.patch.object(codex_backend, "install", install),
+            mock.patch.object(
+                codex_backend, "check_api_reachable", return_value=(True, "ok")
+            ),
+            mock.patch.object(routing, "supported_flags", return_value=set()),
+            mock.patch.object(routing, "run_case", return_value=object()),
+            mock.patch.object(routing, "summarize", return_value=summary),
+            mock.patch.object(routing, "render_markdown", return_value=""),
+            mock.patch.object(run_evals, "_write_report"),
+        ):
+            result = run_evals.main(
+                [
+                    "--agent",
+                    "codex",
+                    "--mode",
+                    "routing",
+                    "--only",
+                    "one-case",
+                    "--jobs",
+                    "1",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        install.assert_called_once_with(["local-ai-use"])
+        install_context.__exit__.assert_called_once_with(None, None, None)
 
 
 class FakeAgent:

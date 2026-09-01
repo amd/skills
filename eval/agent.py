@@ -2,7 +2,7 @@
 #
 # See LICENSE for license information.
 
-"""Agent staging and grading for behavior-mode eval runs.
+"""Agent staging and grading for Claude and Codex behavior-mode eval runs.
 
 One skill is copied into an isolated temp workspace, one prompt is run to
 completion, and the result is graded against a case's expectations::
@@ -43,6 +43,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from datasets import SKILLS_DIR  # noqa: E402
+import codex_backend  # noqa: E402
 
 DEFAULT_MODEL = os.environ.get("EVAL_MODEL", "opus")
 DEFAULT_EFFORT = os.environ.get("EVAL_EFFORT", "high")
@@ -126,7 +127,7 @@ def check_api_reachable(model: str | None = DEFAULT_MODEL, timeout: int = 60) ->
     return True, "ok"
 
 
-def _stage_workspace(skill: str, seed: Path | None = None) -> Path:
+def _stage_workspace(skill: str, seed: Path | None = None, backend: str = "claude") -> Path:
     """Copy ``skill`` into an isolated temp workspace and return its path.
 
     ``seed`` is a directory of fixture files (a case's ``workspace``) whose
@@ -138,9 +139,10 @@ def _stage_workspace(skill: str, seed: Path | None = None) -> Path:
         raise FileNotFoundError(f"skill '{skill}' not found at {skill_src / 'SKILL.md'}")
 
     workspace = Path(tempfile.mkdtemp(prefix=f"behavior-{skill}-"))
-    dest = workspace / ".claude" / "skills" / skill
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(skill_src, dest)
+    if backend == "claude":
+        dest = workspace / ".claude" / "skills" / skill
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(skill_src, dest)
 
     if seed is not None:
         if not seed.is_dir():
@@ -150,27 +152,54 @@ def _stage_workspace(skill: str, seed: Path | None = None) -> Path:
     return workspace
 
 
-def _run_agent(prompt_text: str, workspace: Path, model: str | None, effort: str | None) -> list[dict]:
+def _run_agent(
+    prompt_text: str,
+    workspace: Path,
+    model: str | None,
+    effort: str | None,
+    *,
+    backend: str = "claude",
+    codex_home: Path | None = None,
+) -> list[dict]:
     """Run the agent once in ``workspace`` and return the stream-json events."""
-    claude_bin = shutil.which("claude")
-    if not claude_bin:
-        raise RuntimeError("'claude' CLI not found on PATH")
+    if backend == "codex":
+        if codex_home is None:
+            raise RuntimeError("Codex behavior run requires an isolated Codex home")
+        cmd = codex_backend.exec_command(
+            workspace, model=model, effort=effort, sandbox="workspace-write"
+        )
+        proc = subprocess.run(
+            cmd,
+            cwd=str(workspace),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            input=prompt_text,
+            env=codex_backend.codex_env(codex_home),
+        )
+        cli_name = "codex"
+    else:
+        claude_bin = shutil.which("claude")
+        if not claude_bin:
+            raise RuntimeError("'claude' CLI not found on PATH")
 
-    cmd = [
-        claude_bin, "-p",
-        "--output-format", "stream-json", "--verbose",
-        "--dangerously-skip-permissions",
-        "--add-dir", str(workspace),
-    ]
-    if model:
-        cmd += ["--model", model]
-    if effort:
-        cmd += ["--effort", effort]
+        cmd = [
+            claude_bin, "-p",
+            "--output-format", "stream-json", "--verbose",
+            "--dangerously-skip-permissions",
+            "--add-dir", str(workspace),
+        ]
+        if model:
+            cmd += ["--model", model]
+        if effort:
+            cmd += ["--effort", effort]
 
-    proc = subprocess.run(
-        cmd, cwd=str(workspace), capture_output=True, text=True,
-        encoding="utf-8", input=prompt_text, env=claude_env(),
-    )
+        proc = subprocess.run(
+            cmd, cwd=str(workspace), capture_output=True, text=True,
+            encoding="utf-8", input=prompt_text, env=claude_env(),
+        )
+        cli_name = "claude"
 
     events: list[dict] = []
     for line in (proc.stdout or "").splitlines():
@@ -184,9 +213,12 @@ def _run_agent(prompt_text: str, workspace: Path, model: str | None, effort: str
 
     if not events:
         raise RuntimeError(
-            f"claude exited with code {proc.returncode} and produced no "
+            f"{cli_name} exited with code {proc.returncode} and produced no "
             f"parseable stream-json output. stderr:\n{proc.stderr}"
         )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or f"exit code {proc.returncode}").strip()
+        raise RuntimeError(f"{cli_name} exited with code {proc.returncode}: {detail[:1000]}")
     return events
 
 
@@ -204,6 +236,17 @@ def _walk(obj, tool_uses, tool_results) -> None:
                 for c in content:
                     if isinstance(c, dict) and isinstance(c.get("text"), str):
                         tool_results.append(c["text"])
+        elif otype in {"command_execution", "mcp_tool_call", "file_change"}:
+            name = {
+                "command_execution": "command_execution",
+                "mcp_tool_call": str(obj.get("tool") or obj.get("name") or "mcp_tool_call"),
+                "file_change": "file_change",
+            }[otype]
+            value = obj.get("command") or obj.get("arguments") or obj.get("changes") or {}
+            tool_uses.append((name, json.dumps(value, ensure_ascii=False)))
+            output = obj.get("aggregated_output") or obj.get("output") or obj.get("result")
+            if isinstance(output, str):
+                tool_results.append(output)
         for v in obj.values():
             _walk(v, tool_uses, tool_results)
     elif isinstance(obj, list):
@@ -211,10 +254,28 @@ def _walk(obj, tool_uses, tool_results) -> None:
             _walk(v, tool_uses, tool_results)
 
 
+def _codex_agent_messages(stdout: str) -> str:
+    """Return agent-message text from Codex JSONL, ignoring non-JSON noise."""
+    messages: list[str] = []
+    for line in stdout.splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        item = event.get("item", {}) if isinstance(event, dict) else {}
+        if isinstance(item, dict) and item.get("type") == "agent_message":
+            text = item.get("text")
+            if isinstance(text, str):
+                messages.append(text)
+    return "\n".join(messages)
+
+
 def _list_workspace_files(workspace: Path) -> list[str]:
     files: list[str] = []
     for p in sorted(workspace.rglob("*")):
-        if ".claude" in p.relative_to(workspace).parts:
+        if any(part in {".claude", ".codex"} for part in p.relative_to(workspace).parts):
             continue
         if p.is_file():
             files.append(str(p.relative_to(workspace)).replace("\\", "/"))
@@ -258,10 +319,6 @@ def _grade_with_llm(
     The grader may read files in the workspace (e.g. open out.png), so the
     workspace is added and tool permissions are bypassed for the grader too.
     """
-    claude_bin = shutil.which("claude")
-    if not claude_bin:
-        return False, "llm_judge skipped: 'claude' CLI not on PATH"
-
     cmd_text = run.command_text
     if len(cmd_text) > 4000:
         cmd_text = cmd_text[:4000] + "\n...[truncated]..."
@@ -294,28 +351,43 @@ def _grade_with_llm(
         "Respond with ONLY a single-line JSON object and nothing else: "
         '{"pass": true|false, "reason": "<one short sentence, no braces>"}'
     )
-    cmd = [
-        claude_bin, "-p",
-        "--output-format", "json",
-        "--dangerously-skip-permissions",
-        "--add-dir", str(run.workspace),
-    ]
-    if judge_model:
-        cmd += ["--model", judge_model]
+    if run.backend == "codex":
+        if run.codex_home is None:
+            return False, "llm_judge skipped: isolated Codex home is unavailable"
+        cmd = codex_backend.exec_command(
+            run.workspace, model=judge_model, effort=None, sandbox="read-only"
+        )
+        env = codex_backend.codex_env(run.codex_home)
+    else:
+        claude_bin = shutil.which("claude")
+        if not claude_bin:
+            return False, "llm_judge skipped: 'claude' CLI not on PATH"
+        cmd = [
+            claude_bin, "-p",
+            "--output-format", "json",
+            "--dangerously-skip-permissions",
+            "--add-dir", str(run.workspace),
+        ]
+        if judge_model:
+            cmd += ["--model", judge_model]
+        env = claude_env()
 
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8",
-            input=prompt_text, timeout=180, env=claude_env(),
+            input=prompt_text, timeout=180, env=env,
         )
     except subprocess.TimeoutExpired:
         return False, "llm_judge timed out after 180s"
 
-    try:
-        payload = json.loads((proc.stdout or "").strip())
-        verdict_text = payload.get("result", "") if isinstance(payload, dict) else ""
-    except json.JSONDecodeError:
-        verdict_text = (proc.stdout or "").strip()
+    if run.backend == "codex":
+        verdict_text = _codex_agent_messages(proc.stdout or "")
+    else:
+        try:
+            payload = json.loads((proc.stdout or "").strip())
+            verdict_text = payload.get("result", "") if isinstance(payload, dict) else ""
+        except json.JSONDecodeError:
+            verdict_text = (proc.stdout or "").strip()
 
     # A chatty judge may wrap the verdict in prose, and its reason may itself
     # contain braces (a regex quantifier, a quoted JSON snippet), so let the
@@ -353,7 +425,15 @@ class Check:
 class Run:
     """The captured result of one agent run."""
 
-    def __init__(self, *, workspace: Path, events: list[dict], judge_model: str | None) -> None:
+    def __init__(
+        self,
+        *,
+        workspace: Path,
+        events: list[dict],
+        judge_model: str | None,
+        backend: str = "claude",
+        codex_home: Path | None = None,
+    ) -> None:
         tool_uses: list[tuple[str, str]] = []
         tool_results: list[str] = []
         for ev in events:
@@ -363,9 +443,18 @@ class Run:
         for ev in events:
             if ev.get("type") == "result" and isinstance(ev.get("result"), str):
                 result_text = ev["result"]
+            item = ev.get("item")
+            if (
+                isinstance(item, dict)
+                and item.get("type") == "agent_message"
+                and isinstance(item.get("text"), str)
+            ):
+                result_text = item["text"]
 
         self.workspace = workspace
         self.judge_model = judge_model
+        self.backend = backend
+        self.codex_home = codex_home
         self.files = _list_workspace_files(workspace)
         self.tool_names = {name for name, _ in tool_uses if name}
         self.result_text = result_text
@@ -469,16 +558,20 @@ class Agent:
         skill: str,
         effort: str | None = DEFAULT_EFFORT,
         seed: Path | None = None,
+        backend: str = "claude",
+        codex_home: Path | None = None,
     ) -> None:
         # Coerce here so the agent run and the LLM judge share the capped model.
-        self.model = enforce_model_policy(model)
+        self.model = enforce_model_policy(model) if backend == "claude" else model
         self.skill = skill
         self.effort = effort
         self.seed = seed
+        self.backend = backend
+        self.codex_home = codex_home
         self.workspace: Path | None = None
 
     def __enter__(self) -> "Agent":
-        self.workspace = _stage_workspace(self.skill, self.seed)
+        self.workspace = _stage_workspace(self.skill, self.seed, self.backend)
         return self
 
     def __exit__(self, *exc) -> None:
@@ -491,9 +584,25 @@ class Agent:
         if self.workspace is None:
             raise RuntimeError("Agent.prompt() must be called inside a 'with' block")
 
-        _safe_print(f"\n[behavior] skill='{self.skill}' model='{self.model}': {text}")
-        events = _run_agent(text, self.workspace, self.model, self.effort)
-        return Run(workspace=self.workspace, events=events, judge_model=self.model)
+        _safe_print(
+            f"\n[behavior] agent='{self.backend}' skill='{self.skill}' "
+            f"model='{self.model or 'default'}': {text}"
+        )
+        events = _run_agent(
+            text,
+            self.workspace,
+            self.model,
+            self.effort,
+            backend=self.backend,
+            codex_home=self.codex_home,
+        )
+        return Run(
+            workspace=self.workspace,
+            events=events,
+            judge_model=self.model,
+            backend=self.backend,
+            codex_home=self.codex_home,
+        )
 
 
 def claude(
@@ -503,5 +612,27 @@ def claude(
     effort: str | None = DEFAULT_EFFORT,
     seed: Path | None = None,
 ) -> Agent:
-    """Factory for a Claude-backed `Agent` (the only agent backend today)."""
+    """Factory for a Claude-backed `Agent`."""
     return Agent(model, skill=skill, effort=effort, seed=seed)
+
+
+def session(
+    backend: str,
+    model: str | None,
+    *,
+    skill: str,
+    effort: str | None,
+    seed: Path | None = None,
+    codex_home: Path | None = None,
+) -> Agent:
+    """Create a behavior session for the requested agent backend."""
+    if backend not in {"claude", "codex"}:
+        raise ValueError(f"unsupported agent backend: {backend}")
+    return Agent(
+        model,
+        skill=skill,
+        effort=effort,
+        seed=seed,
+        backend=backend,
+        codex_home=codex_home,
+    )

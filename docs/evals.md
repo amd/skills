@@ -114,6 +114,31 @@ python eval/run_evals.py --mode routing          # the published bundle
 python eval/run_evals.py --only <case-id> --keep-logs logs   # one case, keeping the transcript
 ```
 
-Everything but `--validate` needs the `claude` CLI authenticated, plus whatever your own cases need. No `pip install`: the runner is standard library only.
+These commands use Claude by default. Everything but `--validate` needs the
+`claude` CLI authenticated, plus whatever the cases need. No `pip install` is
+needed for the runner itself.
+
+The same datasets can also evaluate Codex:
+
+```bash
+npm install -g @openai/codex
+export OPENAI_API_KEY="..."
+python eval/run_evals.py --agent codex --mode routing --no-extended
+python eval/run_evals.py --agent codex --mode behavior --skill <your-skill> --no-extended
+```
+
+For Codex, the runner builds a temporary plugin containing exactly the skills
+under test and installs it into a temporary `CODEX_HOME`. This prevents a
+developer's personal plugins, skills, and settings from changing the result.
+The model defaults to the Codex CLI default; pass `--model <model>` to pin one.
+Codex JSON reports use `codex-routing-*` and `codex-behavior-*` names so they
+can be kept beside Claude reports.
 
 In CI, the `evals` workflow runs routing when a change can move a routing decision (a published description, any dataset, or the bundle itself), and runs behavior for the skills a change touches.
+
+The separate `codex-evals` workflow runs Codex routing as an advisory signal.
+It is intentionally outside the required `evals` gate while a baseline is
+being established, and skips cleanly when the repository's `OPENAI_API_KEY`
+secret is unavailable (including pull requests from forks). Codex behavior
+evals remain opt-in because they may need the hardware and setup declared by
+each skill.
