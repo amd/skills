@@ -1,0 +1,85 @@
+name: Product repo approval
+description: Get engineering and product sign-off on a product repo before its skills enter the catalog.
+title: "[Product repo approval] <owner/repo>"
+labels:
+  - product-repo-approval
+body:
+  - type: markdown
+    attributes:
+      value: |
+        File this **before** opening a catalog pull request. Two people have to sign off here:
+
+        - the **engineering owner**, confirming they own the underlying product, and
+        - the **product manager** for that product, confirming they are comfortable with
+          the product repo backing these skills and that the product is in Tech Preview or GA.
+
+        Each of them signs off by leaving a comment containing `/approve` — say as much or as
+        little alongside it as you like. Approvals are recorded per person: nobody can approve
+        on someone else's behalf, and filing this issue is not an approval.
+
+        Once both have approved, a pull request is opened automatically adding this repo to
+        `.github/skill_owners.json`. Merging that pull request closes this issue.
+
+  - type: input
+    id: product
+    attributes:
+      label: Product name
+      description: The product as it is known to customers, not the repo name.
+      placeholder: e.g. TraceLens
+    validations:
+      required: true
+
+  - type: input
+    id: repo
+    attributes:
+      label: Product repo
+      description: The AMD-owned repo that holds the skills, as `owner/repo`. This is the repo being approved.
+      placeholder: e.g. AMD-AGI/TraceLens
+    validations:
+      required: true
+
+  - type: textarea
+    id: skills
+    attributes:
+      label: Skills to add
+      description: One per line, as the catalog will name them. Rough names are fine if they are not settled yet.
+      placeholder: |
+        tracelens-analysis-orchestrator
+    validations:
+      required: true
+
+  - type: input
+    id: engineering_owner
+    attributes:
+      label: Engineering owner
+      description: GitHub handle of the person who owns the underlying product. They must approve from this account, so get the handle exactly right — edit the issue if it is wrong.
+      placeholder: e.g. @octocat
+    validations:
+      required: true
+
+  - type: input
+    id: product_manager
+    attributes:
+      label: Product manager
+      description: GitHub handle of the product manager who manages this product. They must approve from this account.
+      placeholder: e.g. @octocat
+    validations:
+      required: true
+
+  - type: dropdown
+    id: status
+    attributes:
+      label: Product status
+      description: Approval requires Tech Preview or GA. If the product is not there yet, file this once it is.
+      options:
+        - "Tech Preview"
+        - "GA"
+        - "Neither yet — pre-release or internal only"
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Anything the approvers should know, or context on the product's status.

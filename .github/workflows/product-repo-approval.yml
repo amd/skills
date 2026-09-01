@@ -1,0 +1,300 @@
+name: product-repo-approval
+
+# Turns a "Product repo approval" issue into a reviewable registry entry.
+#
+# Two people named on the issue sign off by commenting `/approve`: the
+# engineering owner, who owns the underlying product, and the product manager,
+# who vouches for the product repo and for the product being in Tech Preview or
+# GA. This workflow only records approvals from those two accounts, so a
+# `/approve` from anyone else -- including whoever filed the issue -- does
+# nothing but get an explanation.
+#
+# Each approval is stored as a label on the issue rather than kept in this run,
+# so the second one can arrive days after the first and still complete the pair.
+# Once both are in, the run adds the repo to `.github/skill_owners.json` and
+# opens a pull request; merging it closes the issue.
+#
+# Every detail comes from the issue body, which makes a mistake cheap to fix:
+# correct the issue and re-approve. The registry is keyed on the repo, so the
+# second pass rewrites the entry instead of adding a rival one.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+# Two approvals landing at once would otherwise race for the same branch.
+concurrency:
+  group: product-repo-approval-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+env:
+  BASE_BRANCH: main
+  REGISTRY: .github/skill_owners.json
+
+jobs:
+  approve:
+    name: Record approval
+    if: >-
+      github.event.issue.state == 'open' &&
+      !github.event.issue.pull_request &&
+      contains(github.event.issue.labels.*.name, 'product-repo-approval') &&
+      contains(github.event.comment.body, '/approve') &&
+      github.event.comment.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Record this approval
+        id: approval
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const issue = context.payload.issue;
+            const issue_number = issue.number;
+            const commenter = context.payload.comment.user.login;
+            const body = issue.body || "";
+
+            const ENG_LABEL = "eng-owner-approved";
+            const PM_LABEL = "pm-approved";
+
+            // Issue forms render each answer as an `### <label>` heading followed
+            // by the response, so the form's labels are the parsing contract.
+            const answers = new Map();
+            let heading = null;
+            for (const line of body.split(/\r?\n/)) {
+              const match = line.match(/^###\s+(.*?)\s*$/);
+              if (match) {
+                heading = match[1].toLowerCase();
+                answers.set(heading, []);
+              } else if (heading) {
+                answers.get(heading).push(line);
+              }
+            }
+
+            function field(label) {
+              const lines = answers.get(label.toLowerCase());
+              if (!lines) return "";
+              const value = lines.join("\n").trim();
+              return value === "_No response_" ? "" : value;
+            }
+
+            const handle = (value) => value.trim().replace(/^@/, "").trim();
+            const engOwner = handle(field("Engineering owner"));
+            const productManager = handle(field("Product manager"));
+            const sameHandle = (a, b) => !!a && a.toLowerCase() === b.toLowerCase();
+
+            async function comment(comment_body) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number, body: comment_body,
+              });
+            }
+
+            // Two approvals from one account would defeat the point of asking
+            // engineering and product separately.
+            if (sameHandle(engOwner, productManager)) {
+              core.info(`${engOwner} is named as both approvers; nothing recorded.`);
+              await comment(
+                `This issue names \`${engOwner}\` as both the engineering owner and the product manager, ` +
+                `so nothing was recorded. Those have to be two different people. Edit the issue with the right ` +
+                `handles, then have each of them comment \`/approve\`.`
+              );
+              core.setOutput("ready", "false");
+              return;
+            }
+
+            const roles = [];
+            if (sameHandle(commenter, engOwner)) {
+              roles.push({ label: ENG_LABEL, who: "engineering owner" });
+            }
+            if (sameHandle(commenter, productManager)) {
+              roles.push({ label: PM_LABEL, who: "product manager" });
+            }
+
+            if (roles.length === 0) {
+              core.info(`${commenter} is neither the named engineering owner nor the named product manager.`);
+              await comment(
+                `@${commenter} — this approval was not recorded, because this issue names ` +
+                `${engOwner ? "`" + engOwner + "`" : "nobody"} as the engineering owner and ` +
+                `${productManager ? "`" + productManager + "`" : "nobody"} as the product manager. ` +
+                `Approval has to come from those two accounts. If a handle is wrong, edit the issue and ask them to approve again.`
+              );
+              core.setOutput("ready", "false");
+              return;
+            }
+
+            const present = new Set(issue.labels.map(l => l.name));
+            const toAdd = roles.map(r => r.label).filter(l => !present.has(l));
+
+            for (const name of toAdd) {
+              // The labels are part of this workflow's state, so create them on
+              // first use rather than relying on someone having set them up.
+              try {
+                await github.rest.issues.createLabel({
+                  owner, repo, name,
+                  color: "0e8a16",
+                  description: "Product repo approval recorded for this role",
+                });
+              } catch (err) {
+                core.debug(`Label ${name} already exists or could not be created: ${err.message}`);
+              }
+            }
+
+            if (toAdd.length > 0) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number, labels: toAdd });
+              toAdd.forEach(l => present.add(l));
+            }
+
+            const ready = present.has(ENG_LABEL) && present.has(PM_LABEL);
+
+            if (toAdd.length > 0) {
+              const recorded = roles
+                .filter(r => toAdd.includes(r.label))
+                .map(r => r.who)
+                .join(" and ");
+              const waiting = present.has(ENG_LABEL)
+                ? `@${productManager} (product manager)`
+                : `@${engOwner} (engineering owner)`;
+              await comment(
+                ready
+                  ? `Recorded @${commenter} as the ${recorded}. Both approvals are in — opening a pull request to add \`${field("Product repo")}\` to the skill owners registry.`
+                  : `Recorded @${commenter} as the ${recorded}. Still waiting on ${waiting}.`
+              );
+            } else if (!ready) {
+              core.info(`${commenter} has already approved; the other approval is still outstanding.`);
+              core.setOutput("ready", "false");
+              return;
+            }
+
+            if (!ready) {
+              core.setOutput("ready", "false");
+              return;
+            }
+
+            // Both approvals are in, so the details now have to be usable. A
+            // problem here is worth saying out loud on the issue: the approvers
+            // are done and would otherwise be left waiting on a pull request
+            // that never arrives.
+            const productRepo = field("Product repo").replace(/^https?:\/\/github\.com\//i, "").replace(/\/$/, "");
+            const product = field("Product name");
+            const statusAnswer = field("Product status");
+            const status = /^Tech Preview/i.test(statusAnswer)
+              ? "tech-preview"
+              : /^GA\b/i.test(statusAnswer) ? "ga" : "";
+
+            const problems = [];
+            if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(productRepo)) {
+              problems.push(`**Product repo** reads \`${productRepo || "(empty)"}\`, which is not an \`owner/repo\` slug.`);
+            }
+            if (!product) {
+              problems.push("**Product name** is empty.");
+            }
+            if (!status) {
+              problems.push(`**Product status** reads \`${statusAnswer || "(empty)"}\`. The registry only accepts Tech Preview or GA.`);
+            }
+
+            if (problems.length > 0) {
+              await comment(
+                `Both approvals are recorded, but no pull request was opened:\n\n` +
+                problems.map(p => `- ${p}`).join("\n") +
+                `\n\nEdit the issue to fix that, then comment \`/approve\` again to retry.`
+              );
+              core.setOutput("ready", "false");
+              return;
+            }
+
+            core.setOutput("ready", "true");
+            core.setOutput("product_repo", productRepo);
+            core.setOutput("product", product);
+            core.setOutput("status", status);
+            core.setOutput("engineering_owner", engOwner);
+            core.setOutput("product_manager", productManager);
+
+      - name: Set up uv
+        if: steps.approval.outputs.ready == 'true'
+        uses: astral-sh/setup-uv@v7
+
+      # The product name and handles come from an issue body, so they reach the
+      # shell through the environment rather than through expression
+      # interpolation, which would let a crafted issue run commands here.
+      - name: Add the repo to the skill owners registry
+        if: steps.approval.outputs.ready == 'true'
+        env:
+          PRODUCT_REPO: ${{ steps.approval.outputs.product_repo }}
+          PRODUCT: ${{ steps.approval.outputs.product }}
+          STATUS: ${{ steps.approval.outputs.status }}
+          ENGINEERING_OWNER: ${{ steps.approval.outputs.engineering_owner }}
+          PRODUCT_MANAGER: ${{ steps.approval.outputs.product_manager }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+        run: |
+          uv run .github/scripts/record_skill_owner.py \
+            --registry "$REGISTRY" \
+            --repo "$PRODUCT_REPO" \
+            --product "$PRODUCT" \
+            --status "$STATUS" \
+            --engineering-owner "$ENGINEERING_OWNER" \
+            --product-manager "$PRODUCT_MANAGER" \
+            --issue "$ISSUE_URL"
+
+      # A pull request rather than a commit to main, so the entry gets the same
+      # review as any other change to the catalog's registries. Re-approving
+      # updates this issue's existing pull request in place.
+      - name: Open pull request
+        id: pr
+        if: steps.approval.outputs.ready == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          base: ${{ env.BASE_BRANCH }}
+          branch: bot/skill-owners/issue-${{ github.event.issue.number }}
+          delete-branch: true
+          commit-message: "Add `${{ steps.approval.outputs.product_repo }}` to the skill owners registry"
+          title: "Add `${{ steps.approval.outputs.product_repo }}` to the skill owners registry"
+          body: |
+            Approved on #${{ github.event.issue.number }} by
+            @${{ steps.approval.outputs.engineering_owner }} (engineering owner, owns the underlying product) and
+            @${{ steps.approval.outputs.product_manager }} (product manager, product is ${{ steps.approval.outputs.status }}).
+
+            Closes #${{ github.event.issue.number }}
+
+            Opened by the `product-repo-approval` workflow ([run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})).
+          labels: |
+            catalog
+            automated
+          add-paths: |
+            .github/skill_owners.json
+
+      - name: Link the pull request on the issue
+        if: steps.approval.outputs.ready == 'true' && steps.pr.outputs.pull-request-url != ''
+        uses: actions/github-script@v7
+        env:
+          PR_URL: ${{ steps.pr.outputs.pull-request-url }}
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.payload.issue.number,
+              body: `Registry entry up for review: ${process.env.PR_URL}`,
+            });
+
+      - name: Report outcome
+        env:
+          READY: ${{ steps.approval.outputs.ready }}
+          PRODUCT_REPO: ${{ steps.approval.outputs.product_repo }}
+          PR_URL: ${{ steps.pr.outputs.pull-request-url }}
+          PR_OPERATION: ${{ steps.pr.outputs.pull-request-operation }}
+        run: |
+          if [ "$READY" != "true" ]; then
+            message="No registry entry was proposed on this run. The issue comment explains why: either an approval is still outstanding, or the issue needs correcting."
+          elif [ -n "$PR_URL" ]; then
+            message="Pull request ${PR_OPERATION:-ready} for $PRODUCT_REPO ($PR_URL)"
+          else
+            message="$PRODUCT_REPO was already recorded in the registry with these details, so there was nothing to propose."
+          fi
+          echo "$message"
+          echo "$message" >> "$GITHUB_STEP_SUMMARY"
