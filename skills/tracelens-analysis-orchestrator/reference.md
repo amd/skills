@@ -10,7 +10,7 @@ This document is the detailed specification for the TraceLens **analysis-orchest
 
 ## Workflow overview
 
-The orchestrator runs a staged pipeline (Steps 0–11): collect inputs and environment prefix, generate perf reports, prepare category data via `orchestrator_prepare.py`, run system-level and compute-kernel subagents in parallel, aggregate and validate findings, identify the model, render plots when no extension is present, and write `analysis.md` via remote `tee` heredocs. Only Steps 6, 7, and 9 delegate to Task subagents; all other steps run in the main agent.
+The orchestrator runs a staged pipeline (Steps 0–12): collect inputs and environment prefix, generate perf reports, prepare category data via `orchestrator_prepare.py`, run system-level and compute-kernel subagents in parallel, aggregate and validate findings, identify the model, render plots when no extension is present, and write `analysis.md` via remote `tee` heredocs. Only Steps 7, 8, and 10 delegate to Task subagents; all other steps run in the main agent.
 
 ---
 
@@ -27,18 +27,19 @@ Use vendor-agnostic terminology throughout such as GPU kernels, collective commu
 ```
 0. Query User Inputs (Platform, Trace Path(s), Analysis Mode, Environment Setup)
 1. Generate Performance Report (branches on analysis mode: training vs inference then, comparison scope)
-2-5. Prepare Category Data (GPU Util, Top Ops, Tree Data, Multi-Kernel Data, Category Filtering)
-6. System-Level Analysis (PARALLEL, CPU/Idle + Kernel Fusion + Multi-Kernel) → system_findings/
-7. Invoke Compute Kernel Subagents (PARALLEL, read category_findings[] from _metrics.json) → category_findings/
-   7.5. Aggregate per-category category_findings[] → priority_data.json::findings[] (globally sorted)
-8. Validate Subagent Outputs (system_findings/ + category_findings/)
-9. Prepare Report Data (load_findings) + Model Identification (subagent) → metadata/model_info.json
-10. Render performance PNG IF agent_extension.py is absent
-11. Generate Final Report (composable System + Compute sections), validate it,
+2. Trace-Quality Gate (deterministic fallback branch for graph-under-recorded traces)
+3-6. Prepare Category Data (GPU Util, Top Ops, Tree Data, Multi-Kernel Data, Category Filtering)
+7. System-Level Analysis (PARALLEL, CPU/Idle + Kernel Fusion + Multi-Kernel) → system_findings/
+8. Invoke Compute Kernel Subagents (PARALLEL, read category_findings[] from _metrics.json) → category_findings/
+   8.5. Aggregate per-category category_findings[] → priority_data.json::findings[] (globally sorted)
+9. Validate Subagent Outputs (system_findings/ + category_findings/)
+10. Prepare Report Data (load_findings) + Model Identification (subagent) → metadata/model_info.json
+11. Render performance PNG IF agent_extension.py is absent
+12. Generate Final Report (composable System + Compute sections), validate it,
     optionally invoke agent_extension.py (when present), then embed the PNG into the report.
 ```
 
-**Subagent usage:** Only invoke Task subagents in steps that explicitly say "subagent" (Steps 6, 7, 9). All other steps (including Step 7.5) must be performed directly by the orchestrator using the command prefix.
+**Subagent usage:** Only invoke Task subagents in steps that explicitly say "subagent" (Steps 7, 8, 10). All other steps (including Step 8.5) must be performed directly by the orchestrator using the command prefix.
 
 ---
 
@@ -255,7 +256,37 @@ All commands below append `<suffix_1>` and `<suffix_2>`, resolved by `<compariso
 
 ---
 
-## Steps 2-5: Prepare Category Data
+## Step 2: Trace-Quality Gate
+
+
+`<unified_perf_csv>` is `<output_dir>/perf_report_csvs/unified_perf_summary.csv` (`standalone`) or `<output_dir>/perf_report_trace1_csvs/unified_perf_summary.csv` (`comparative`, primary trace).
+
+```bash
+<prefix> python3 -c \"
+from TraceLens.Agent.Analysis.utils import check_graph_replay_coverage
+coverage = check_graph_replay_coverage(<unified_perf_csv>)
+status = 'GRAPH_UNDER_RECORDED' if coverage.graph_under_recorded else 'OK'
+print(f'STATUS={status}')
+print(f'GRAPH_REPLAY_FRACTION={coverage.graph_replay_fraction}')
+" 
+```
+<graph_replay_fraction> refers to the returned GRAPH_REPLAY_FRACTION value.
+
+**`STATUS=OK`:** Proceed
+**`STATUS=GRAPH_UNDER_RECORDED`:**
+1. Emit `[DIAG:trace_quality:GRAPH_UNDER_RECORDED]`: Deterministic fallback report
+2. Run the deterministic fallback writer on `<unified_perf_csv>`:
+   ```bash
+   <prefix> python3 -m TraceLens.Agent.Analysis.utils.deterministic_fallback \
+     --unified-perf-csv '<unified_perf_csv>' \
+     --output-dir '<output_dir>' \ 
+     --graph-replay-fraction <graph_replay_fraction>
+   ```
+3. **Skip Steps 3-12.** The writer already produced `<output_dir>/analysis.md`
+
+---
+
+## Steps 3-6: Prepare Category Data
 
 Execute the TraceLens Agentic Mode orchestrator preparation script:
 
@@ -269,11 +300,11 @@ Execute the TraceLens Agentic Mode orchestrator preparation script:
 ```
 
 This script performs:
-- **Step 2:** Assess GPU utilization (computation, idle, communication times)
-- **Step 3:** Identify top 10 operations by GPU time
-- **Step 4:** Pre-compute tree data for bottleneck operations (load trace ONCE)
-- **Step 4.5:** Pre-compute multi-kernel issue data (memcpy by direction, NCCL events, overlap metrics)
-- **Step 5:** Filter and export category-specific data
+- **Step 3:** Assess GPU utilization (computation, idle, communication times)
+- **Step 4:** Identify top 10 operations by GPU time
+- **Step 5:** Pre-compute tree data for bottleneck operations (load trace ONCE)
+- **Step 5.5:** Pre-compute multi-kernel issue data (memcpy by direction, NCCL events, overlap metrics)
+- **Step 6:** Filter and export category-specific data
 
 **Outputs:**
 - `category_data/<category>_ops.csv` - Filtered operations per category
@@ -285,13 +316,13 @@ This script performs:
 
 ---
 
-## Step 6: System-Level Analysis (PARALLEL)
+## Step 7: System-Level Analysis (PARALLEL)
 
 System-level analysis examines issues that affect the GPU pipeline as a whole -- idle time, memory transfer patterns, and communication/compute overlap. These are **not** about individual kernel efficiency.
 
 **Output directory:** `system_findings/`
 
-### 6.1 Read Manifest and Identify System-Level Subagents
+### 7.1 Read Manifest and Identify System-Level Subagents
 
 ```bash
 <prefix> python3 -c \"
@@ -301,9 +332,9 @@ load_manifest_categories(sys.argv[1])
 \" '<output_dir>'"
 ```
 
-This prints `system_categories` and `compute_categories` lists. Use `system_categories` for Step 6 and `compute_categories` for Step 7.
+This prints `system_categories` and `compute_categories` lists. Use `system_categories` for Step 7 and `compute_categories` for Step 8.
 
-### 6.2 Launch System-Level Subagents in PARALLEL
+### 7.2 Launch System-Level Subagents in PARALLEL
 
 Launch system-level sub-agents simultaneously using the Task tool. Do NOT wait between invocations.
 
@@ -347,12 +378,12 @@ Execute every step in the agent file. Return "DONE" when complete.
 3. Reading the metrics JSON output
 4. Identifying issues and generating findings
 
-### 6.3 Wait for System-Level Subagents to Complete
+### 7.3 Wait for System-Level Subagents to Complete
 
-The three subagents must complete before proceeding to Step 6.4.
+The three subagents must complete before proceeding to Step 7.4.
 Each writes findings to `system_findings/<name>_findings.md`.
 
-### 6.4 Verify System Outputs and Retry Failures (up to 1 retry per subagent)
+### 7.4 Verify System Outputs and Retry Failures (up to 1 retry per subagent)
 
 After all system-level subagents complete:
 
@@ -360,25 +391,25 @@ After all system-level subagents complete:
    - Does `system_findings/<category>_findings.md` exist?
    - If it exists, does it contain "Status: ERROR"?
 2. Collect a list of **failed** categories (missing file OR Status: ERROR).
-3. **Retry each failed category exactly once** by re-launching its subagent with the same prompt from Step 6.2. Wait for all retries to complete before proceeding.
+3. **Retry each failed category exactly once** by re-launching its subagent with the same prompt from Step 7.2. Wait for all retries to complete before proceeding.
 4. After retries, re-check outputs. Any category that still fails is excluded from aggregation.
 5. **CRITICAL: Do NOT attempt manual analysis of failed system checks — only automated subagent retry is allowed.**
 
 ---
 
-## Step 7: Invoke Compute Kernel Subagents (PARALLEL)
+## Step 8: Invoke Compute Kernel Subagents (PARALLEL)
 
 Compute kernel analysis examines individual operation category efficiency.
 
 **Output directory:** `category_findings/`
 
-### 7.1 Read Manifest and Identify Compute Kernel Categories
+### 8.1 Read Manifest and Identify Compute Kernel Categories
 
-Use `compute_categories` from the `load_manifest_categories()` call in Step 6.1.
+Use `compute_categories` from the `load_manifest_categories()` call in Step 7.1.
 
-### 7.2 Launch Compute Kernel Subagents in PARALLEL
+### 8.2 Launch Compute Kernel Subagents in PARALLEL
 
-For each entry in `compute_categories` (loaded in Step 6.1), resolve `{agent_file}` as `{entry.skill}.md` and launch a subagent with agent file `TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/{agent_file}`. Fall back to `generic-op-analyzer.md` if the file is absent.
+For each entry in `compute_categories` (loaded in Step 7.1), resolve `{agent_file}` as `{entry.skill}.md` and launch a subagent with agent file `TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/{agent_file}`. Fall back to `generic-op-analyzer.md` if the file is absent.
 
 Launch all subagents simultaneously in a single parallel batch.
 
@@ -435,12 +466,12 @@ Read and follow the FULL instructions in:
 Execute every step in the agent file. Return "DONE" when complete.
 ```
 
-### 7.3 Wait for All Compute Kernel Subagents to Complete
+### 8.3 Wait for All Compute Kernel Subagents to Complete
 
-All subagents must complete before proceeding to Step 7.4.
+All subagents must complete before proceeding to Step 8.4.
 Each subagent writes its findings to `category_findings/<category>_findings.md`.
 
-### 7.4 Verify Outputs and Retry Failures (up to 1 retry per subagent)
+### 8.4 Verify Outputs and Retry Failures (up to 1 retry per subagent)
 
 After all compute kernel subagents complete:
 
@@ -448,11 +479,11 @@ After all compute kernel subagents complete:
    - Does `category_findings/<category>_findings.md` exist?
    - If it exists, does it contain "Status: ERROR"?
 2. Collect a list of **failed** categories (missing file OR Status: ERROR).
-3. **Retry each failed category exactly once** by re-launching its subagent with the same prompt structure from Step 7.2. Launch all retries in parallel and wait for completion.
+3. **Retry each failed category exactly once** by re-launching its subagent with the same prompt structure from Step 8.2. Launch all retries in parallel and wait for completion.
 4. After retries, re-check outputs. Any category that still fails is excluded from aggregation and recommendations.
 5. **CRITICAL: Do NOT attempt to manually analyze failed categories — only automated subagent retry is allowed.**
 
-### 7.5 Aggregate findings → priority_data.json
+### 8.5 Aggregate findings → priority_data.json
 
 After all compute sub-agent `_metrics.json` files exist (each carrying its own `category_findings[]`), concatenate them into a globally-sorted `priority_data.json::findings[]` for the report template.
 
@@ -466,7 +497,7 @@ generate_priority_data(sys.argv[1])
 
 ---
 
-## Step 8: Validate Subagent Outputs
+## Step 9: Validate Subagent Outputs
 
 Before aggregating results, validate outputs from **both** tiers (system_findings/ and category_findings/).
 
@@ -486,7 +517,7 @@ This runs four checks:
 
 ---
 
-## Step 9: Prepare Report Data + Model Identification
+## Step 10: Prepare Report Data + Model Identification
 
 ```bash
 <prefix> python3 -c \"
@@ -496,7 +527,7 @@ load_findings(sys.argv[1])
 \" '<output_dir>'"
 ```
 
-### 9.1 Model Identification (Subagent, retry once on failure)
+### 10.1 Model Identification (Subagent, retry once on failure)
 
 Launch a Task subagent (generalPurpose) that reads and follows `TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/model-identification-agent.md` with context: <output_dir>. Wait for completion.
 
@@ -508,12 +539,12 @@ Assign <Model> to model value in `<output_dir>/metadata/model_info.json` or "Wor
 
 ---
 
-## Step 10: Render Plot (conditional)
+## Step 11: Render Plot (conditional)
 
-**Important:** Plot data is sourced from `priority_data.json` (written in Step 7.5). This step only renders the PNG when `agent_extension.py` is absent.
+**Important:** Plot data is sourced from `priority_data.json` (written in Step 8.5). This step only renders the PNG when `agent_extension.py` is absent.
 Look at the environment variable TL_EXTENSION to find python packages and directories to recursively search for `agent_extension.py`.
 If this environment variable is not present or the it is not found look in TraceLens/Agent/Analysis/utils/.
-If the file is present, **skip this step** — Step 11.2 will produce `perf_improvement.png` and Step 11.3 will embed it.
+If the file is present, **skip this step** — Step 12.2 will produce `perf_improvement.png` and Step 12.3 will embed it.
 Use <agent_extension_file> to represent the location of this file.
 
 ```bash
@@ -527,13 +558,13 @@ generate_perf_plot(sys.argv[1], sys.argv[2])
 fi
 ```
 
-If the plot fails (extension-absent branch), retry once. If still failing, proceed to Step 11 without the plot.
+If the plot fails (extension-absent branch), retry once. If still failing, proceed to Step 12 without the plot.
 
 ---
 
-## Step 11: Generate Final Report (<output_dir>/analysis.md)
+## Step 12: Generate Final Report (<output_dir>/analysis.md)
 
-**CRITICAL: Do NOT delegate Step 11 to a Task subagent.** The orchestrator must write the report directly.
+**CRITICAL: Do NOT delegate Step 12 to a Task subagent.** The orchestrator must write the report directly.
 
 1. **Read** the report template: `TraceLens/Agent/Analysis/skills/analysis-orchestrator/templates/analysis_template.md`
 2. **Write the report in sections** to `<output_dir>/analysis.md` using **only** `<prefix> tee` / `<prefix> tee -a` with single-quoted heredoc delimiters (see write order below). You MUST NOT use the IDE Write tool, Edit tool, StrReplace tool, `cat >`, `echo >`, `>>` redirect, or any other write method for `analysis.md` unless tee fails.
@@ -574,7 +605,7 @@ The report at `<output_dir>/analysis.md` must use these exact `##` headers — d
 6. `## Appendix`
 
 
-### 11.1 Validate Report Structure (Retry up to 2x)
+### 12.1 Validate Report Structure (Retry up to 2x)
 
 After writing `analysis.md`, validate that the report contains all required `##` section headers. If validation fails, modify the report with the missing sections.
 
@@ -610,11 +641,11 @@ h. For priority-consistency errors (R1 P-item count mismatch, R2 P-item category
 
 ---
 
-### 11.2 Optional extension (auto-detected)
+### 12.2 Optional extension (auto-detected)
 
 If `<agent_extension_file>` exists, run it as shown below. Its behavior is documented in the extension itself; the orchestrator does not need to inspect or reason about it.
 
-If the file is absent, skip this step silently. The analysis is complete; the simple plot from Step 10 stays in place.
+If the file is absent, skip this step silently. The analysis is complete; the simple plot from Step 11 stays in place.
 
 ```bash
 EXT='<agent_extension_file>'
@@ -629,9 +660,9 @@ This step is a hook for an optional extension; if `agent_extension.py` is not pr
 
 ---
 
-### 11.3 Embed Performance Improvement Plot
+### 12.3 Embed Performance Improvement Plot
 
-The PNG (`perf_improvement.png`) is already on disk from either Step 10.3 or Step 11.2 (whichever ran). This step only embeds its base64 sidecar into the report at the `{{PERF_PLOT}}` placeholder.
+The PNG (`perf_improvement.png`) is already on disk from either Step 11 or Step 12.2 (whichever ran). This step only embeds its base64 sidecar into the report at the `{{PERF_PLOT}}` placeholder.
 
 ```bash
 <prefix> python3 -c \"
@@ -646,7 +677,7 @@ If the plot is skipped, the `{{PERF_PLOT}}` placeholder is removed so the report
 
 ## Trace Feature Detection
 
-If Steps 1 or many of Steps 2-5 fail or produce unexpected results, check whether the trace uses the following features before retrying:
+If Steps 1 or many of Steps 3-6 fail or produce unexpected results, check whether the trace uses the following features before retrying:
 - **GPU Graph Replay**: raw trace JSON contains `hipGraphLaunch` or `cudaGraphLaunch`.
   - **Default mode** (analysis_mode = `default`): Inform the user with `[DIAG:trace_quality:GPU_GRAPH_REPLAY]` that GPU graph replay was detected and that the default analysis mode supports typical PyTorch traces. **Abort** -- do not retry or continue.
   - **Inference mode** (analysis_mode = `inference`): Graph launches are expected and supported if graph capture folder is provided, do not abort. If inference_exec_mode is `eager` (no capture folder was provided), continue.
