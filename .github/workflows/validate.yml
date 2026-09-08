@@ -88,6 +88,24 @@ jobs:
       - name: Test the eval runner
         run: uv run --with pyyaml python eval/test_evals.py
 
+  # The serving recipe cache controls model compatibility and the container
+  # image agents deploy. Exercise its fail-closed freshness and immutable-image
+  # selection without making network requests.
+  test-serving-recipe-cache:
+    name: Test serving recipe cache
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Test recipe cache
+        run: >-
+          uv run --with pyyaml python -m unittest discover
+          -s skills/serving-llms-on-instinct/scripts/tests -v
+
   # Repo-wide checks that aren't tied to a single skill: the generated plugin
   # manifests and internal markdown references.
   validate-manifests:
