@@ -1,5 +1,18 @@
 name: validate
 
+# Repo-wide checks that are this catalog's own business: the federation file and
+# the generated plugin manifests.
+#
+# Whether a *skill* is well formed is not here. Frontmatter, `name` rules,
+# description and body length, the governance card, the eval dataset, and the
+# references our markdown makes are all checked by skillscope, configured in
+# .github/workflows/evals.yml -- the same graders every repo that keeps skills
+# in a tree runs. Duplicating them here would be a second implementation to
+# keep in step, which is the drift that moving the harness out was meant to end.
+#
+# What is left needs a manifest, and skillscope reads none: which skills this
+# catalog publishes, and where it lists them, is ours to check.
+
 on:
   push:
     branches: [main]
@@ -7,89 +20,16 @@ on:
     paths:
       - ".github/scripts/**"
       - ".github/federation.json"
-      - "**/*.md"
       - "skills/**"
-      - "eval/**"
       - "plugin-metadata.json"
       - ".claude-plugin/**"
       - ".cursor-plugin/**"
       - ".codex-plugin/**"
       - ".agents/plugins/**"
       - ".github/workflows/validate.yml"
-      - ".github/lychee.toml"
   workflow_dispatch:
 
 jobs:
-  # Enumerate the skills so the validation job can fan out over them with a
-  # matrix. Running each skill in its own job (with fail-fast disabled) means
-  # one broken skill shows up as a single red check instead of failing the
-  # whole suite and hiding the status of every other skill.
-  discover-skills:
-    name: Discover skills
-    runs-on: ubuntu-latest
-    outputs:
-      skills: ${{ steps.discover.outputs.skills }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: List skills
-        id: discover
-        run: echo "skills=$(uv run .github/scripts/validate_skills.py --list)" >> "$GITHUB_OUTPUT"
-
-  validate-skill:
-    name: Validate skill
-    needs: discover-skills
-    runs-on: ubuntu-latest
-    strategy:
-      # Don't cancel the other skills when one fails; we want to see every
-      # skill's status in a single run.
-      fail-fast: false
-      matrix:
-        skill: ${{ fromJson(needs.discover-skills.outputs.skills) }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Validate skill
-        run: uv run .github/scripts/validate_skills.py --skill "${{ matrix.skill }}"
-
-  # Eval datasets are structural too: they have a schema, a required coverage
-  # bar, and repo-wide unique case ids. Checking them here means a malformed
-  # dataset or a skill with no tests fails in seconds on a free runner, rather
-  # than partway through a run that spends real tokens.
-  validate-evals:
-    name: Validate eval datasets
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-
-      # Structure, Tier 0 coverage, repo-wide unique ids, staged workspaces.
-      - name: Validate datasets
-        run: python eval/run_evals.py --validate
-
-      # Guards the machinery itself, including that the JSON Schema still
-      # matches what the parser enforces.
-      - name: Test the eval runner
-        run: uv run --with pyyaml python eval/test_evals.py
-
-  # Repo-wide checks that aren't tied to a single skill: the generated plugin
-  # manifests and internal markdown references.
   validate-manifests:
     name: Validate plugin manifests
     runs-on: ubuntu-latest
@@ -112,7 +52,7 @@ jobs:
         run: uv run .github/scripts/test_federate_skills.py
 
       - name: Validate marketplace manifest
-        run: uv run .github/scripts/validate_skills.py --marketplace-only
+        run: uv run .github/scripts/validate_marketplace.py
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -131,36 +71,20 @@ jobs:
       - name: Validate generated Codex manifests
         run: uv run .github/scripts/generate_codex_plugin.py --check
 
-      # Deterministic, offline-only reference check: relative paths and
-      # heading anchors. External URLs are intentionally not checked here
-      # because their failure modes are flaky; see
-      # `.github/workflows/external-reference-check.yml` for that.
-      - name: Check internal references and anchors
-        uses: lycheeverse/lychee-action@v2
-        with:
-          args: --config .github/lychee.toml --offline --include-fragments --no-progress "./**/*.md"
-          fail: true
-
-  # Single gate that aggregates the per-skill matrix and the repo-wide manifest
-  # checks. Branch protection can require just this one check: it only passes
-  # when every skill validated and the manifest job succeeded. Because matrix
-  # jobs always succeed individually under `fail-fast: false`, we inspect the
-  # job results explicitly rather than relying on `needs` short-circuiting.
+  # Single gate, so branch protection can require one check from this workflow.
+  # Kept as its own job even with one dependency: the required check's name
+  # stays put when a job is added beside it.
   validate:
-    name: Validate skills and plugin manifests
-    needs: [validate-skill, validate-evals, validate-manifests]
+    name: Validate plugin manifests and federation
+    needs: [validate-manifests]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Verify all validation jobs passed
         run: |
-          echo "validate-skill result: ${{ needs.validate-skill.result }}"
-          echo "validate-evals result: ${{ needs.validate-evals.result }}"
           echo "validate-manifests result: ${{ needs.validate-manifests.result }}"
-          if [ "${{ needs.validate-skill.result }}" != "success" ] || \
-             [ "${{ needs.validate-evals.result }}" != "success" ] || \
-             [ "${{ needs.validate-manifests.result }}" != "success" ]; then
+          if [ "${{ needs.validate-manifests.result }}" != "success" ]; then
             echo "One or more validation jobs failed." >&2
             exit 1
           fi
-          echo "All skill, eval, and manifest validations passed."
+          echo "All manifest and federation validations passed."

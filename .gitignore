@@ -9,8 +9,8 @@ __pycache__/
 # uv
 .uv-cache/
 
-# Eval run artifacts (JSON reports and kept transcripts)
-eval/runs/
+# Eval run artifacts (JSON reports and kept transcripts), written by skillscope
+.skillscope/
 
 # Sphinx docs: _toc.yml is generated from _toc.yml.in at build time
 docs/rocm-docs/sphinx/_toc.yml
