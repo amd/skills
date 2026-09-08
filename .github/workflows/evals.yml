@@ -157,7 +157,7 @@ jobs:
       # reason to hold a merge. The weekly schedule above is what catches rot
       # in markdown nobody is editing.
       external_references: true
-      excluded_urls: '^https://openai\.com/codex/?$'
+      excluded_urls: '^https://openai\.com/codex/?$,^https://www\.amd\.com/en/resources/product-security\.html$'
 
       # AMD's internal gateway. The key is named rather than passed, and
       # `$API_KEY` in the headers is replaced with it, so a gateway that wants
