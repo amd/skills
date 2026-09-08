@@ -123,11 +123,11 @@ Keep prompts and expectations in the dataset even when you use hooks, so what is
 
 ### Running tests locally
 
-Install the harness once, at the version CI grades this repo with (the
-`version:` input in [`.github/workflows/evals.yml`](../.github/workflows/evals.yml)):
+Install the harness once, at the version CI grades this repo with — the `uses:`
+ref in [`.github/workflows/evals.yml`](../.github/workflows/evals.yml):
 
 ```bash
-uv tool install --system-certs git+https://github.com/amd/skillscope@v0.1.0
+uv tool install --system-certs git+https://github.com/amd/skillscope@v0.1.1
 ```
 
 Then, from the repo root:

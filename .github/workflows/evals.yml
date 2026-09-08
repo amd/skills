@@ -75,7 +75,11 @@ permissions:
 jobs:
   # Mark the `results` check this produces as required in branch protection.
   evals:
-    uses: amd/skillscope/.github/workflows/skill-evals.yml@v0.1.0
+    # This pin is the harness. Each job in the called workflow checks skillscope
+    # out at the commit this ref names and runs it from there, so bumping the
+    # line below is the whole of upgrading -- there is no second version to keep
+    # in step with it.
+    uses: amd/skillscope/.github/workflows/skill-evals.yml@v0.1.1
     # By name, not by value: the Instinct legs read a secret scoped to the
     # `behavioral-instinct` environment, and an environment's secrets are
     # readable only inside the job that declares it.
@@ -129,11 +133,6 @@ jobs:
 
       # --- this run --------------------------------------------------------
       #
-      # The build of the harness that grades this repo. A skill may pin its own
-      # in `skillscope_version` in its evals.json, next to the prompts it
-      # affects; leaving this set means the repo decides instead.
-      version: v0.1.0
-
       # `references` runs the structural and external checks and skips the
       # graded ones, which is all the weekly schedule is here for: a cron that
       # quietly re-ran every skill against a real agent would be a standing
