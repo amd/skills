@@ -110,10 +110,10 @@ repo by calling them as reusable workflows, so you catch breakage during normal
 development instead of in the catalog's nightly run. You never copy or maintain
 a check yourself, and green in your repo means green in the catalog.
 
-The skill checks — structure, routing, and behavior — are
-[skillscope](https://github.com/amd/skillscope), which grades a skill wherever
-it lives. Point it at your skill folder and it reads the same
-`evals/evals.json` this catalog does:
+Every check the catalog runs is [skillscope](https://github.com/amd/skillscope),
+which grades a skill wherever it lives — structure, the references your
+markdown makes, routing, and behavior. Point it at your skill folder and it
+reads the same `evals/evals.json` this catalog does:
 
 ```yaml
 name: skills-checks
@@ -127,17 +127,12 @@ jobs:
       api_key: ${{ secrets.ANTHROPIC_API_KEY }}
     with:
       skills: path/to/your/skill
-
-  external-references:
-    uses: amd/skills/.github/workflows/external-reference-check.yml@main
-    permissions:
-      contents: read
-      issues: write
 ```
 
 Skillscope's [usage guide](https://github.com/amd/skillscope/blob/main/docs/usage.md)
 covers the rest: holding a check to `optional` while you get a bar green, GPU
-runners, and pooling several skills into one routing run.
+runners, pooling several skills into one routing run, and fetching external
+URLs on a schedule to catch link rot.
 
 ## Update or remove
 

@@ -1,10 +1,12 @@
 name: evals
 
 # Structural, routing, and behavioral testing for every skill in this catalog,
-# run by skillscope (https://github.com/amd/skillscope). The harness used to
-# live here, under eval/ and .github/scripts/select_evals.py; it moved out so
-# other repos could run the same graders against their own skills, and what is
-# left is the half that was always specific to amd/skills -- which skills are
+# plus the references our markdown makes, run by skillscope
+# (https://github.com/amd/skillscope). The harness used to live here, under
+# eval/ and .github/scripts/select_evals.py, with the reference half in
+# external-reference-check.yml and .github/lychee.toml; it moved out so other
+# repos could run the same graders against their own skills, and what is left
+# is the half that was always specific to amd/skills -- which skills are
 # published, which runners we own, and whose key pays for a run.
 #
 # The `with:` block below is the whole configuration. Everything skillscope
@@ -38,12 +40,17 @@ on:
       # The structural checks resolve every reference our prose makes, so the
       # prose is an input too. Free to check, and cheap to be wrong about.
       - "**/*.md"
+  # Catches external link rot in markdown nobody is editing. Runs the free
+  # checks only -- see `mode` below -- so a quiet week costs one ubuntu runner.
+  schedule:
+    # Mondays at 12:00 UTC.
+    - cron: "0 12 * * 1"
   workflow_dispatch:
     inputs:
       mode:
         description: "Which grader to run."
         type: choice
-        options: [both, routing, behavioral]
+        options: [both, routing, behavioral, references]
         default: both
       skills:
         description: "Comma-separated skill names (blank = every skill with a dataset)."
@@ -127,7 +134,11 @@ jobs:
       # affects; leaving this set means the repo decides instead.
       version: v0.1.0
 
-      mode: ${{ inputs.mode || 'both' }}
+      # `references` runs the structural and external checks and skips the
+      # graded ones, which is all the weekly schedule is here for: a cron that
+      # quietly re-ran every skill against a real agent would be a standing
+      # bill nobody asked for.
+      mode: ${{ github.event_name == 'schedule' && 'references' || inputs.mode || 'both' }}
       skills: ${{ inputs.skills }}
       only: ${{ inputs.only }}
 
@@ -141,9 +152,13 @@ jobs:
       # Extended datasets are still checked structurally.
       extended: false
 
-      # External URLs are checked by external-reference-check.yml instead,
-      # which also files an issue when a schedule catches rot.
-      external_references: false
+      # Fetch every external URL our markdown links to, in a job of its own
+      # that the aggregate `results` check ignores. Leave it out of branch
+      # protection: a rate limit or a runner IP some host blocks is not a
+      # reason to hold a merge. The weekly schedule above is what catches rot
+      # in markdown nobody is editing.
+      external_references: true
+      excluded_urls: '^https://openai\.com/codex/?$'
 
       # AMD's internal gateway. The key is named rather than passed, and
       # `$API_KEY` in the headers is replaced with it, so a gateway that wants
