@@ -1,32 +1,29 @@
 name: evals
 
-# One workflow for both halves of "does this skill work?", reading the same
-# per-skill datasets at skills/<name>/evals/evals.json:
+# Structural, routing, and behavioral testing for every skill in this catalog,
+# plus the references our markdown makes, run by skillscope
+# (https://github.com/amd/skillscope). The harness used to live here, under
+# eval/ and .github/scripts/select_evals.py, with the reference half in
+# external-reference-check.yml and .github/lychee.toml; it moved out so other
+# repos could run the same graders against their own skills, and what is left
+# is the half that was always specific to amd/skills -- which skills are
+# published, which runners we own, and whose key pays for a run.
 #
-#   * routing  -- installs every skill at once and checks that each prompt
-#     activates the skill it should, and that the ones which should activate
-#     nothing don't. Catalog-wide by nature: a skill tested alone will happily
-#     answer prompts that belong to its neighbour. Cheap, because each case is
-#     killed the moment the routing decision is observable.
-#   * behavior -- installs one skill, runs the prompt to completion, and grades
-#     what the agent actually did.
+# The `with:` block below is the whole configuration. Everything skillscope
+# needs to know about this repo is an input here, so there is no second file to
+# keep in step:
 #
-# Selective: routing runs only when a change can move a routing decision (a
-# SKILL.md description or a dataset), and behavior runs only for the skills a
-# change touches. The whole suite runs when the shared engine changes.
+#   * routing_room  -- the published bundle, installed side by side.
+#   * behavior_*    -- the everyday Strix Halo pool, on both platforms.
+#   * scoped_*      -- the Instinct pool: its own labels, its own gate label,
+#                      its own credentials. A skill asks for that hardware in
+#                      its evals/machine.yml; this file says what it costs.
+#   * api_*         -- AMD's internal LLM gateway, named by secret rather than
+#                      value so the called workflow never learns either.
 #
-# A skill may also ship evals/extended_evals.json, in the same format and with
-# no coverage requirement of its own. Whether those prompts run is the
-# RUN_EXTENDED_EVALS knob below; the required evals.json always runs.
-#
-# Which class of machine a skill's behavior job needs is declared by the skill,
-# in skills/<name>/evals/machine.yml, and resolved to labels, gates, and
-# credentials by eval/datasets.py. Nothing here names a skill: a hardcoded list
-# of which skills need which runner lives in the wrong place and drifts from
-# reality the first time a skill is added.
-#
-# Shape mirrors validate.yml: discover -> matrix -> single aggregate gate, so
-# branch protection can require just the `evals` check.
+# Selection is still by change: routing runs only when a change can move a
+# routing decision, and a behavioral leg runs only for the skills a change
+# touches. `skillscope select` makes that call, so it can be re-run by hand.
 
 on:
   pull_request:
@@ -36,18 +33,24 @@ on:
     types: [opened, synchronize, reopened, labeled]
     paths:
       - "skills/**"
-      - "eval/**"
+      # This file holds the routing room, the runner topology, and the harness
+      # pin, so a change to it can move any result. It is passed as an infra
+      # path below for the same reason.
       - ".github/workflows/evals.yml"
-      - ".github/scripts/select_evals.py"
-      # Publishing a skill changes what routing installs, so the bundle is an
-      # input to this workflow even when no skill file changed.
-      - ".claude-plugin/marketplace.json"
+      # The structural checks resolve every reference our prose makes, so the
+      # prose is an input too. Free to check, and cheap to be wrong about.
+      - "**/*.md"
+  # Catches external link rot in markdown nobody is editing. Runs the free
+  # checks only -- see `mode` below -- so a quiet week costs one ubuntu runner.
+  schedule:
+    # Mondays at 12:00 UTC.
+    - cron: "0 12 * * 1"
   workflow_dispatch:
     inputs:
       mode:
         description: "Which grader to run."
         type: choice
-        options: [both, routing, behavior]
+        options: [both, routing, behavioral, references]
         default: both
       skills:
         description: "Comma-separated skill names (blank = every skill with a dataset)."
@@ -69,333 +72,101 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  # Whether a skill's optional skills/<name>/evals/extended_evals.json is run
-  # alongside the required evals.json. Off here: this catalog grades the
-  # required dataset only, and a product repo's extra prompts are that repo's
-  # bill to pay. A repo vendoring this harness sets this to "true" -- which is
-  # also what eval/run_evals.py does when nobody passes the flag. Either way
-  # extended datasets are still structurally validated.
-  RUN_EXTENDED_EVALS: "false"
-
 jobs:
-  # Secret-free: structural validation, the engine's own unit tests, and a git
-  # diff. All three are free and fast, so a malformed dataset or a broken
-  # runner fails here rather than halfway through a paid run.
-  discover:
-    name: Validate datasets and select runs
-    runs-on: ubuntu-latest
-    outputs:
-      routing: ${{ steps.select.outputs.routing }}
-      # The runner flag, resolved once here so selection and every run job
-      # agree on whether extended datasets are in play.
-      extended: ${{ steps.select.outputs.extended }}
-      default: ${{ steps.select.outputs.default }}
-      default_any: ${{ steps.select.outputs.default_any }}
-      scoped: ${{ steps.select.outputs.scoped }}
-      scoped_any: ${{ steps.select.outputs.scoped_any }}
-      skipped: ${{ steps.select.outputs.skipped }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          # Need the merge base so `git diff` can see what the PR changed.
-          fetch-depth: 0
+  # Mark the `results` check this produces as required in branch protection.
+  evals:
+    # This pin is the harness. Each job in the called workflow checks skillscope
+    # out at the commit this ref names and runs it from there, so bumping the
+    # line below is the whole of upgrading -- there is no second version to keep
+    # in step with it.
+    uses: amd/skillscope/.github/workflows/skill-evals.yml@v0.1.1
+    # By name, not by value: the Instinct legs read a secret scoped to the
+    # `behavioral-instinct` environment, and an environment's secrets are
+    # readable only inside the job that declares it.
+    secrets: inherit
+    with:
+      # --- what this repo looks like ---------------------------------------
+      skill_globs: skills/*
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      # The published bundle, in the order .claude-plugin/marketplace.json
+      # lists it. Listed rather than read from the manifest, because who a
+      # skill competes against is what its score means: adding a name here
+      # moves every other skill's number, and that deserves a visible diff.
+      # Publishing a skill means adding it in both places.
+      routing_room: "local-ai-use,local-ai-app-integration,serving-llms-on-instinct,tracelens-analysis-orchestrator,hyperloom-workload-optimizer"
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
+      # A change to this file is a change to the harness as far as this repo is
+      # concerned, so it re-runs every skill rather than whatever the diff
+      # happened to touch.
+      infra_paths: .github/workflows/evals.yml
 
-      # Also enforced by validate.yml, which is the always-on structural gate.
-      # Repeated here so an expensive run never starts against a broken
-      # dataset, whatever order the two workflows happen to be scheduled in.
-      - name: Validate every eval dataset
-        run: python eval/run_evals.py --validate
+      # Prose outside the skills whose references are checked too. The skills'
+      # own markdown is always checked; this adds the catalog's documentation,
+      # its walkthroughs, and the skills still in staging.
+      doc_globs: "*.md,docs/**/*.md,walkthroughs/*.md,staging/**/*.md"
 
-      - name: Select what to run
-        id: select
-        shell: bash
-        env:
-          EVENT: ${{ github.event_name }}
-          SKILLS: ${{ github.event.inputs.skills }}
-          MODE: ${{ github.event.inputs.mode }}
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-        run: |
-          set -euo pipefail
-          # The harness default is on, so only an explicit "false" turns it off.
-          if [ "${RUN_EXTENDED_EVALS:-true}" = "false" ]; then
-            extended=--no-extended
-          else
-            extended=--extended
-          fi
-          if [ "$EVENT" = "workflow_dispatch" ]; then
-            # A dispatch is already explicit human intent, so gate labels are
-            # not required on top of it.
-            if [ -n "$SKILLS" ]; then
-              plan=$(uv run .github/scripts/select_evals.py --names "$SKILLS" --ignore-gates "$extended")
-            else
-              plan=$(uv run .github/scripts/select_evals.py --all --ignore-gates "$extended")
-            fi
-            if [ "$MODE" = "behavior" ]; then
-              plan=$(printf '%s' "$plan" | python3 -c \
-                "import sys,json;p=json.load(sys.stdin);p['routing']=False;print(json.dumps(p))")
-            elif [ "$MODE" = "routing" ]; then
-              plan=$(printf '%s' "$plan" | python3 -c \
-                "import sys,json;p=json.load(sys.stdin);p['default']=[];p['scoped']=[];print(json.dumps(p))")
-            fi
-          else
-            plan=$(git diff --name-only \
-              "${{ github.event.pull_request.base.sha }}" \
-              "${{ github.event.pull_request.head.sha }}" \
-              | uv run .github/scripts/select_evals.py --changed --labels "$LABELS" "$extended")
-          fi
+      # What this catalog asks of a skill on top of the format: a governance
+      # card, with those three sections filled in. See docs/skill-requirements.md.
+      skill_files: skill-card.md
+      skill_sections: Description,Owner,License
 
-          echo "Plan: $plan"
-          printf '%s' "$plan" | python3 -c '
-          import json, os, sys
-          plan = json.load(sys.stdin)
-          lines = [
-              "routing=" + str(plan["routing"]).lower(),
-              # Emitted as the flag itself: every run job passes it through
-              # verbatim rather than re-deriving the same boolean.
-              "extended=" + ("--extended" if plan["extended"] else "--no-extended"),
-          ]
-          for key in ("default", "scoped", "skipped"):
-              lines.append(key + "=" + json.dumps(plan[key]))
-          for key in ("default", "scoped"):
-              lines.append(key + "_any=" + str(bool(plan[key])).lower())
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
-              out.write("\n".join(lines) + "\n")
-          '
-
-  # A routing decision is made from skill descriptions alone, so this needs no
-  # GPU and no second platform. It stays on a self-hosted Linux runner only
-  # because that is what can reach the internal LLM gateway.
-  routing:
-    name: Routing (whole catalog)
-    needs: discover
-    if: needs.discover.outputs.routing == 'true'
-    runs-on: [self-hosted, strix_halo, Linux]
-    # Each case is killed as soon as its routing decision is observable, so
-    # this is far shorter than a behavior run; the cap catches a hung agent.
-    timeout-minutes: 40
-    env:
-      ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
-      ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
-      ANTHROPIC_CUSTOM_HEADERS: |
-        Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
-        user: a1_ucicd
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install the claude CLI
-        run: npm install -g @anthropic-ai/claude-code
-
-      # No pip install: the runner is standard library only.
+      # --- where the graded runs happen ------------------------------------
       #
-      # By default this reports rather than gates, so a low score shows up as
-      # statistics instead of a red run; set `min_accuracy` on dispatch to make
-      # it a hard bar. It still fails on infrastructure problems (no case
-      # produced a decision, or no skill activated anywhere).
-      - name: Run the routing eval
-        shell: bash
-        env:
-          ONLY: ${{ github.event.inputs.only }}
-          MIN_ACCURACY: ${{ github.event.inputs.min_accuracy || '0' }}
-          EXTENDED: ${{ needs.discover.outputs.extended }}
-        run: |
-          set -euo pipefail
-          python eval/run_evals.py \
-            --mode routing \
-            --only "$ONLY" \
-            --min-accuracy "$MIN_ACCURACY" \
-            "$EXTENDED" \
-            --output routing-report.json \
-            --keep-logs routing-logs
+      # A routing decision is made from skill descriptions alone, so it needs
+      # no GPU and no second platform. It stays on a self-hosted Linux runner
+      # only because that is what can reach the internal LLM gateway.
+      routing_runner: '["self-hosted", "strix_halo", "Linux"]'
+      behavior_runner: '["self-hosted", "strix_halo"]'
+      behavior_os: Linux,Windows
 
-      - name: Upload routing report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: routing-report
-          path: |
-            routing-report.json
-            routing-logs/
-          if-no-files-found: warn
+      # The Instinct pool. A skill lands here by asking for these labels in its
+      # evals/machine.yml; nothing in this file names a skill, because a
+      # hardcoded skill-to-runner table drifts from reality the first time a
+      # skill is added. The pool is scarce, so touching such a skill is
+      # necessary but not sufficient: a maintainer opts the PR in with the gate
+      # label. It also sits outside the AMD network and cannot reach the
+      # internal gateway, so it calls api.anthropic.com with its own budgeted
+      # key from its own environment.
+      scoped_runner: '["self-hosted", "Linux", "X64"]'
+      scoped_gate: enable_mi_ci
+      scoped_environment: behavioral-instinct
 
-  # Skills that run on the default runners and use the repo-wide gateway key.
-  behavior:
-    name: Behavior (${{ matrix.skill }} on ${{ matrix.os }})
-    needs: discover
-    if: needs.discover.outputs.default_any == 'true'
-    runs-on: ${{ fromJSON(matrix.runner) }}
-    # Behavior runs install local models and can take a while; cap it so a hung
-    # agent or a stalled model pull fails the job instead of burning minutes.
-    timeout-minutes: 45
-    strategy:
-      # One skill / OS failing should not hide the others' results.
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.discover.outputs.default) }}
-    env:
-      ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
-      ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
-      ANTHROPIC_CUSTOM_HEADERS: |
-        Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
+      # --- this run --------------------------------------------------------
+      #
+      # `references` runs the structural and external checks and skips the
+      # graded ones, which is all the weekly schedule is here for: a cron that
+      # quietly re-ran every skill against a real agent would be a standing
+      # bill nobody asked for.
+      mode: ${{ github.event_name == 'schedule' && 'references' || inputs.mode || 'both' }}
+      skills: ${{ inputs.skills }}
+      only: ${{ inputs.only }}
+
+      # Reports the routing score without gating on it, which is what this
+      # catalog has always done. Raise it once the prompts have a number worth
+      # holding a bar against.
+      min_accuracy: ${{ inputs.min_accuracy || '0' }}
+
+      # A skill's optional evals/extended_evals.json is that skill's product
+      # repo's bill to pay; this catalog grades the required dataset only.
+      # Extended datasets are still checked structurally.
+      extended: false
+
+      # Fetch every external URL our markdown links to, in a job of its own
+      # that the aggregate `results` check ignores. Leave it out of branch
+      # protection: a rate limit or a runner IP some host blocks is not a
+      # reason to hold a merge. The weekly schedule above is what catches rot
+      # in markdown nobody is editing.
+      external_references: true
+      excluded_urls: '^https://openai\.com/codex/?$,^https://www\.amd\.com/en/resources/product-security\.html$'
+
+      # AMD's internal gateway. The key is named rather than passed, and
+      # `$API_KEY` in the headers is replaced with it, so a gateway that wants
+      # the key in a header needs no second secret.
+      api_key_secret: ORCHESTR_API_KEY
+      api_base_url: https://llm-api.amd.com/Anthropic
+      api_custom_headers: |
+        Ocp-Apim-Subscription-Key: $API_KEY
         user: a1_ucicd
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install the claude CLI
-        run: npm install -g @anthropic-ai/claude-code
-
-      - name: Run behavior cases for ${{ matrix.skill }}
-        env:
-          EXTENDED: ${{ needs.discover.outputs.extended }}
-        run: python eval/run_evals.py --mode behavior --skill ${{ matrix.skill }} "$EXTENDED"
-
-  # Skills on a runner class that carries its own environment. Those bring
-  # scoped secrets, which is why they cannot share the job above: a job's
-  # credentials are fixed before its matrix expands. The Instinct runner, for
-  # instance, sits outside the AMD network and calls api.anthropic.com directly
-  # with its own budgeted key, so it sets no gateway base URL or headers.
-  behavior-scoped:
-    name: Behavior (${{ matrix.skill }} on ${{ matrix.os }}, ${{ matrix.environment }})
-    needs: discover
-    if: needs.discover.outputs.scoped_any == 'true'
-    runs-on: ${{ fromJSON(matrix.runner) }}
-    timeout-minutes: 45
-    environment:
-      name: ${{ matrix.environment }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.discover.outputs.scoped) }}
-    env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-    steps:
-      - name: Verify the scoped Anthropic key is available
-        run: |
-          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-            echo "ANTHROPIC_API_KEY resolved to an empty value. GitHub withholds" >&2
-            echo "secrets from pull requests opened from forks; re-run this from" >&2
-            echo "a branch in amd/skills, or check that the secret is set on the" >&2
-            echo "'${{ matrix.environment }}' environment." >&2
-            exit 1
-          fi
-
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install the claude CLI
-        run: npm install -g @anthropic-ai/claude-code
-
-      - name: Run behavior cases for ${{ matrix.skill }}
-        env:
-          EXTENDED: ${{ needs.discover.outputs.extended }}
-        run: python eval/run_evals.py --mode behavior --skill ${{ matrix.skill }} "$EXTENDED"
-
-  # Single aggregate gate. Mark THIS check required in branch protection.
-  #
-  #   * nothing testable changed -> pass (neutral).
-  #   * testable change          -> pass iff every leg that ran passed.
-  #
-  # A leg held back by a missing gate label is warned about, not failed: the PR
-  # should not be blocked by a test it deliberately did not request.
-  evals-gate:
-    name: evals
-    needs: [discover, routing, behavior, behavior-scoped]
-    if: always()
-    runs-on: ubuntu-latest
-    env:
-      DISCOVER: ${{ needs.discover.result }}
-      ROUTING: ${{ needs.routing.result }}
-      BEHAVIOR: ${{ needs.behavior.result }}
-      SCOPED: ${{ needs.behavior-scoped.result }}
-      ROUTING_WANTED: ${{ needs.discover.outputs.routing }}
-      BEHAVIOR_WANTED: ${{ needs.discover.outputs.default_any }}
-      SCOPED_WANTED: ${{ needs.discover.outputs.scoped_any }}
-      SKIPPED: ${{ needs.discover.outputs.skipped }}
-    steps:
-      - name: Verify eval results
-        run: |
-          echo "discover:        $DISCOVER"
-          echo "routing:         $ROUTING (requested: $ROUTING_WANTED)"
-          echo "behavior:        $BEHAVIOR (requested: $BEHAVIOR_WANTED)"
-          echo "behavior-scoped: $SCOPED (requested: $SCOPED_WANTED)"
-          echo "held back:       $SKIPPED"
-
-          # If discovery itself failed, surface that rather than guessing. It
-          # also covers dataset validation, so a malformed evals.json lands
-          # here as a clear failure.
-          if [ "$DISCOVER" != "success" ]; then
-            echo "The discover job did not succeed ($DISCOVER)." >&2
-            exit 1
-          fi
-
-          # Say loudly when a change went out without running on real hardware.
-          if [ "$SKIPPED" != "[]" ]; then
-            echo "::warning::These skills' behavior cases were held back for a" \
-                 "missing gate label and did not run: $SKIPPED"
-          fi
-
-          failed=0
-          if [ "$ROUTING_WANTED" = "true" ] && [ "$ROUTING" != "success" ]; then
-            echo "Routing did not pass ($ROUTING)." >&2
-            failed=1
-          fi
-          if [ "$BEHAVIOR_WANTED" = "true" ] && [ "$BEHAVIOR" != "success" ]; then
-            echo "Behavior cases did not pass ($BEHAVIOR)." >&2
-            failed=1
-          fi
-          if [ "$SCOPED_WANTED" = "true" ] && [ "$SCOPED" != "success" ]; then
-            echo "Scoped-runner behavior cases did not pass ($SCOPED)." >&2
-            failed=1
-          fi
-          if [ "$failed" -ne 0 ]; then
-            exit 1
-          fi
-
-          if [ "$ROUTING_WANTED" != "true" ] && [ "$BEHAVIOR_WANTED" != "true" ] \
-             && [ "$SCOPED_WANTED" != "true" ]; then
-            echo "No evals affected by this change."
-          else
-            echo "All affected evals passed."
-          fi
-          exit 0
+      # The Instinct environment holds a plain Anthropic key, so no gateway.
+      scoped_api_key_secret: ANTHROPIC_API_KEY
