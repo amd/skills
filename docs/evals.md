@@ -103,7 +103,7 @@ def teardown(workspace, case, ctx): ...
 def check(run, case, ctx): ...        # after each case; raise AssertionError to fail it
 ```
 
-Keep prompts and expectations in the dataset even when you use hooks, so what is being asserted stays readable without opening Python. See [`skills/serving-llms-on-instinct/evals/hooks.py`](../skills/serving-llms-on-instinct/evals/hooks.py) for a simple example and [`skills/tracelens-analysis-orchestrator/evals/hooks.py`](../skills/tracelens-analysis-orchestrator/evals/hooks.py) for an involved one.
+Keep prompts and expectations in the dataset even when you use hooks, so what is being asserted stays readable without opening Python. See [`skills/serving-llms-on-instinct/evals/hooks.py`](../skills/serving-llms-on-instinct/evals/hooks.py) for an example.
 
 ### Running tests locally
 
