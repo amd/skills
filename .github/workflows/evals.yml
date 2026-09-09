@@ -71,6 +71,9 @@ concurrency:
 
 permissions:
   contents: read
+  # Lets a job ask GitHub for an OIDC token, which is traded for a
+  # short-lived Anthropic one instead of reading a key.
+  id-token: write
 
 jobs:
   # Mark the `results` check this produces as required in branch protection.
@@ -79,7 +82,7 @@ jobs:
     # out at the commit this ref names and runs it from there, so bumping the
     # line below is the whole of upgrading -- there is no second version to keep
     # in step with it.
-    uses: amd/skillscope/.github/workflows/skill-evals.yml@v0.1.2
+    uses: amd/skillscope/.github/workflows/skill-evals.yml@v0.1.3
     # By name, not by value: the Instinct legs read a secret scoped to the
     # `behavioral-instinct` environment, and an environment's secrets are
     # readable only inside the job that declares it.
@@ -168,5 +171,11 @@ jobs:
         Ocp-Apim-Subscription-Key: $API_KEY
         user: a1_ucicd
 
-      # The Instinct environment holds a plain Anthropic key, so no gateway.
-      scoped_api_key_secret: ANTHROPIC_API_KEY
+      # Some runners talk straight to api.anthropic.com, so they can use GitHub OIDC tokens to get temporary Anthropic access instead of storing a key. 
+      # (The gateway runners above can't, since those tokens only work with api.anthropic.com.)
+      # The four fields below are just IDs—no secrets—and only work if GitHub sends a signed token from this repo.
+      scoped_api_key_secret: ""
+      scoped_federation_rule_id: fdrl_014u39zsJmsex5SkL1gWg7qo
+      scoped_federation_organization_id: 9bdff596-1595-4140-8301-817e43ef8412
+      scoped_federation_service_account_id: svac_016zcTqZ4XkFdjAJCag9jQC9
+      scoped_federation_workspace_id: wrkspc_01EUPtU7mqFtoQowMAREPvoq
