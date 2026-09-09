@@ -71,10 +71,8 @@ concurrency:
 
 permissions:
   contents: read
-  # Lets a job ask GitHub for an OIDC token, which the Instinct legs trade for a
-  # short-lived Anthropic one instead of reading a key. It grants nothing over
-  # the repository, and it has to be granted here rather than in the called
-  # workflow: a reusable workflow can only lower what its caller passed down.
+  # Lets a job ask GitHub for an OIDC token, which is traded for a
+  # short-lived Anthropic one instead of reading a key.
   id-token: write
 
 jobs:
@@ -173,16 +171,9 @@ jobs:
         Ocp-Apim-Subscription-Key: $API_KEY
         user: a1_ucicd
 
-      # The Instinct legs call api.anthropic.com directly, so they can federate
-      # instead of holding a key: each job trades its GitHub OIDC token for a
-      # short-lived Anthropic one. The gateway legs above cannot, because that
-      # token only authenticates at api.anthropic.com.
-      #
-      # These four are identifiers, not credentials -- the exchange only
-      # succeeds when they arrive with a JWT GitHub signed for this repository
-      # -- and the `secrets` context is not available in a job-level `with:`
-      # anyway. The rule is scoped on Anthropic's side to the subject these
-      # jobs present, `repo:amd/skills:environment:behavioral-instinct`.
+      # Some runners talk straight to api.anthropic.com, so they can use GitHub OIDC tokens to get temporary Anthropic access instead of storing a key. 
+      # (The gateway runners above can't, since those tokens only work with api.anthropic.com.)
+      # The four fields below are just IDs—no secrets—and only work if GitHub sends a signed token from this repo.
       scoped_api_key_secret: ""
       scoped_federation_rule_id: fdrl_014u39zsJmsex5SkL1gWg7qo
       scoped_federation_organization_id: 9bdff596-1595-4140-8301-817e43ef8412
