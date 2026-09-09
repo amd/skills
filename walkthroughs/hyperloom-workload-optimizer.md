@@ -123,9 +123,8 @@ below.
 ```text
 Optimize Qwen/Qwen3-8B with <framework> on <gpu_type>: TP=1, conc=64, ISL=1024,
 OSL=1024, precision bf16, target-gain 30, max-hours 3, serving parameters only:
---no-framework-agent --no-kernel --no-enable-conc-sweep --no-enable-roofline
---max-minutes-explore-pct 0.39 --max-minutes-sweep-pct 0.01
---explore-force-exit-budget-pct 0.01 --explore-force-exit-hours-remaining 0.05.
+--max-minutes-framework-pct 0.50 --max-minutes-sweep-pct 0.01
+--no-kernel --no-enable-conc-sweep --no-enable-roofline.
 Launch and monitor.
 ```
 
@@ -135,10 +134,10 @@ larger gains come from.
 
 ```text
 Optimize Qwen/Qwen3-14B-FP8 with <framework> on <gpu_type>: TP=1, conc=64,
-ISL=1024, OSL=1024, precision fp8, target-gain 30, max-hours 12, all components
+ISL=1024, OSL=1024, precision fp8, target-gain 50, max-hours 12, all components
 enabled:
---max-minutes-framework-pct 0.01 --max-minutes-explore-pct 0.42
---max-minutes-kernel-pct 0.42. Launch and monitor.
+--max-minutes-framework-pct 0.43 --max-minutes-kernel-pct 0.42.
+Launch and monitor.
 ```
 
 **3. Custom.** Ask for a run and let the agent take you through the choices:
