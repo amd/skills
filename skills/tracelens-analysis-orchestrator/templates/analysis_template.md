@@ -24,11 +24,11 @@ section that has STANDALONE / COMPARATIVE variants. Delete the unused variant.
 === GENERAL RULES ===
 1. Warnings section: Only include if there were errors or high-variance operations; omit entirely if all succeeded and no variance flags.
 2. Executive Summary: Max ~20 lines.
-3. Performance plot: The {{PERF_PLOT}} placeholder is replaced by Step 11.3 with a base64-embedded
+3. Performance plot: The {{PERF_PLOT}} placeholder is replaced by Step 12.3 with a base64-embedded
    PNG data URI (![Performance Breakdown](data:image/png;base64,...)) of a single horizontal stacked
    bar showing the run's compute-time breakdown by kernel category. The plot is purely descriptive
    (no error bars, no throughput cone, no savings estimates). If the plot was not generated
-   (Step 10.3 / Step 11.2 failed), the placeholder is removed.
+   (Step 11 / Step 12.2 failed), the placeholder is removed.
 4. Compute Kernel Optimizations: One P-item per entry in `priority_data.json::findings[]`,
    numbered P1, P2, ... in `findings[]` order (already globally sorted by `impact_score`). The
    P-item Impact line uses the canonical mid `impact_score` value; low/high values appear only
@@ -128,7 +128,7 @@ These are excluded from the recommendations below.
 ## Compute Kernel Optimizations
 
 Findings from per-category kernel analysis (GEMM, SDPA, elementwise, etc.).
-Summaries of recommendations from Step 7 sub-agents, focused on individual kernel efficiency.
+Summaries of recommendations from Step 8 sub-agents, focused on individual kernel efficiency.
 
 ### Top Operations
 

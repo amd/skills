@@ -16,6 +16,7 @@ Three companion guides hold the detail:
 | [docs/skill-requirements.md](docs/skill-requirements.md) | The rules CI enforces: required files, frontmatter limits, skill cards, the pre-PR checklist |
 | [docs/best-practices.md](docs/best-practices.md) | How to write a skill agents actually reach for: fit, descriptions, body structure, scripts, AMD specifics |
 | [docs/evals.md](docs/evals.md) | How structure, routing, and behavior are graded, and what to put in `evals/evals.json` |
+| [amd/skillscope](https://github.com/amd/skillscope) | The harness that runs those graders, here and in your own repo |
 
 For repository structure and the broader catalog model, see the
 [README](README.md).
@@ -95,8 +96,9 @@ manifest to edit by hand.
 ## 4. Open a pull request
 
 Commit `.github/federation.json`, `skills/**`, and the regenerated manifests. A
-maintainer reviews and merges once CI passes. The `validate` workflow runs
-`check.sh`; the `evals` workflow runs your prompts against a real agent.
+maintainer reviews and merges once CI passes. The `validate` workflow checks the
+manifests; the `evals` workflow runs [skillscope](https://github.com/amd/skillscope)
+— the structural checks, then your prompts against a real agent.
 
 Never hand-edit vendored skills under `skills/`. Changes must come from your
 repo via re-import, or they will be overwritten.
@@ -105,11 +107,13 @@ repo via re-import, or they will be overwritten.
 
 The catalog runs checks against your skills. Run the **same** checks in your own
 repo by calling them as reusable workflows, so you catch breakage during normal
-development instead of in the catalog's nightly run. The logic and config live
-in `amd/skills`, so green in your repo means green in the catalog, and you never
-copy or maintain the check yourself.
+development instead of in the catalog's nightly run. You never copy or maintain
+a check yourself, and green in your repo means green in the catalog.
 
-Add a caller workflow to your repo (e.g. `.github/workflows/skills-checks.yml`):
+Every check the catalog runs is [skillscope](https://github.com/amd/skillscope),
+which grades a skill wherever it lives — structure, the references your
+markdown makes, routing, and behavior. Point it at your skill folder and it
+reads the same `evals/evals.json` this catalog does:
 
 ```yaml
 name: skills-checks
@@ -117,12 +121,18 @@ on:
   pull_request:
   workflow_dispatch:
 jobs:
-  external-references:
-    uses: amd/skills/.github/workflows/external-reference-check.yml@main
-    permissions:
-      contents: read
-      issues: write
+  evals:
+    uses: amd/skillscope/.github/workflows/reusable.yml@v0.1.1
+    secrets:
+      api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+    with:
+      skills: path/to/your/skill
 ```
+
+Skillscope's [usage guide](https://github.com/amd/skillscope/blob/main/docs/usage.md)
+covers the rest: holding a check to `optional` while you get a bar green, GPU
+runners, pooling several skills into one routing run, and fetching external
+URLs on a schedule to catch link rot.
 
 ## Update or remove
 

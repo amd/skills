@@ -95,12 +95,12 @@ Every skill needs a dataset: at least 3 evaluations with
 `skill_should_trigger: true` and 2 with `false`. CI rejects a skill without
 them.
 
-The validator also enforces that the file is parseable and uses only known
-fields (a typo'd key is an error, not a silently dropped expectation), that
-`skill_should_trigger` is present and a real boolean on every evaluation, that
-case ids are unique across the whole repo, that a `false` evaluation carries
-only an id and a prompt, and that any `workspace` points at a directory that
-exists.
+[skillscope](https://github.com/amd/skillscope) also enforces that the file is
+parseable and uses only known fields (a typo'd key is an error, not a silently
+dropped expectation), that `skill_should_trigger` is present and a real boolean
+on every evaluation, that case ids are unique across the whole repo, that a
+`false` evaluation carries only an id and a prompt, and that any `workspace`
+points at a directory that exists.
 
 See [evals.md](evals.md) for what to put in the file and how it is graded.
 
@@ -136,6 +136,7 @@ A reviewer will push back if any of these are false:
 - [ ] The skill was tested end-to-end on the target hardware against real prompts
 
 ```bash
-./.github/scripts/check.sh                    # structural validation, no tokens
-python eval/run_evals.py --skill <your-skill> # routing and behavior
+./.github/scripts/check.sh                      # structural validation, no tokens
+skillscope routing --routing-room all           # which skill fires
+skillscope behavioral --skill <your-skill>      # what it does once it has fired
 ```
