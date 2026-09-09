@@ -122,7 +122,7 @@ on:
   workflow_dispatch:
 jobs:
   evals:
-    uses: amd/skillscope/.github/workflows/reusable.yml@v0.1.1
+    uses: amd/skillscope/.github/workflows/reusable.yml@v0.1.2
     secrets:
       api_key: ${{ secrets.ANTHROPIC_API_KEY }}
     with:

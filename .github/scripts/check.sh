@@ -22,7 +22,7 @@ cd "$ROOT_DIR"
 
 # Keep in step with the `uses:` ref in .github/workflows/evals.yml, which is
 # the version CI grades with.
-SKILLSCOPE_VERSION="v0.1.1"
+SKILLSCOPE_VERSION="v0.1.2"
 SKILLSCOPE=(uv tool run --from "git+https://github.com/amd/skillscope@${SKILLSCOPE_VERSION}" skillscope)
 
 # Keep in step with the structural inputs in .github/workflows/evals.yml.
