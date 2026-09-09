@@ -127,7 +127,7 @@ Install the harness once, at the version CI grades this repo with — the `uses:
 ref in [`.github/workflows/evals.yml`](../.github/workflows/evals.yml):
 
 ```bash
-uv tool install --system-certs git+https://github.com/amd/skillscope@v0.1.1
+uv tool install --system-certs git+https://github.com/amd/skillscope@v0.1.2
 ```
 
 Then, from the repo root:
