@@ -1,0 +1,231 @@
+name: wif-smoke
+
+# THROWAWAY. Lives on `dholanda/claude_fed` to prove out workload identity
+# federation before any of it lands on `main`. Delete the branch and this file
+# together; nothing else in the repo references it.
+#
+# Two stages, dispatched one at a time, because they fail for different reasons
+# and a single job would not tell you which:
+#
+#   * `exchange` -- does this repo's OIDC token satisfy the federation rule?
+#     No skillscope, no agent, no model call, so it costs nothing and answers
+#     only the auth question. Run this first: if the rule is mis-scoped, every
+#     later failure is downstream of this one.
+#   * `evals` -- does the harness use the federated token to grade with? Calls
+#     the skillscope branch that adds federation support, and runs exactly one
+#     routing case on a GitHub-hosted runner.
+#
+# `permissions: id-token: write` below is the whole reason this works. GitHub
+# only exposes the token endpoint to a job that asks for it, and a reusable
+# workflow cannot raise what its caller granted -- so the grant has to be here,
+# in the caller, not in skillscope.
+
+# The push trigger is not redundant, and it is why this workflow is reachable
+# at all. `workflow_dispatch` only registers a workflow that exists on the
+# default branch: with this file living on a throwaway branch, there is no "Run
+# workflow" button and `gh workflow run` cannot find it. A push to the branch
+# runs it once, and GitHub's own note is that "once a workflow has run at least
+# once, you can dispatch it against any branch or tag via the GitHub API or
+# GitHub CLI" -- so the first push is what makes the dispatch below work.
+#
+# A push runs the free `exchange` stage, never `evals`: see each job's `if`.
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Which question to answer."
+        type: choice
+        options: [exchange, evals]
+        default: exchange
+  push:
+    branches: [dholanda/claude_fed]
+
+permissions:
+  contents: read
+  id-token: write
+
+# The federation rule this branch tests against. These are identifiers, not
+# credentials: the exchange only succeeds when it is presented alongside a JWT
+# that GitHub signed for this repository, so they are safe in plain sight.
+# Anthropic classifies the organization and workspace IDs as "Non-secret. Safe
+# to commit." They are also inputs to a reusable workflow, and the `secrets`
+# context is not available in a job-level `with:` block, so a secret could not
+# be passed there anyway.
+env:
+  FEDERATION_RULE_ID: fdrl_014u39zsJmsex5SkL1gWg7qo
+  FEDERATION_ORGANIZATION_ID: 9bdff596-1595-4140-8301-817e43ef8412
+  FEDERATION_SERVICE_ACCOUNT_ID: svac_016zcTqZ4XkFdjAJCag9jQC9
+  FEDERATION_WORKSPACE_ID: wrkspc_01EUPtU7mqFtoQowMAREPvoq
+
+jobs:
+  # Stage 1: the token trade, on its own.
+  exchange:
+    name: Trade an OIDC token for an Anthropic token
+    # `!= 'evals'` rather than `== 'exchange'`, so a push -- which carries no
+    # inputs at all -- runs this stage rather than skipping both of them.
+    if: inputs.stage != 'evals'
+    runs-on: ubuntu-latest
+    steps:
+      # `core.getIDToken` is the same call the curl recipe makes by hand, minus
+      # the two runner variables and the URL assembly.
+      - name: Fetch a GitHub OIDC token
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const token = await core.getIDToken('https://api.anthropic.com');
+            core.setSecret(token);
+            core.exportVariable('JWT', token);
+
+            // The claims, so a refusal can be read against the rule rather
+            // than guessed at. The signature is what makes the token usable
+            // and it is not printed; these are just the assertions.
+            const claims = JSON.parse(
+              Buffer.from(token.split('.')[1], 'base64url').toString('utf8')
+            );
+            const interesting = [
+              'iss', 'aud', 'sub', 'repository', 'repository_owner',
+              'event_name', 'ref', 'workflow_ref', 'runner_environment',
+            ];
+            core.startGroup('Claims the federation rule matches on');
+            for (const name of interesting) {
+              core.info(`${name}: ${claims[name]}`);
+            }
+            core.endGroup();
+
+            // `sub` is the claim a subject prefix is compared against, and its
+            // trailing segment differs between event types. On a dispatch it
+            // is the ref form, so a rule pinned to `...:pull_request` will
+            // refuse this run while working fine on a pull request.
+            core.summary.addHeading('OIDC token', 3);
+            core.summary.addTable([
+              [{data: 'claim', header: true}, {data: 'value', header: true}],
+              ['sub', claims.sub],
+              ['aud', String(claims.aud)],
+              ['event_name', claims.event_name],
+              ['repository', claims.repository],
+            ]);
+            await core.summary.write();
+
+      - name: Exchange it at Anthropic
+        run: |
+          set -euo pipefail
+
+          # Built with jq rather than a heredoc so the JWT is never subject to
+          # shell quoting: it arrives as a value, not as text to be expanded.
+          payload=$(jq -nc \
+            --arg assertion "$JWT" \
+            --arg rule "$FEDERATION_RULE_ID" \
+            --arg org "$FEDERATION_ORGANIZATION_ID" \
+            --arg service_account "$FEDERATION_SERVICE_ACCOUNT_ID" \
+            --arg workspace "$FEDERATION_WORKSPACE_ID" \
+            '{
+              grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+              assertion: $assertion,
+              federation_rule_id: $rule,
+              organization_id: $org,
+              service_account_id: $service_account,
+              workspace_id: $workspace
+            }')
+
+          status=$(curl -sS -o exchange.json -w '%{http_code}' \
+            https://api.anthropic.com/v1/oauth/token \
+            -H 'content-type: application/json' \
+            --data "$payload")
+          echo "POST /v1/oauth/token -> HTTP $status"
+
+          if [ "$status" != "200" ]; then
+            echo "--- response ---"
+            cat exchange.json
+            echo
+            cat <<'EXPLAIN'
+          A refused exchange is always this opaque: the message is a fixed
+          "Authentication failed" whatever the cause, because a distinguishable
+          error would let a caller probe the rule's configuration.
+
+          The reason is recorded server-side instead. Open the Claude Console ->
+          Settings -> Workload identity -> this rule -> authentication history,
+          and read the deny reason on this attempt. `match_subject_prefix` means
+          `sub` (printed in the step above) did not match the rule's subject
+          prefix; `workspace_id_required` means the rule spans more than one
+          workspace and the request named none.
+          EXPLAIN
+            exit 1
+          fi
+
+          token=$(jq -r '.access_token' exchange.json)
+          echo "::add-mask::$token"
+          # Length only. A prefix would be a substring of a masked value, and
+          # substrings are not redacted.
+          echo "Minted an access token of ${#token} characters."
+          jq 'del(.access_token, .refresh_token)' exchange.json
+
+          # The token authenticating is the claim worth testing, and /v1/models
+          # needs auth while spending nothing. It also prints the model names
+          # this workspace can actually reach, which is the next thing you need.
+          echo "--- GET /v1/models as the federated service account ---"
+          model_status=$(curl -sS -o models.json -w '%{http_code}' \
+            https://api.anthropic.com/v1/models \
+            -H "authorization: Bearer $token" \
+            -H 'anthropic-version: 2023-06-01')
+          echo "HTTP $model_status"
+          if [ "$model_status" != "200" ]; then
+            cat models.json
+            echo
+            echo "The exchange worked but the token was refused at the API." >&2
+            echo "Check the rule's oauth_scope, and that the service account is" >&2
+            echo "a member of the workspace the token was scoped to." >&2
+            exit 1
+          fi
+          jq -r '[.data[].id] | "reachable models: " + (join(", "))' models.json
+
+          echo "### Federation works end to end" >> "$GITHUB_STEP_SUMMARY"
+
+  # Stage 2: the same credential, but reached through the harness.
+  #
+  # No `secrets: inherit`, on purpose. Federation needs no secret, so leaving it
+  # off makes that the thing this run demonstrates: if it grades, it graded
+  # without a key anywhere in the caller or the callee.
+  evals:
+    name: One routing case, on a federated token
+    if: inputs.stage == 'evals'
+    permissions:
+      contents: read
+      id-token: write
+    uses: amd/skillscope/.github/workflows/skill-evals.yml@dholanda/workload-identity-federation
+    with:
+      skill_globs: skills/*
+
+      # `routing` empties both behavioral matrices, so nothing here can reach
+      # the Strix Halo or Instinct pools. One case, one model call.
+      mode: routing
+      only: images-cost
+      # Reporting the score, not gating on it: this run is a test of the
+      # credential, and a wrong routing decision is not what is being measured.
+      min_accuracy: "0"
+
+      # The room the case is graded in has to match main's, or the decision is
+      # being made among a different set of skills than the one that matters.
+      routing_room: "local-ai-use,local-ai-app-integration,serving-llms-on-instinct,tracelens-analysis-orchestrator,hyperloom-workload-optimizer"
+
+      # Hosted, not the usual self-hosted Strix Halo runner. That pool sits on
+      # the AMD network so it can reach the internal gateway; a federated token
+      # is only good at api.anthropic.com, which needs egress the hosted runner
+      # has and that one may not.
+      routing_runner: '["ubuntu-latest"]'
+
+      # No key at all: not named, not read, not exported. Note that this rules
+      # out the gateway -- `api_base_url` and `api_custom_headers` are left
+      # blank because a minted Anthropic token would not authenticate to
+      # llm-api.amd.com, and skillscope refuses that combination rather than
+      # failing halfway through the run.
+      api_key_secret: ""
+      # Repeated from the `env:` block above rather than referenced, because
+      # the `env` context is not available in a job-level `with:`. Do not
+      # "tidy" these into `${{ env.* }}`; the workflow stops being valid.
+      federation_rule_id: fdrl_014u39zsJmsex5SkL1gWg7qo
+      federation_organization_id: 9bdff596-1595-4140-8301-817e43ef8412
+      federation_service_account_id: svac_016zcTqZ4XkFdjAJCag9jQC9
+      federation_workspace_id: wrkspc_01EUPtU7mqFtoQowMAREPvoq
+
+      # Link rot is not what is being tested, and it is the slow half.
+      external_references: false
