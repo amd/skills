@@ -45,14 +45,17 @@ Any failure → treat as a fresh launch and re-run `install.sh`.
 `_preflight()` runs `preflight_kb.sh`. Exit `1` auto-enables `--degraded-kb` /
 `--degraded-pr`; launch continues. IR-3 never aborts.
 
-### IR-4 / IR-6 — EXPLORE contracts (Coordinator-internal)
+### IR-4 — OPTIMIZE phase contracts (Coordinator-internal)
 
-- **IR-4:** EXPLORE is specialist-informed; GPU specialists lease cards via
+Configuration search and source landing are two arms of **one** phase
+(OPTIMIZE / FRAMEWORK_AGENT) sharing one budget. The separate EXPLORE phase and
+its `--explore-force-exit-*` flags no longer exist.
+
+- **IR-4:** OPTIMIZE is specialist-informed; GPU specialists lease cards via
   `gpu_research_lane` and must not touch production serving on port 8888.
-- **IR-6:** EXPLORE force-exits when wall-clock remaining <
-  `--explore-force-exit-hours-remaining` (default 3 h) or phase budget <
-  `--explore-force-exit-budget-pct` (default 20%).
-- Plateau signals are advisory; IR-6 and per-phase budgets are hard gates.
+  Specialists author patches into an isolated worktree; `integrate_patch` does
+  the `git apply` plus throughput/accuracy gate after Critic review.
+- Plateau signals are advisory; the per-phase budgets are the hard gates.
 
 ### IR-8 — `--framework atom` is single-node only
 
