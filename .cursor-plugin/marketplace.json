@@ -17,9 +17,10 @@
         "./skills/local-ai-app-integration",
         "./skills/serving-llms-on-instinct",
         "./skills/tracelens-analysis-orchestrator",
-        "./skills/hyperloom-workload-optimizer"
+        "./skills/hyperloom-workload-optimizer",
+        "./skills/optimizing-models-with-quark"
       ],
-      "description": "AMD's verified Agent Skills in one plugin: route image/audio through local AI on Ryzen AI, serve LLMs on AMD Instinct GPUs with vLLM, optimize inference throughput with Hyperloom, and analyze GPU kernel and PyTorch trace performance.",
+      "description": "AMD's verified Agent Skills in one plugin: route image/audio through local AI on Ryzen AI, serve LLMs on AMD Instinct GPUs with vLLM, optimize inference throughput with Hyperloom, quantize PyTorch and ONNX models with Quark, and analyze GPU kernel and PyTorch trace performance.",
       "author": {
         "name": "AMD"
       },
