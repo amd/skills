@@ -33,7 +33,9 @@ The skill does three things:
    by the OS — so the setup script waits for the service and, if it stays down,
    prints the exact OS-specific command to start it (e.g. `sudo systemctl start
    lemond` on Linux).
-2. **Verifies that local Lemonade is reachable.**
+2. **Verifies that local Lemonade is reachable** on the port `lemonade status`
+   reports, so a server already running on a non-default port is used as-is
+   rather than reported missing (`13305` is only the fallback).
 3. **Drops a `Local AI Use` block into the workspace `AGENTS.md`** so the agent
    reads the routing rule on every later turn, in Cursor, Claude Code, Codex,
    Gemini CLI, and any other agent that respects `AGENTS.md`.
@@ -58,7 +60,8 @@ Use this skill when **all** of the following are true:
 
 - The user wants local Lemonade. If it is not yet installed, the setup script
   installs the latest version for them automatically.
-- The user accepts the default Lemonade endpoint `http://localhost:13305`.
+- The user accepts the Lemonade endpoint on this machine, whichever port the
+  service reports (`http://localhost:13305` if it has never been changed).
 - The user wants the change to be **persistent** across future turns and
   agent restarts (the rule is written to disk).
 
@@ -162,21 +165,34 @@ After a Windows install the CLI lands in `%LOCALAPPDATA%\lemonade_server` and
 is added to the *user* PATH (new shells only); the setup script probes that
 directory so it works in the same run.
 
-**1b. Is the service running?** Check `lemonade status --json`. The `lemond`
-service auto-starts on install — there is **no** `lemonade serve` in modern
-Lemonade.
+**1b. Is the service running, and where?** Check `lemonade status --json`,
+which answers both at once by printing the bound port (`{"port": 13305}`). The
+`lemond` service auto-starts on install — there is **no** `lemonade serve` in
+modern Lemonade.
 
 | `lemonade status` says | Action |
 |---|---|
-| `Server is running on port 13305` | Continue to Step 2. |
-| `Server is not running` | Wait a few seconds for the auto-started service (the script polls `/api/v1/health`). If it stays down, start it via the OS service manager: `sudo systemctl start lemond` (Linux system install) or `systemctl --user start lemond` (per-user install); `launchctl load /Library/LaunchDaemons/com.lemonade.server.plist` (macOS); the Lemonade tray app or `Start-Service lemond` (Windows). |
+| `Server is running on port <N>` | Use port `<N>` for every later request and for the rule, even when it is not 13305. Continue to Step 2. |
+| `Server is not running` | Wait a few seconds for the auto-started service (the script polls `/api/v1/health`, re-asking `status` in case the service comes up on a different port). If it stays down, start it via the OS service manager: `sudo systemctl start lemond` (Linux system install) or `systemctl --user start lemond` (per-user install); `launchctl load /Library/LaunchDaemons/com.lemonade.server.plist` (macOS); the Lemonade tray app or `Start-Service lemond` (Windows). |
+
+Never treat 13305 as the definition of "running": the port is a config value
+(`lemonade config set port`) that an existing config, another install channel,
+or a port conflict all move, so probing only the default reports a healthy
+server as missing. Ask `status`, which resolves the port from the service's UDP
+beacon for you — `lemonade scan` is for finding servers on *other* machines
+(see [reference.md](reference.md#re-pointing-the-rule-at-a-remote-host)), never
+for picking the local endpoint. The setup script prefers `--host` / `--port` or
+`LEMONADE_HOST` / `LEMONADE_PORT` over discovery, and bakes whatever it settles
+on into the rule; pass both when pointing at another machine, since the CLI
+here cannot report a remote service's port.
 
 Only if the automatic install genuinely fails (no `apt-get`, no `sudo`,
 download blocked) should you stop and point the user at
 <https://lemonade-server.ai/docs/guide/install/>.
 
-The rest of this skill assumes the endpoint is `http://localhost:13305/api/v1`
-and no API key is required (the system-wide server defaults to no auth on
+The rest of this skill writes the endpoint as `http://localhost:13305/api/v1`,
+the default; substitute the port `status` reported if it differs. It also
+assumes no API key is required (the system-wide server defaults to no auth on
 loopback). If the user has set `LEMONADE_API_KEY`, the routing rule template
 in `templates/local-ai-rule.md` shows where to add the `Authorization` header.
 
@@ -283,6 +299,7 @@ machine.
 |---|---|---|
 | `lemonade: command not found` | CLI not installed | Re-run `python scripts/setup_local_ai.py` (auto-installs the latest version). If it just installed on Windows, open a new shell so the user PATH refreshes, or the script will find it under `%LOCALAPPDATA%\lemonade_server`. |
 | `status` gives an "invalid choice" / usage error | An old `lemonade` (pre-v10.1.0) is shadowing the modern CLI | Uninstall it (see the Step 1a table: `winget uninstall -e --id AMD.LemonadeServer` / `sudo apt remove lemonade-server` / `brew uninstall --cask lemonade-server`), then re-run the setup script. |
+| Requests to `http://localhost:13305` are refused, but `lemonade status` says the server is running | The service is bound to a non-default port (existing config, another install channel, or a port conflict) | Use the port from `lemonade status --json` and re-run `python scripts/setup_local_ai.py` so the rule is rewritten with it. Do not start a second server; the running one is fine. |
 | `Server is not running` | `lemond` service stopped | Start it via the OS service manager — `sudo systemctl start lemond` / `systemctl --user start lemond` (Linux), `launchctl load /Library/LaunchDaemons/com.lemonade.server.plist` (macOS), or the tray app / `Start-Service lemond` (Windows). There is no `lemonade serve`. |
 | `POST /v1/images/generations` returns 404 model not found | Image model not downloaded | `lemonade pull SD-Turbo` and retry. |
 | `lemonade pull` keeps printing `Progress: NN%` but never finishes | Download target is a bad path (out of space, no write permission, quota, read-only mount). The write error may surface only in the server log while the console keeps showing progress | Check the target and free space first: `GET /api/v1/system-info` reports `models_dir` and `model_storage.free_bytes`. If a pull stalls, read the recent lines of the server log (typically `lemonade-server.log` in the OS temp dir) for the real error (e.g. a download/write failure like `CURL code 23`, or an out-of-space message), then point the download at a writable disk with room. |
@@ -296,14 +313,16 @@ machine.
 
 Mark this skill complete only when **all** of the following are true:
 
-- [ ] `lemonade status --json` reports the server running on port 13305.
+- [ ] `lemonade status --json` reports the server running, and the port it
+      reports is the port in the installed rule (13305 unless the service was
+      configured otherwise).
 - [ ] The workspace `AGENTS.md` contains the
       `amd-skills:local-ai-use` block. This is required even when Lemonade was
       already installed and running — generating an image alone does not
       complete the skill.
 - [ ] On a follow-up turn, asking the agent to "generate an image of X"
-      causes it to POST to `http://localhost:13305/api/v1/images/generations`
-      (pulling the model on first use) rather than calling a cloud tool.
+      causes it to POST to `/api/v1/images/generations` on the endpoint in the
+      rule (pulling the model on first use) rather than calling a cloud tool.
 - [ ] `lemonade backends --all` shows `installed` for every backend variant
       this workspace's routing depends on (see Step 1c). Do not treat a working
       image or chat path as proof that transcription will work.
