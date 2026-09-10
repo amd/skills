@@ -185,8 +185,9 @@ Never copy API keys into chat output.
 | MAX_HOURS | `--max-hours` | CLI `2.0` | offer `3` (quick) or `12` (full); see below |
 | TARGET_GAIN | `--target-gain` | `30` | desired % gain |
 
-**Optional:** `--no-explore`, `--no-enable-conc-sweep`, `--gpu-type`,
-`--server-args`, `--compare-against-gpu`, `--quantize` prelude.
+**Optional:** `--no-framework-agent`, `--no-kernel`, `--no-enable-conc-sweep`,
+`--no-enable-roofline`, `--gpu-type`, `--server-args`, `--compare-against-gpu`,
+`--quantize` prelude.
 
 Infer `PRECISION` from the model name when obvious (e.g. an `FP8` model implies
 `--precision fp8`) and confirm it — do not silently keep the `bf16` default.
@@ -209,11 +210,19 @@ Expect a modest validated gain, or an honest 0% when the workload has no
 parameter headroom.
 
 ```text
---max-hours 3 --precision bf16
---no-framework-agent --no-kernel --no-enable-conc-sweep --no-enable-roofline
---max-minutes-explore-pct 0.39 --max-minutes-sweep-pct 0.01
---explore-force-exit-budget-pct 0.01 --explore-force-exit-hours-remaining 0.05
+--max-hours 3 --precision bf16 --target-gain 30
+--max-minutes-framework-pct 0.50 --max-minutes-sweep-pct 0.01
+--no-kernel --no-enable-conc-sweep --no-enable-roofline
 ```
+
+`0.50` is the share *before* redistribution. With `--no-kernel`, KERNEL_AGENT is
+disabled and its freed share is added on top, so `0.50` becomes ~0.99 of the wall
+clock for OPTIMIZE. Raising `0.50` buys almost nothing — the post-redistribution
+share is capped at one full wall clock and the excess is discarded.
+
+Do **not** pass `--no-framework-agent` here: it skips OPTIMIZE entirely, which is
+the one phase this profile relies on. `--no-kernel` is what makes it "no kernel
+rewrites".
 
 **2. 12-hour demo** (`hyperloom-qwen3-14b-fp8-12h`) — `Qwen/Qwen3-14B-FP8`
 unless the user names another model, TP=1, CONC=64, ISL=OSL=1024,
@@ -222,10 +231,13 @@ rewrites included. The kernel agent needs room to profile, rewrite and
 revalidate, which is where the larger gains come from.
 
 ```text
---max-hours 12 --precision fp8
---max-minutes-framework-pct 0.01 --max-minutes-explore-pct 0.42
---max-minutes-kernel-pct 0.42
+--max-hours 12 --precision fp8 --target-gain 50
+--max-minutes-framework-pct 0.43 --max-minutes-kernel-pct 0.42
 ```
+
+Do not add `--max-minutes-explore-pct`: configuration search and source landing
+are two arms of one phase with one budget, so that spelling is an alias onto
+`--max-minutes-framework-pct` and silently overwrites it.
 
 **3. Custom** — the user brings their own model or workload instead of taking a
 demo. Walk through the fields in the table above and the phase toggles, one
@@ -250,13 +262,11 @@ Launch plan — please confirm:
   TP=1  EP=1  CONC=64
   ISL=1024  OSL=1024
   PRECISION=fp8
-  MAX_HOURS=3     TARGET_GAIN=20%
-  profile       3-hour demo — no kernel, no framework agent, no roofline
-  flags         --no-framework-agent --no-kernel --no-enable-conc-sweep
-                --no-enable-roofline
-                --max-minutes-explore-pct 0.39 --max-minutes-sweep-pct 0.01
-                --explore-force-exit-budget-pct 0.01
-                --explore-force-exit-hours-remaining 0.05
+  MAX_HOURS=3     TARGET_GAIN=30%
+  profile       3-hour demo — no kernel rewrites, no conc sweep, no roofline
+  flags         --max-minutes-framework-pct 0.50
+                --max-minutes-sweep-pct 0.01
+                --no-kernel --no-enable-conc-sweep --no-enable-roofline
   RUN_MODE      baremetal
 ```
 
@@ -291,10 +301,10 @@ export ISL=1024
 export OSL=1024
 export PRECISION=fp8
 export MAX_HOURS=3
-export TARGET_GAIN=20
+export TARGET_GAIN=30
 # The whole flag set for the approved profile, space-separated. The 3-hour
 # demo is shown; a 12-hour run swaps in its own set.
-export OPT_FLAGS="--no-framework-agent --no-kernel --no-enable-conc-sweep --no-enable-roofline --max-minutes-explore-pct 0.39 --max-minutes-sweep-pct 0.01 --explore-force-exit-budget-pct 0.01 --explore-force-exit-hours-remaining 0.05"
+export OPT_FLAGS="--max-minutes-framework-pct 0.50 --max-minutes-sweep-pct 0.01 --no-kernel --no-enable-conc-sweep --no-enable-roofline"
 EOF
 ```
 
@@ -364,10 +374,11 @@ bash "${SKILL_DIR}/scripts/launch.sh"
 
 Every workload value comes from the confirmed `workload.env`; the script has no
 `${VAR:-default}` fallbacks, so a missing value fails loudly instead of launching
-a different config. Put any optional Phase 2 flags (`--no-kernel`, `--no-explore`,
-`--gpu-type`, `--model-class`, `--server-args`, `--compare-against-gpu`,
-`--quantize`, phase budget flags) into `OPT_FLAGS` in `workload.env`. `OPT_FLAGS`
-is word-split, so quote any flag value that contains spaces, e.g.
+a different config. Put any optional Phase 2 flags (`--no-kernel`,
+`--no-framework-agent`, `--gpu-type`, `--model-class`, `--server-args`,
+`--compare-against-gpu`, `--quantize`, phase budget flags) into `OPT_FLAGS` in
+`workload.env`. `OPT_FLAGS` is word-split, so quote any flag value that contains
+spaces, e.g.
 `export OPT_FLAGS='--server-args "--foo bar"'`.
 
 ### Launch health check (30 s after start)

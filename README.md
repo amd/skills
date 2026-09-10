@@ -182,7 +182,9 @@ Contributions are welcome from AMD engineers and selected partners.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the step-by-step instructions, then
 [docs/skill-requirements.md](docs/skill-requirements.md) for the rules CI enforces,
 [docs/best-practices.md](docs/best-practices.md) for writing guidance, and
-[docs/evals.md](docs/evals.md) for how skills are graded.
+[docs/evals.md](docs/evals.md) for how skills are graded. The graders themselves
+are [amd/skillscope](https://github.com/amd/skillscope), which you can point at
+your own repo to get the same verdict before you submit.
 
 ## License
 
