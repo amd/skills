@@ -9,10 +9,17 @@ A skill reaches the catalog after passing three review stages: an eligibility an
 * **Stage 2: Structural screening** (*CI, on every pull request*)
   * Are the files well-formed? Required files, frontmatter, skill-card sections, eval schema, unique case ids, internal links, and manifests in sync. See [skill-requirements.md](skill-requirements.md).
 * **Stage 3: Agentic testing** (*CI, on every pull request*)
-  * **Routing Testing**: Does the skill trigger when it should, and stay quiet when it shouldn't? Prompts run with the published bundle installed side by side, so a skill only wins the ones it owns. You cannot test this alone: a skill tested by itself will happily answer prompts that belong to its neighbour.
+  * **Routing Testing**: Does the skill trigger when it should, and stay quiet when it shouldn't? Prompts run with the published skills installed side by side, so a skill only wins the ones it owns. You cannot test this alone: a skill tested by itself will happily answer prompts that belong to its neighbour.
   * **Behavioral Testing**: Once the skill has triggered, does it do the job? The prompt runs to completion with the skill loaded, and what the agent actually did is graded against the expectations in the dataset.
 
-The rest of this document is the dataset that structural screening and agentic testing read. You write one file, `evals/evals.json`, inside your skill folder in this catalog. For now `evals/` is the one folder federation does not carry, so unlike the rest of a federated skill the dataset is authored and edited here rather than imported from your repo, and a re-import never overwrites it. Copy [`eval/TEMPLATE.json`](../eval/TEMPLATE.json) to start.
+Stages 2 and 3 are run by [skillscope](https://github.com/amd/skillscope), the
+harness AMD uses to grade skills wherever they live. This catalog configures it
+in [`.github/workflows/evals.yml`](../.github/workflows/evals.yml) — which
+skills are published and so compete for a prompt, which runners we own, and
+which key pays for a run. The graders themselves are not in this repo, so the
+same prompts score the same way in your product repo as they do here.
+
+The rest of this document is the dataset those stages read. You write one file, `evals/evals.json`, inside your skill folder in this catalog. For now `evals/` is the one folder federation does not carry, so unlike the rest of a federated skill the dataset is authored and edited here rather than imported from your repo, and a re-import never overwrites it. Run `skillscope template` for a file to start from.
 
 ## What skill owners write
 
@@ -77,8 +84,8 @@ The bottom two are instant and free where a judged expectation costs a second ag
 A `files_exist` entry matches whole path segments anywhere in the workspace, so `plan.md` is satisfied by `examples/plan.md` and `out/report.md` by `run-1/out/report.md`. Name the artifact rather than the directory you hope the agent picks: where a file lands is usually the agent's call, and a plan written beside the fixture it describes should not fail the run. If the location matters, ask for it in the prompt and grade it with `expected_behavior`.
 
 The full field reference is
-[`eval/schema/evals.schema.json`](../eval/schema/evals.schema.json), enforced by
-`python eval/run_evals.py --validate`.
+[skillscope's authoring guide](https://github.com/amd/skillscope/blob/main/docs/authoring-evals.md),
+enforced by `skillscope structural`.
 
 ### Enabling more complex tests
 
@@ -88,11 +95,20 @@ Two optional files sit beside the dataset when JSON is not enough.
 are wrong for your skill. Both keys are optional:
 
 ```yaml
-runner_type: instinct    # `default` (assumed) or `instinct`
-os: [Linux]              # defaults to every platform that runner type has
+os: [Linux]              # defaults to both platforms this catalog runs
+labels: [mi300x, gpu, rocm]   # extra runs-on labels your cases need
 ```
 
-Name the kind of machine and the rest follows: `runner_type: instinct` implies the runner labels, the Linux-only constraint, the `enable_mi_ci` pull-request label that rations that scarce pool, and the scoped credentials. Most skills that need this file need only `os: [Linux]`, to drop a Windows leg that would just exercise the failure path of Linux-only tooling.
+Name the hardware you need, not the pool that has it. Asking for any label at
+all is what makes your behavioral run *scoped*: this catalog sends those legs
+to the Instinct pool, holds them behind the `enable_mi_ci` pull-request label
+because that hardware is scarce, and pays for them from a separate environment
+with its own key. Which pool, which label, and whose key are the repo's
+business and live in
+[`.github/workflows/evals.yml`](../.github/workflows/evals.yml), so a new skill
+that needs a GPU never means editing CI. Most skills that need this file need
+only `os: [Linux]`, to drop a Windows leg that would just exercise the failure
+path of Linux-only tooling.
 
 **`evals/hooks.py`** — setup a dataset cannot express: cloning a repo, tearing down a container, running an external scoring script. Every function is optional:
 
@@ -103,17 +119,33 @@ def teardown(workspace, case, ctx): ...
 def check(run, case, ctx): ...        # after each case; raise AssertionError to fail it
 ```
 
-Keep prompts and expectations in the dataset even when you use hooks, so what is being asserted stays readable without opening Python. See [`skills/serving-llms-on-instinct/evals/hooks.py`](../skills/serving-llms-on-instinct/evals/hooks.py) for a simple example and [`skills/tracelens-analysis-orchestrator/evals/hooks.py`](../skills/tracelens-analysis-orchestrator/evals/hooks.py) for an involved one.
+Keep prompts and expectations in the dataset even when you use hooks, so what is being asserted stays readable without opening Python. See [`skills/serving-llms-on-instinct/evals/hooks.py`](../skills/serving-llms-on-instinct/evals/hooks.py) for an example.
 
 ### Running tests locally
 
+Install the harness once, at the version CI grades this repo with — the `uses:`
+ref in [`.github/workflows/evals.yml`](../.github/workflows/evals.yml):
+
 ```bash
-python eval/run_evals.py --validate              # structure only: no agent, no tokens, instant
-python eval/run_evals.py --skill <your-skill>    # routing and behavior for your skill
-python eval/run_evals.py --mode routing          # the published bundle
-python eval/run_evals.py --only <case-id> --keep-logs logs   # one case, keeping the transcript
+uv tool install --system-certs git+https://github.com/amd/skillscope@v0.1.2
 ```
 
-Everything but `--validate` needs the `claude` CLI authenticated, plus whatever your own cases need. No `pip install`: the runner is standard library only.
+Then, from the repo root:
 
-In CI, the `evals` workflow runs routing when a change can move a routing decision (a published description, any dataset, or the bundle itself), and runs behavior for the skills a change touches.
+```bash
+./.github/scripts/check.sh                        # structure only: no agent, no tokens, instant
+skillscope behavioral --skill <your-skill>         # your skill, end to end
+skillscope routing --routing-room all              # every skill in the room together
+skillscope routing --routing-room all --only <case-id> --keep-logs logs   # one case, keeping the transcript
+```
+
+`check.sh` wraps `skillscope structural` with this catalog's own settings and
+adds the manifest checks, so it is the same bar CI holds you to. Everything
+else needs the `claude` CLI authenticated, plus whatever your own cases need.
+`skillscope --help` is the reference for the rest of the flags.
+
+In CI, routing runs when a change can move a routing decision (a published description or any dataset), and behavioral cases run for the skills a change touches. `skillscope select` is what makes that call, so you can ask it what a change will cost before you push:
+
+```bash
+git diff --name-only main HEAD | skillscope select --changed --skills-dir 'skills/*'
+```

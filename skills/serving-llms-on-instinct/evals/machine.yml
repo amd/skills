@@ -1,1 +1,6 @@
-runner_type: instinct
+# Behavioral cases for this skill need an Instinct GPU, so they say which
+# hardware and leave the rest to the repo: .github/workflows/evals.yml maps
+# these labels onto the pool that carries them, the pull-request label that
+# rations it, and the environment whose key pays for the run.
+os: [Linux]
+labels: [mi300x, gpu, rocm]
