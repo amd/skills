@@ -28,7 +28,7 @@
   "interface": {
     "displayName": "AMD",
     "shortDescription": "Enable AMD's skills ecosystem",
-    "longDescription": "AMD's verified Agent Skills in one plugin: route image/audio through local AI on Ryzen AI, serve LLMs on AMD Instinct GPUs with vLLM, optimize inference throughput with Hyperloom, and analyze GPU kernel and PyTorch trace performance.",
+    "longDescription": "AMD's verified Agent Skills in one plugin: route image/audio through local AI on Ryzen AI, serve LLMs on AMD Instinct GPUs with vLLM, optimize inference throughput with Hyperloom, quantize PyTorch and ONNX models with Quark, and analyze GPU kernel and PyTorch trace performance.",
     "developerName": "AMD",
     "category": "Developer Tools",
     "capabilities": [

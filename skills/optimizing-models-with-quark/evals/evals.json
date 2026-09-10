@@ -1,0 +1,67 @@
+{
+  "evaluations": [
+    {
+      "id": "quark-fp8-torch-entry",
+      "skill_should_trigger": true,
+      "note": "The entry point's whole job, graded end to end: put the tree on disk and name the file to start from. Consent is granted in the prompt because a headless run has nobody to answer Step 2, and the prompt stops the run before quantization, which would need a GPU and a model download to say anything. Nothing is asserted with logs_contain: every literal worth pinning here (the cache directory name, the sparse-checkout call, the starting-point paths) is written in SKILL.md, which the run reads, so a substring match would pass on the skill body alone.",
+      "prompt": "I want to quantize meta-llama/Llama-3.1-8B-Instruct to FP8 for vLLM with AMD Quark. This is an automated test on a machine I own: you have my approval to fetch whatever you need, do not wait for confirmation. Get to the point where you know which starting point handles this and tell me which file you will follow -- do not start quantizing.",
+      "expected_behavior": [
+        "Fetch Quark's skill tree into a cache directory outside the workspace, as a shallow sparse clone rather than file by file",
+        "Check that the starting-point files are readable before routing anywhere",
+        "Name the Torch LLM PTQ workflow as the starting point and say it will follow that file as written"
+      ],
+      "unexpected_behavior": [
+        "Offer quantization flags for quantize_quark.py, or a QConfig, from its own knowledge instead of from the fetched tree",
+        "Copy the fetched tree into the workspace or a skills directory, or ask the user to restart the agent"
+      ]
+    },
+    {
+      "id": "quark-onnx-ptq-routing",
+      "skill_should_trigger": true,
+      "note": "An .onnx model is the fork in Step 4, and sending it down the Torch path is the mistake that wastes the most of a user's time. The no-registration consequence is graded here rather than in the case above because SKILL.md asks for it once, up front, and one graded case is enough to hold it.",
+      "prompt": "I have a model.onnx I need quantized to INT8 with AMD Quark. This is an automated test on a machine I own: you have my approval to fetch whatever you need, do not wait for confirmation. Tell me which starting point handles this and what the first checkpoint will be -- do not start quantizing.",
+      "expected_behavior": [
+        "Route to the ONNX PTQ workflow rather than the Torch one",
+        "Say once that nothing is registered as a skill, so later Quark questions come back through this entry point"
+      ],
+      "unexpected_behavior": [
+        "Send an .onnx model to the Torch PTQ workflow",
+        "Improvise an ONNX quantization recipe instead of reading the fetched workflow"
+      ]
+    },
+    {
+      "id": "quark-install-module-not-found",
+      "skill_should_trigger": true,
+      "prompt": "My script dies with ModuleNotFoundError: No module named 'quark'. Sort out my environment so it imports."
+    },
+    {
+      "id": "quark-shrink-checkpoint-for-fit",
+      "skill_should_trigger": true,
+      "note": "The need with none of the vocabulary: no PTQ, no FP8, no mention of Quark. If routing needs the keywords to fire, most real users will miss it.",
+      "prompt": "My fine-tuned checkpoint is 16 GB of safetensors and it no longer fits on the card I have to serve it from. Make it smaller without retraining it."
+    },
+    {
+      "id": "quark-int4-awq-for-ryzen-ai",
+      "skill_should_trigger": true,
+      "prompt": "Produce an INT4 AWQ checkpoint of Qwen2.5-7B-Instruct for Ryzen AI, and use my own calibration set rather than the default one."
+    },
+    {
+      "id": "serve-quantized-checkpoint-on-instinct",
+      "skill_should_trigger": false,
+      "note": "Quantization vocabulary, but the quantizing is already done. Deploying the result is serving-llms-on-instinct's job.",
+      "prompt": "I already have an FP8 checkpoint. Stand it up behind an OpenAI-compatible endpoint on my MI300X node and benchmark it."
+    },
+    {
+      "id": "profile-quantized-gemm-kernel",
+      "skill_should_trigger": false,
+      "note": "A quantized model is in the picture, but the task is kernel-level profiling, which belongs to magpie-kernel-evaluator.",
+      "prompt": "Profile the INT8 GEMM kernels in my inference run and tell me which ones are the bottleneck."
+    },
+    {
+      "id": "fp8-versus-int8-tradeoff",
+      "skill_should_trigger": false,
+      "note": "This skill's exact vocabulary in a question rather than a task. Nothing is being quantized, so nothing should fire.",
+      "prompt": "In post-training quantization, how does FP8 usually compare to INT8 for accuracy and speed? Just explain the trade-off."
+    }
+  ]
+}
