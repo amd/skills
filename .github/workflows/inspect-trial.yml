@@ -61,6 +61,11 @@ jobs:
           sudo -n apt-get update -qq \
             && sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -qq podman \
             || echo "could not install podman; the next step will fall back"
+          # `podman compose` is a shim that delegates to whatever compose
+          # provider it finds -- on this runner that is Docker's plugin, which
+          # then talks to the daemon nobody can reach. podman-compose is the
+          # native one, and INSPECT_PODMAN_COMPOSE below forces it.
+          python -m pip install --quiet podman-compose || echo "no podman-compose"
 
       # `docker compose version` reports the CLI's own version and never
       # contacts the daemon, so it passes on a runner whose user cannot reach
@@ -68,7 +73,9 @@ jobs:
       - name: Choose a sandbox
         id: sandbox
         run: |
-          if podman info >/dev/null 2>&1; then
+          # Podman needs a working compose of its own, not just a daemon: the
+          # last run had `podman info` succeed and then fail at compose time.
+          if podman info >/dev/null 2>&1 && podman-compose version >/dev/null 2>&1; then
             provider=podman
           elif docker info >/dev/null 2>&1; then
             provider=docker
@@ -118,6 +125,9 @@ jobs:
         continue-on-error: true
         env:
           SKILLSCOPE_SANDBOX: ${{ steps.sandbox.outputs.provider }}
+          # Without this, podman picks Docker's compose plugin as its provider
+          # and the run dies trying to reach the Docker daemon.
+          INSPECT_PODMAN_COMPOSE: podman-compose
         run: >
           skillscope behavioral --engine inspect
           --skills-dir 'skills/*'
