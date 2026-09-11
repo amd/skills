@@ -44,13 +44,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      # `docker compose version` reports the CLI's own version and never
-      # contacts the daemon, so it passes on a runner whose user cannot reach
-      # the socket -- which is what this one turned out to be. `docker info`
-      # is the question worth asking.
-      # Podman rather than Docker: it is daemonless and rootless, so it needs
-      # neither a socket nor group membership -- which is exactly what this
-      # runner lacks. Best effort; the next step copes with it not working.
+      # This runner has the Docker CLI but its user cannot reach the socket, so
+      # no container can start. Podman is daemonless and rootless and needs
+      # neither, which is exactly the gap. Best effort; the next step copes
+      # with it not working.
       #
       # Note this mutates a persistent shared runner. On an ephemeral fleet it
       # would belong in the image instead.
@@ -84,7 +81,9 @@ jobs:
       - name: Install the candidate harness
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "skillscope[inspect] @ git+https://github.com/rominf/skillscope@inspect-engine"
+          # `[podman]` rather than `[inspect]`: the provider is registered by a
+          # separate package, so installing the podman binary is not enough.
+          python -m pip install "skillscope[podman] @ git+https://github.com/rominf/skillscope@inspect-engine"
 
       # Routing is the leg to try first. It offers the skill tool and never
       # calls it, so nothing is executed and no sandbox is started -- whatever
@@ -107,16 +106,14 @@ jobs:
       # and validates JSON, so it is the one skill that can run in the default
       # container, which has no network of its own.
       #
+      # Runs in whatever the sandbox step found. If that is `local` the agent
+      # works directly in the runner's filesystem, as the legacy engine already
+      # does, and the report records `sandbox_isolated: false` so no reader has
+      # to guess.
+      #
       # Continues on error deliberately. This is the leg most likely to find
       # something, and finding something is the point -- a red step here should
       # not hide the routing result above it.
-      #
-      # Whatever the step above found. If that is `local` the agent works
-      # directly in the runner's filesystem, as the legacy engine already does,
-      # and the report records `sandbox_isolated: false` so no reader has to
-      # guess. Either way this exercises everything above the sandbox: the
-      # tools, the scorers, and the LLM judge, which has never run outside a
-      # laptop.
       - name: Behavioral, one hardware-free skill
         continue-on-error: true
         env:
