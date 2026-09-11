@@ -72,10 +72,29 @@ jobs:
           --min-accuracy 0
           --output routing-trial.json
 
-      - name: Keep the report
+      # The first behavioral run on real infrastructure, and the first time the
+      # LLM judge is exercised anywhere but by hand. `lemonade-router-builder`
+      # because it needs neither the network nor an accelerator: it generates
+      # and validates JSON, so it is the one skill that can run in the default
+      # container, which has no network of its own.
+      #
+      # Continues on error deliberately. This is the leg most likely to find
+      # something, and finding something is the point -- a red step here should
+      # not hide the routing result above it.
+      - name: Behavioral, one hardware-free skill
+        continue-on-error: true
+        run: >
+          skillscope behavioral --engine inspect
+          --skills-dir 'skills/*'
+          --skill lemonade-router-builder
+          --output behavioral-trial.json
+
+      - name: Keep the reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: routing-trial
-          path: routing-trial.json
+          name: inspect-trial-reports
+          path: |
+            routing-trial.json
+            behavioral-trial.json
           if-no-files-found: warn
