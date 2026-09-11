@@ -48,12 +48,38 @@ jobs:
       # contacts the daemon, so it passes on a runner whose user cannot reach
       # the socket -- which is what this one turned out to be. `docker info`
       # is the question worth asking.
-      - name: What container runtime is usable here
+      # Podman rather than Docker: it is daemonless and rootless, so it needs
+      # neither a socket nor group membership -- which is exactly what this
+      # runner lacks. Best effort; the next step copes with it not working.
+      #
+      # Note this mutates a persistent shared runner. On an ephemeral fleet it
+      # would belong in the image instead.
+      - name: Install podman if it is missing
         continue-on-error: true
         run: |
-          docker info >/dev/null 2>&1 && echo "docker: usable" || echo "docker: CLI may exist, but the daemon is not reachable"
-          podman info >/dev/null 2>&1 && echo "podman: usable" || echo "podman: not usable"
-          id
+          if podman info >/dev/null 2>&1; then
+            echo "podman already usable"
+            exit 0
+          fi
+          sudo -n apt-get update -qq \
+            && sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -qq podman \
+            || echo "could not install podman; the next step will fall back"
+
+      # `docker compose version` reports the CLI's own version and never
+      # contacts the daemon, so it passes on a runner whose user cannot reach
+      # the socket. `info` is the question worth asking of either runtime.
+      - name: Choose a sandbox
+        id: sandbox
+        run: |
+          if podman info >/dev/null 2>&1; then
+            provider=podman
+          elif docker info >/dev/null 2>&1; then
+            provider=docker
+          else
+            provider=local
+          fi
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
+          echo "Behavioral cases will run in: $provider"
 
       - name: Install the candidate harness
         run: |
@@ -85,17 +111,16 @@ jobs:
       # something, and finding something is the point -- a red step here should
       # not hide the routing result above it.
       #
-      # Unsandboxed, because this runner's user cannot reach the Docker socket.
-      # That is a real constraint on the migration and not a thing to paper
-      # over: the agent works directly in the runner's filesystem here, exactly
-      # as the legacy engine already does, and the report records
-      # `sandbox_isolated: false` so no reader has to guess. What it still
-      # proves is everything above the sandbox -- the tools, the scorers, and
-      # the LLM judge, which has never run outside a laptop.
+      # Whatever the step above found. If that is `local` the agent works
+      # directly in the runner's filesystem, as the legacy engine already does,
+      # and the report records `sandbox_isolated: false` so no reader has to
+      # guess. Either way this exercises everything above the sandbox: the
+      # tools, the scorers, and the LLM judge, which has never run outside a
+      # laptop.
       - name: Behavioral, one hardware-free skill
         continue-on-error: true
         env:
-          SKILLSCOPE_SANDBOX: local
+          SKILLSCOPE_SANDBOX: ${{ steps.sandbox.outputs.provider }}
         run: >
           skillscope behavioral --engine inspect
           --skills-dir 'skills/*'
