@@ -54,18 +54,21 @@ jobs:
       - name: Install podman if it is missing
         continue-on-error: true
         run: |
-          if podman info >/dev/null 2>&1; then
-            echo "podman already usable"
+          # Both, not just podman: it is already installed from an earlier run
+          # of this trial, and checking only for it would skip the thing that
+          # was actually missing.
+          if podman info >/dev/null 2>&1 && podman-compose version >/dev/null 2>&1; then
+            echo "podman and podman-compose already usable"
             exit 0
           fi
+          # Both from apt: they are system packages every job on this runner
+          # would see, which is what a runner image would ship. `podman compose`
+          # alone is not enough -- it is a shim that delegates to whichever
+          # compose provider it finds, and on this runner that is Docker's
+          # plugin, which then talks to the daemon nobody can reach.
           sudo -n apt-get update -qq \
-            && sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -qq podman \
-            || echo "could not install podman; the next step will fall back"
-          # `podman compose` is a shim that delegates to whatever compose
-          # provider it finds -- on this runner that is Docker's plugin, which
-          # then talks to the daemon nobody can reach. podman-compose is the
-          # native one, and INSPECT_PODMAN_COMPOSE below forces it.
-          python -m pip install --quiet podman-compose || echo "no podman-compose"
+            && sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -qq podman podman-compose \
+            || echo "apt could not install podman and podman-compose; the next step will fall back"
 
       # `docker compose version` reports the CLI's own version and never
       # contacts the daemon, so it passes on a runner whose user cannot reach
