@@ -137,7 +137,11 @@ jobs:
           --skill lemonade-router-builder
           --output behavioral-trial.json
 
-      - name: Keep the reports
+      # The reports say which expectations failed; the eval logs say what the
+      # agent actually did. Diagnosing the last failure needed the transcript
+      # and it had to be inferred from the judge's phrasing instead, so keep
+      # both. `.skillscope/logs` is where the inspect engine writes them.
+      - name: Keep the reports and the transcripts
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -145,4 +149,5 @@ jobs:
           path: |
             routing-trial.json
             behavioral-trial.json
+            .skillscope/logs/
           if-no-files-found: warn
