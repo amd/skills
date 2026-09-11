@@ -44,13 +44,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Nobody knows what this runner has, and a behavioral trial would need to.
-      # Recorded now so the next step of this work starts from a fact.
-      - name: What container runtime is here
+      # `docker compose version` reports the CLI's own version and never
+      # contacts the daemon, so it passes on a runner whose user cannot reach
+      # the socket -- which is what this one turned out to be. `docker info`
+      # is the question worth asking.
+      - name: What container runtime is usable here
         continue-on-error: true
         run: |
-          docker compose version || echo "no docker compose"
-          podman --version || echo "no podman"
+          docker info >/dev/null 2>&1 && echo "docker: usable" || echo "docker: CLI may exist, but the daemon is not reachable"
+          podman info >/dev/null 2>&1 && echo "podman: usable" || echo "podman: not usable"
+          id
 
       - name: Install the candidate harness
         run: |
@@ -81,8 +84,18 @@ jobs:
       # Continues on error deliberately. This is the leg most likely to find
       # something, and finding something is the point -- a red step here should
       # not hide the routing result above it.
+      #
+      # Unsandboxed, because this runner's user cannot reach the Docker socket.
+      # That is a real constraint on the migration and not a thing to paper
+      # over: the agent works directly in the runner's filesystem here, exactly
+      # as the legacy engine already does, and the report records
+      # `sandbox_isolated: false` so no reader has to guess. What it still
+      # proves is everything above the sandbox -- the tools, the scorers, and
+      # the LLM judge, which has never run outside a laptop.
       - name: Behavioral, one hardware-free skill
         continue-on-error: true
+        env:
+          SKILLSCOPE_SANDBOX: local
         run: >
           skillscope behavioral --engine inspect
           --skills-dir 'skills/*'
