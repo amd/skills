@@ -70,6 +70,24 @@ jobs:
             && sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -qq podman podman-compose \
             || echo "apt could not install podman and podman-compose; the next step will fall back"
 
+      # Docker assumes Docker Hub for a short image name; podman refuses to
+      # guess, and inspect's default compose names `aisiuk/inspect-tool-support`
+      # without a registry. So podman needs one configured or nothing pulls.
+      # This belongs in a runner image next to the packages themselves.
+      - name: Give podman a registry to search
+        continue-on-error: true
+        run: |
+          conf=/etc/containers/registries.conf
+          if sudo -n test -f "$conf" && sudo -n grep -q "^unqualified-search-registries" "$conf"; then
+            echo "already configured:"
+            sudo -n grep "^unqualified-search-registries" "$conf"
+          else
+            echo 'unqualified-search-registries = ["docker.io"]' \
+              | sudo -n tee -a "$conf" >/dev/null \
+              && echo "added docker.io as a search registry" \
+              || echo "could not write $conf"
+          fi
+
       # `docker compose version` reports the CLI's own version and never
       # contacts the daemon, so it passes on a runner whose user cannot reach
       # the socket. `info` is the question worth asking of either runtime.
