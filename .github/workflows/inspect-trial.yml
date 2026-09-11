@@ -1,0 +1,81 @@
+# Copyright Advanced Micro Devices, Inc.
+#
+# SPDX-License-Identifier: MIT
+
+name: inspect-engine trial
+
+# A trial of amd/skillscope#19, which adds a second eval engine built on
+# inspect_ai. Nothing here is part of this repository's CI.
+#
+# Scoped to its own branch: it runs when that branch is pushed and is
+# unreachable from main, from any pull request, and from the required checks.
+# Deleting the branch deletes the trial. `workflow_dispatch` would not work
+# here at all, since that only reaches workflows already on the default branch.
+#
+# What it is for: the engine has been exercised against one skill in a podman
+# container on a laptop, and against fixtures in hosted CI. It has never run on
+# this repository's runners, against this catalogue, through this gateway --
+# which is the only place the answer that matters can be obtained.
+
+on:
+  push:
+    branches: [trial/inspect-engine]
+
+permissions:
+  contents: read
+
+jobs:
+  trial:
+    name: Routing on the inspect engine
+    runs-on: ["self-hosted", "strix_halo", "Linux"]
+    timeout-minutes: 40
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
+      ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
+      ANTHROPIC_CUSTOM_HEADERS: |
+        Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
+        user: a1_ucicd
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Nobody knows what this runner has, and a behavioral trial would need to.
+      # Recorded now so the next step of this work starts from a fact.
+      - name: What container runtime is here
+        continue-on-error: true
+        run: |
+          docker compose version || echo "no docker compose"
+          podman --version || echo "no podman"
+
+      - name: Install the candidate harness
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "skillscope[inspect] @ git+https://github.com/rominf/skillscope@inspect-engine"
+
+      # Routing is the leg to try first. It offers the skill tool and never
+      # calls it, so nothing is executed and no sandbox is started -- whatever
+      # the probe above found cannot block it. It is also the cheap leg: one
+      # model call per case rather than an agent loop.
+      #
+      # `--min-accuracy 0` reports instead of gating. A surprise here is
+      # information, not a broken branch.
+      - name: Routing, whole catalogue
+        run: >
+          skillscope routing --engine inspect
+          --skills-dir 'skills/*'
+          --routing-room 'local-ai-use,local-ai-app-integration,serving-llms-on-instinct,tracelens-analysis-orchestrator,hyperloom-workload-optimizer'
+          --min-accuracy 0
+          --output routing-trial.json
+
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: routing-trial
+          path: routing-trial.json
+          if-no-files-found: warn
