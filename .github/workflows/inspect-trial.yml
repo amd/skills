@@ -111,7 +111,27 @@ jobs:
           python -m pip install --upgrade pip
           # `[podman]` rather than `[inspect]`: the provider is registered by a
           # separate package, so installing the podman binary is not enough.
-          python -m pip install "skillscope[podman] @ git+https://github.com/rominf/skillscope@inspect-engine"
+          #
+          # `--upgrade --no-cache-dir` because a VCS URL naming a *branch* does
+          # not change when the branch moves, so pip happily reuses the wheel it
+          # built last time. Two runs of this trial trialled a stale commit.
+          python -m pip install --upgrade --no-cache-dir \
+            "skillscope[podman] @ git+https://github.com/rominf/skillscope@inspect-engine"
+
+      # Assume nothing about which build arrived: name something only the
+      # current one has, and fail loudly rather than trialling last week's.
+      - name: Check which harness actually installed
+        run: |
+          python - <<'CHECK'
+          import inspect
+          from skillscope.engine import sandbox
+          src = inspect.getsource(sandbox._declared_compose)
+          assert "machine_path" in src, (
+              "installed an older skillscope: a declared compose file still "
+              "resolves against the skill root"
+          )
+          print("harness is current")
+          CHECK
 
       # Routing is the leg to try first. It offers the skill tool and never
       # calls it, so nothing is executed and no sandbox is started -- whatever
