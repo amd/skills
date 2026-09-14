@@ -233,6 +233,62 @@ jobs:
           done
           exit $status
 
+      # The third way to drive the same cases: the real CLI again, but on the
+      # host under inspect_ai rather than inside the sandbox under inspect_swe.
+      # This is the path Windows has to take -- inspect_swe installs a Linux
+      # proxy binary in the guest, so it cannot run there at all -- and this
+      # runner is where it can be checked against the other two before anyone
+      # relies on it.
+      #
+      # `local` is not a choice here: the CLI runs on the host, so the sandbox
+      # has to be the host, and the harness refuses any other provider rather
+      # than working in one filesystem and grading another. Unsandboxed, like
+      # the legacy engine this repository's CI already runs.
+      - name: Behavioral again, on real Claude Code driven from the host
+        continue-on-error: true
+        env:
+          SKILLSCOPE_SANDBOX: local
+        run: |
+          command -v claude >/dev/null 2>&1 || npm install -g @anthropic-ai/claude-code
+          status=0
+          for skill in lemonade-router-builder local-ai-app-integration \
+                       tracelens-analysis-orchestrator serving-llms-on-epyc; do
+            echo "::group::$skill (claude-cli)"
+            skillscope behavioral --engine claude-cli \
+              --skills-dir 'skills/*' \
+              --skill "$skill" \
+              --output "claude-cli-$skill.json" || { echo "FAILED: $skill"; status=1; }
+            echo "::endgroup::"
+          done
+          exit $status
+
+      # The question this trial exists to answer about `claude-cli`: does
+      # wrapping the CLI in inspect change what it concludes? Both engines run
+      # the same binary on the same cases, so agreement means the framework
+      # around the agent is faithful and disagreement is a defect in the
+      # crossing -- a sharper signal than comparing two different agents.
+      #
+      # If they agree, the legacy engine is redundant rather than merely
+      # superseded, and the ~1,200 lines it occupies can go.
+      #
+      # `--noise` runs the baseline twice. Behavioral is nondeterministic, so
+      # without a measured floor a flip cannot be told from ordinary variance.
+      # Two skills rather than six, because that is three runs of each.
+      - name: Does wrapping the CLI change its verdicts?
+        continue-on-error: true
+        env:
+          SKILLSCOPE_SANDBOX: local
+        run: |
+          command -v claude >/dev/null 2>&1 || npm install -g @anthropic-ai/claude-code
+          curl -fsSL -o benchmark_engines.py \
+            https://raw.githubusercontent.com/rominf/skillscope/inspect-engine/tools/benchmark_engines.py
+          python benchmark_engines.py behavioral \
+            --baseline legacy --candidate claude-cli --noise \
+            --output benchmark-legacy-vs-cli.json \
+            --skills-dir 'skills/*' \
+            --skill lemonade-router-builder,tracelens-analysis-orchestrator \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
       # The reports say which expectations failed; the eval logs say what the
       # agent actually did. Diagnosing the last failure needed the transcript
       # and it had to be inferred from the judge's phrasing instead, so keep
@@ -246,5 +302,7 @@ jobs:
             routing-trial.json
             behavioral-*.json
             claude-code-*.json
+            claude-cli-*.json
+            benchmark-legacy-vs-cli.json
             .skillscope/logs/
           if-no-files-found: warn
