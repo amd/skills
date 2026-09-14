@@ -1,0 +1,8 @@
+# This skill's behavioral case installs Lemonade Server and downloads a model
+# before generating anything, so it cannot run in the default sandbox, which
+# has no network of its own.
+#
+# Requires a skillscope that understands `sandbox:` (amd/skillscope#19). Older
+# releases reject the key outright, so this cannot merge ahead of that.
+os: [Linux]
+sandbox: compose.yaml

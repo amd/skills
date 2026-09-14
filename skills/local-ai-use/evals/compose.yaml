@@ -1,0 +1,9 @@
+# inspect's default sandbox with the line that removes the network taken out,
+# because this case installs a server and fetches a model before it can do
+# anything. Image fully qualified: podman will not guess a registry.
+services:
+  default:
+    image: docker.io/aisiuk/inspect-tool-support
+    command: tail -f /dev/null
+    init: true
+    stop_grace_period: 1s

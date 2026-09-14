@@ -187,11 +187,23 @@ jobs:
           # Without this, podman picks Docker's compose plugin as its provider
           # and the run dies trying to reach the Docker daemon.
           INSPECT_PODMAN_COMPOSE: podman-compose
-        run: >
-          skillscope behavioral --engine inspect
-          --skills-dir 'skills/*'
-          --skill lemonade-router-builder,local-ai-app-integration,tracelens-analysis-orchestrator,serving-llms-on-epyc,magpie-kernel-evaluator,local-ai-use
-          --output behavioral-trial.json
+        run: |
+          # One invocation per skill, which is what CI does anyway -- the real
+          # workflow gives each skill its own job. Running six in one command
+          # meant the last one dying discarded the reports for the five that
+          # had already passed, and only inspect's own .eval logs survived.
+          status=0
+          for skill in lemonade-router-builder local-ai-app-integration \
+                       tracelens-analysis-orchestrator serving-llms-on-epyc \
+                       magpie-kernel-evaluator local-ai-use; do
+            echo "::group::$skill"
+            skillscope behavioral --engine inspect \
+              --skills-dir 'skills/*' \
+              --skill "$skill" \
+              --output "behavioral-$skill.json" || { echo "FAILED: $skill"; status=1; }
+            echo "::endgroup::"
+          done
+          exit $status
 
       # The reports say which expectations failed; the eval logs say what the
       # agent actually did. Diagnosing the last failure needed the transcript
@@ -204,6 +216,6 @@ jobs:
           name: inspect-trial-reports
           path: |
             routing-trial.json
-            behavioral-trial.json
+            behavioral-*.json
             .skillscope/logs/
           if-no-files-found: warn
