@@ -28,7 +28,7 @@ jobs:
   trial:
     name: Routing on the inspect engine
     runs-on: ["self-hosted", "strix_halo", "Linux"]
-    timeout-minutes: 40
+    timeout-minutes: 90
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
       ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
@@ -156,12 +156,21 @@ jobs:
           --min-accuracy 0
           --output routing-trial.json
 
-      # Two skills, for two different questions. `lemonade-router-builder`
-      # needs neither network nor accelerator, so it runs in the default
-      # container and has already passed here. `local-ai-app-integration`
-      # installs a runtime and fetches models, so it declares its own compose
-      # file with egress -- which is the first real use of `sandbox:` in
-      # machine.yml, a mechanism so far only unit-tested.
+      # Every skill that belongs on this runner. The two that declare
+      # `mi300x` are left out: they want the Instinct pool, with its own
+      # labels, gate and credentials, which is a different job entirely.
+      #
+      # Two of these are known quantities. `lemonade-router-builder` needs
+      # neither network nor accelerator and runs in the default container.
+      # `local-ai-app-integration` installs a runtime and fetches models, so it
+      # declares its own compose file with egress -- the first real use of
+      # `sandbox:` in machine.yml.
+      #
+      # The other four run on the default sandbox on purpose, undeclared.
+      # Guessing what each needs would hide the answer; letting them fail says
+      # which ones need a `sandbox:` declaration and which need other hardware.
+      # `magpie-kernel-evaluator` is the pointed one -- it is GPU work that
+      # declares no machine.yml at all.
       #
       # Runs in whatever the sandbox step found. If that is `local` the agent
       # works directly in the runner's filesystem, as the legacy engine already
@@ -171,7 +180,7 @@ jobs:
       # Continues on error deliberately. This is the leg most likely to find
       # something, and finding something is the point -- a red step here should
       # not hide the routing result above it.
-      - name: Behavioral, with and without egress
+      - name: Behavioral, every skill that belongs on this runner
         continue-on-error: true
         env:
           SKILLSCOPE_SANDBOX: ${{ steps.sandbox.outputs.provider }}
@@ -181,7 +190,7 @@ jobs:
         run: >
           skillscope behavioral --engine inspect
           --skills-dir 'skills/*'
-          --skill lemonade-router-builder,local-ai-app-integration
+          --skill lemonade-router-builder,local-ai-app-integration,tracelens-analysis-orchestrator,serving-llms-on-epyc,magpie-kernel-evaluator,local-ai-use
           --output behavioral-trial.json
 
       # The reports say which expectations failed; the eval logs say what the
