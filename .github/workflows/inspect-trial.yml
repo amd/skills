@@ -233,6 +233,17 @@ jobs:
           done
           exit $status
 
+      # The two legs below drive the claude binary directly, and this runner
+      # has neither it nor npm on PATH -- `validate.yml` sets Node up for the
+      # same reason before it installs the CLI.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install the claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
       # The third way to drive the same cases: the real CLI again, but on the
       # host under inspect_ai rather than inside the sandbox under inspect_swe.
       # This is the path Windows has to take -- inspect_swe installs a Linux
@@ -249,7 +260,6 @@ jobs:
         env:
           SKILLSCOPE_SANDBOX: local
         run: |
-          command -v claude >/dev/null 2>&1 || npm install -g @anthropic-ai/claude-code
           status=0
           for skill in lemonade-router-builder local-ai-app-integration \
                        tracelens-analysis-orchestrator serving-llms-on-epyc; do
@@ -279,7 +289,6 @@ jobs:
         env:
           SKILLSCOPE_SANDBOX: local
         run: |
-          command -v claude >/dev/null 2>&1 || npm install -g @anthropic-ai/claude-code
           curl -fsSL -o benchmark_engines.py \
             https://raw.githubusercontent.com/rominf/skillscope/inspect-engine/tools/benchmark_engines.py
           python benchmark_engines.py behavioral \
