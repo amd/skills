@@ -112,11 +112,19 @@ jobs:
           # `[podman]` rather than `[inspect]`: the provider is registered by a
           # separate package, so installing the podman binary is not enough.
           #
-          # `--upgrade --no-cache-dir` because a VCS URL naming a *branch* does
-          # not change when the branch moves, so pip happily reuses the wheel it
-          # built last time. Two runs of this trial trialled a stale commit.
-          python -m pip install --upgrade --no-cache-dir \
+          # Two steps, because a branch that does not bump its version defeats
+          # both of pip's usual escapes: the VCS URL does not change when the
+          # branch moves, and `--upgrade` sees the same version already
+          # installed and calls it satisfied. Three runs of this trial reported
+          # a bug that had already been fixed.
+          #
+          # First the dependency closure, which may legitimately no-op.
+          python -m pip install --no-cache-dir \
             "skillscope[podman] @ git+https://github.com/rominf/skillscope@inspect-engine"
+          # Then the package itself, unconditionally. `--no-deps` so this does
+          # not drag eighty packages along with it.
+          python -m pip install --force-reinstall --no-deps --no-cache-dir \
+            "skillscope @ git+https://github.com/rominf/skillscope@inspect-engine"
 
       # Assume nothing about which build arrived: name something only the
       # current one has, and fail loudly rather than trialling last week's.
