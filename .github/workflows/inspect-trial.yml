@@ -205,6 +205,34 @@ jobs:
           done
           exit $status
 
+      # The same cases again, driven by real Claude Code in the sandbox rather
+      # than a harness-independent agent. This is the leg that answers whether
+      # the two agree: these skills are written for Claude Code and may lean on
+      # its conventions, which is an empirical question rather than a matter of
+      # opinion. `tools/benchmark_engines.py --compare` diffs the two reports.
+      #
+      # Linux only -- inspect_swe shells `bash -c` to locate the CLI and the
+      # proxy it installs in the guest is a Linux binary. This runner is Linux.
+      - name: Behavioral again, on real Claude Code
+        continue-on-error: true
+        env:
+          SKILLSCOPE_SANDBOX: ${{ steps.sandbox.outputs.provider }}
+          INSPECT_PODMAN_COMPOSE: podman-compose
+        run: |
+          python -m pip install --no-cache-dir \
+            "skillscope[verify] @ git+https://github.com/rominf/skillscope@inspect-engine"
+          status=0
+          for skill in lemonade-router-builder local-ai-app-integration \
+                       tracelens-analysis-orchestrator serving-llms-on-epyc; do
+            echo "::group::$skill (claude-code)"
+            skillscope behavioral --engine claude-code \
+              --skills-dir 'skills/*' \
+              --skill "$skill" \
+              --output "claude-code-$skill.json" || { echo "FAILED: $skill"; status=1; }
+            echo "::endgroup::"
+          done
+          exit $status
+
       # The reports say which expectations failed; the eval logs say what the
       # agent actually did. Diagnosing the last failure needed the transcript
       # and it had to be inferred from the judge's phrasing instead, so keep
@@ -217,5 +245,6 @@ jobs:
           path: |
             routing-trial.json
             behavioral-*.json
+            claude-code-*.json
             .skillscope/logs/
           if-no-files-found: warn
