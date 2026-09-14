@@ -1,0 +1,12 @@
+# The default sandbox inspect generates is this file with `network_mode: none`.
+# Everything here is that default minus the line that removes the network,
+# because these cases install a runtime and fetch a model.
+#
+# The image is fully qualified on purpose: podman will not guess a registry for
+# a short name, and Docker is content either way.
+services:
+  default:
+    image: docker.io/aisiuk/inspect-tool-support
+    command: tail -f /dev/null
+    init: true
+    stop_grace_period: 1s
