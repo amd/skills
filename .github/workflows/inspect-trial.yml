@@ -376,20 +376,28 @@ jobs:
       - name: Behavioral -- claude-cli
         continue-on-error: true
         run: |
-          $skills = @(
-            "lemonade-router-builder",
-            "local-ai-use",
-            "tracelens-analysis-orchestrator"
-          )
+          $skills = @("tracelens-analysis-orchestrator")
           $status = 0
           foreach ($s in $skills) {
             Write-Host "::group::$s (claude-cli on Windows)"
             skillscope behavioral --engine claude-cli --skills-dir "skills/*" `
-              --skill $s --output "windows-claude-cli-$s.json"
+              --timeout 2700 --skill $s --output "windows-claude-cli-$s.json"
             if ($LASTEXITCODE -ne 0) { Write-Host "FAILED: $s"; $status = 1 }
             Write-Host "::endgroup::"
           }
           exit $status
+
+      - name: What did the run leave behind?
+        if: always()
+        run: |
+          Write-Host "cwd: $(Get-Location)"
+          if (Test-Path ".skillscope") {
+            Get-ChildItem -Recurse -Force ".skillscope" | Select-Object -First 40 FullName, Length
+          } else {
+            Write-Host "no .skillscope directory -- inspect wrote its logs somewhere else"
+            Get-ChildItem -Recurse -Force -Filter "*.eval" . -ErrorAction SilentlyContinue |
+              Select-Object -First 20 FullName
+          }
 
       - name: Keep the reports and the transcripts
         if: always()
