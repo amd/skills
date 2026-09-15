@@ -43,9 +43,25 @@ env:
     hyperloom-workload-optimizer,lemonade-router-builder,local-ai-app-integration,local-ai-use,magpie-kernel-evaluator,serving-llms-on-epyc,serving-llms-on-instinct,tracelens-analysis-orchestrator
 
 jobs:
+  # Which pools this push should exercise. A push re-runs every enabled job,
+  # and the Linux leg alone is an hour of real model spend -- so when a fix
+  # concerns one pool, turn the others off rather than paying again for
+  # results already in hand. Edit these three values.
+  config:
+    name: Which pools to run
+    runs-on: ubuntu-latest
+    outputs:
+      linux: "false"
+      instinct: "false"
+      windows: "true"
+    steps:
+      - run: echo "linux=false instinct=false windows=true"
+
   # ---------------------------------------------------------------- Linux ---
   linux:
     name: Whole catalogue, three engines
+    needs: config
+    if: needs.config.outputs.linux == 'true'
     runs-on: ["self-hosted", "strix_halo", "Linux"]
     timeout-minutes: 180
     env:
@@ -228,6 +244,8 @@ jobs:
   # ------------------------------------------------------------- Instinct ---
   instinct:
     name: The two skills that need an Instinct card
+    needs: config
+    if: needs.config.outputs.instinct == 'true'
     runs-on: ["self-hosted", "mi300x", "gpu", "rocm"]
     timeout-minutes: 120
     env:
@@ -305,6 +323,8 @@ jobs:
   # -------------------------------------------------------------- Windows ---
   windows:
     name: Real Claude Code on Windows
+    needs: config
+    if: needs.config.outputs.windows == 'true'
     runs-on: ["self-hosted", "strix_halo", "Windows"]
     timeout-minutes: 180
     env:
@@ -335,8 +355,15 @@ jobs:
       - name: Install the candidate harness
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --no-cache-dir "skillscope @ git+https://github.com/rominf/skillscope@inspect-engine"
+          python -m pip install --no-cache-dir "skillscope[inspect] @ git+https://github.com/rominf/skillscope@inspect-engine"
           python -m pip install --force-reinstall --no-deps --no-cache-dir "skillscope @ git+https://github.com/rominf/skillscope@inspect-engine"
+
+      # Three skills failed in under a second on the first attempt because the
+      # harness installed without its extra, and `continue-on-error` on the leg
+      # below reported that as success. Check the import before spending
+      # anything.
+      - name: Check the harness can actually run
+        run: python -c "import inspect_ai; from skillscope.engine import cli_agent; print('ok', inspect_ai.__version__)"
 
       # This job is about the engine, not the skills. Most of this catalogue
       # targets Linux hardware and tooling, so failures here are expected and
