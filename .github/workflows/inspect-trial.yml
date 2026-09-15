@@ -30,6 +30,12 @@ jobs:
     runs-on: ["self-hosted", "strix_halo", "Linux"]
     timeout-minutes: 90
     env:
+      # The legs below that this is false for are settled: routing scored
+      # 46/46, the inspect engine has run the whole catalogue twice, and
+      # `legacy` vs `claude-cli` agreed 4/4 against a 4/4 noise floor.
+      # Re-running them re-spends roughly ten dollars of gateway budget to
+      # reproduce numbers already in hand. Flip to 'true' for a full trial.
+      RERUN_SETTLED: 'false'
       ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
       ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
       ANTHROPIC_CUSTOM_HEADERS: |
@@ -133,10 +139,15 @@ jobs:
           python - <<'CHECK'
           import inspect
           from skillscope.engine import sandbox
-          src = inspect.getsource(sandbox._declared_compose)
-          assert "machine_path" in src, (
-              "installed an older skillscope: a declared compose file still "
-              "resolves against the skill root"
+          from skillscope.engine import tools, verify
+          assert hasattr(tools, "workdir_path"), (
+              "installed an older skillscope: the claude-code leg cannot be "
+              "told where to work, so every files_exist check will report an "
+              "empty sandbox"
+          )
+          assert "cwd=" in inspect.getsource(verify.build_task), (
+              "installed an older skillscope: the claude-code leg still runs "
+              "the agent at the container root"
           )
           print("harness is current")
           CHECK
@@ -149,6 +160,7 @@ jobs:
       # `--min-accuracy 0` reports instead of gating. A surprise here is
       # information, not a broken branch.
       - name: Routing, whole catalogue
+        if: env.RERUN_SETTLED == 'true'
         run: >
           skillscope routing --engine inspect
           --skills-dir 'skills/*'
@@ -181,6 +193,7 @@ jobs:
       # something, and finding something is the point -- a red step here should
       # not hide the routing result above it.
       - name: Behavioral, every skill that belongs on this runner
+        if: env.RERUN_SETTLED == 'true'
         continue-on-error: true
         env:
           SKILLSCOPE_SANDBOX: ${{ steps.sandbox.outputs.provider }}
@@ -256,6 +269,7 @@ jobs:
       # than working in one filesystem and grading another. Unsandboxed, like
       # the legacy engine this repository's CI already runs.
       - name: Behavioral again, on real Claude Code driven from the host
+        if: env.RERUN_SETTLED == 'true'
         continue-on-error: true
         env:
           SKILLSCOPE_SANDBOX: local
@@ -285,6 +299,7 @@ jobs:
       # without a measured floor a flip cannot be told from ordinary variance.
       # Two skills rather than six, because that is three runs of each.
       - name: Does wrapping the CLI change its verdicts?
+        if: env.RERUN_SETTLED == 'true'
         continue-on-error: true
         env:
           SKILLSCOPE_SANDBOX: local
@@ -315,3 +330,7 @@ jobs:
             benchmark-legacy-vs-cli.json
             .skillscope/logs/
           if-no-files-found: warn
+          # `.skillscope/logs` starts with a dot, and v4 skips hidden files
+          # unless told otherwise. The transcripts have been dropped on every
+          # run so far, which is exactly what this step exists to keep.
+          include-hidden-files: true
