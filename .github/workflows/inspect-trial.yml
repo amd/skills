@@ -4,18 +4,27 @@
 
 name: inspect-engine trial
 
-# A trial of amd/skillscope#19, which adds a second eval engine built on
-# inspect_ai. Nothing here is part of this repository's CI.
+# A trial of amd/skillscope#19, which rebuilds the eval engine on inspect_ai.
+# Nothing here is part of this repository's CI.
 #
 # Scoped to its own branch: it runs when that branch is pushed and is
 # unreachable from main, from any pull request, and from the required checks.
-# Deleting the branch deletes the trial. `workflow_dispatch` would not work
-# here at all, since that only reaches workflows already on the default branch.
+# Deleting the branch deletes the trial.
 #
-# What it is for: the engine has been exercised against one skill in a podman
-# container on a laptop, and against fixtures in hosted CI. It has never run on
-# this repository's runners, against this catalogue, through this gateway --
-# which is the only place the answer that matters can be obtained.
+# Earlier runs answered whether the engine works at all. This one answers a
+# narrower question that the earlier ones left open by sampling: every skill in
+# the catalogue, against every engine that can reach its hardware. Three jobs
+# because three runner pools, and they overlap in wall clock.
+#
+#   linux    strix_halo, Linux    routing (whole catalogue) + 3 engines
+#   instinct mi300x               the two skills that need an Instinct card
+#   windows  strix_halo, Windows  the claim this whole design rests on
+#
+# The Windows job is the one that matters most. `inspect_swe` installs a Linux
+# proxy binary in the guest and cannot run on Windows at all, so `claude-cli`
+# -- the real CLI driven from the host under inspect_ai -- is the only way real
+# Claude Code reaches a Windows runner. That has been verified by hand on a
+# laptop and never in CI.
 
 on:
   push:
@@ -24,74 +33,66 @@ on:
 permissions:
   contents: read
 
+env:
+  ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
+  # Every skill with a dataset. The room is the whole catalogue on purpose:
+  # routing pools each skill's prompts as its neighbours' negatives, so a skill
+  # left out of the room is a set of negatives nobody is asserting. Earlier
+  # runs used a room of five and reported 46/46 as though it covered the repo.
+  ROUTING_ROOM: >-
+    hyperloom-workload-optimizer,lemonade-router-builder,local-ai-app-integration,local-ai-use,magpie-kernel-evaluator,serving-llms-on-epyc,serving-llms-on-instinct,tracelens-analysis-orchestrator
+
 jobs:
-  trial:
-    name: Routing on the inspect engine
+  # ---------------------------------------------------------------- Linux ---
+  linux:
+    name: Whole catalogue, three engines
     runs-on: ["self-hosted", "strix_halo", "Linux"]
-    timeout-minutes: 90
+    timeout-minutes: 180
     env:
-      # The legs below that this is false for are settled: routing scored
-      # 46/46, the inspect engine has run the whole catalogue twice, and
-      # `legacy` vs `claude-cli` agreed 4/4 against a 4/4 noise floor.
-      # Re-running them re-spends roughly ten dollars of gateway budget to
-      # reproduce numbers already in hand. Flip to 'true' for a full trial.
-      RERUN_SETTLED: 'false'
       ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
-      ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
       ANTHROPIC_CUSTOM_HEADERS: |
         Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
         user: a1_ucicd
+      # Everything that does not declare mi300x. `magpie-kernel-evaluator` is
+      # GPU work that declares no machine.yml at all, so it runs here by
+      # default rather than by intent -- keep an eye on what it reports.
+      SKILLS: >-
+        lemonade-router-builder local-ai-app-integration local-ai-use
+        magpie-kernel-evaluator serving-llms-on-epyc
+        tracelens-analysis-orchestrator
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       # This runner has the Docker CLI but its user cannot reach the socket, so
       # no container can start. Podman is daemonless and rootless and needs
-      # neither, which is exactly the gap. Best effort; the next step copes
-      # with it not working.
+      # neither. Best effort; the sandbox probe copes with it not working.
       #
       # Note this mutates a persistent shared runner. On an ephemeral fleet it
-      # would belong in the image instead.
+      # would belong in the image.
       - name: Install podman if it is missing
         continue-on-error: true
         run: |
-          # Both, not just podman: it is already installed from an earlier run
-          # of this trial, and checking only for it would skip the thing that
-          # was actually missing.
           if podman info >/dev/null 2>&1 && podman-compose version >/dev/null 2>&1; then
-            echo "podman and podman-compose already usable"
-            exit 0
+            echo "podman and podman-compose already usable"; exit 0
           fi
-          # Both from apt: they are system packages every job on this runner
-          # would see, which is what a runner image would ship. `podman compose`
-          # alone is not enough -- it is a shim that delegates to whichever
-          # compose provider it finds, and on this runner that is Docker's
-          # plugin, which then talks to the daemon nobody can reach.
           sudo -n apt-get update -qq \
             && sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -qq podman podman-compose \
-            || echo "apt could not install podman and podman-compose; the next step will fall back"
+            || echo "apt could not install podman and podman-compose"
 
       # Docker assumes Docker Hub for a short image name; podman refuses to
-      # guess, and inspect's default compose names `aisiuk/inspect-tool-support`
-      # without a registry. So podman needs one configured or nothing pulls.
-      # This belongs in a runner image next to the packages themselves.
+      # guess, and inspect's default compose names its image without one.
       - name: Give podman a registry to search
         continue-on-error: true
         run: |
           conf=/etc/containers/registries.conf
           if sudo -n test -f "$conf" && sudo -n grep -q "^unqualified-search-registries" "$conf"; then
-            echo "already configured:"
-            sudo -n grep "^unqualified-search-registries" "$conf"
+            echo "already configured"
           else
             echo 'unqualified-search-registries = ["docker.io"]' \
-              | sudo -n tee -a "$conf" >/dev/null \
-              && echo "added docker.io as a search registry" \
-              || echo "could not write $conf"
+              | sudo -n tee -a "$conf" >/dev/null || echo "could not write $conf"
           fi
 
       # `docker compose version` reports the CLI's own version and never
@@ -100,8 +101,6 @@ jobs:
       - name: Choose a sandbox
         id: sandbox
         run: |
-          # Podman needs a working compose of its own, not just a daemon: the
-          # last run had `podman info` succeed and then fail at compose time.
           if podman info >/dev/null 2>&1 && podman-compose version >/dev/null 2>&1; then
             provider=podman
           elif docker info >/dev/null 2>&1; then
@@ -115,20 +114,12 @@ jobs:
       - name: Install the candidate harness
         run: |
           python -m pip install --upgrade pip
-          # `[podman]` rather than `[inspect]`: the provider is registered by a
-          # separate package, so installing the podman binary is not enough.
-          #
           # Two steps, because a branch that does not bump its version defeats
           # both of pip's usual escapes: the VCS URL does not change when the
           # branch moves, and `--upgrade` sees the same version already
-          # installed and calls it satisfied. Three runs of this trial reported
-          # a bug that had already been fixed.
-          #
-          # First the dependency closure, which may legitimately no-op.
+          # installed and calls it satisfied.
           python -m pip install --no-cache-dir \
-            "skillscope[podman] @ git+https://github.com/rominf/skillscope@inspect-engine"
-          # Then the package itself, unconditionally. `--no-deps` so this does
-          # not drag eighty packages along with it.
+            "skillscope[podman,verify] @ git+https://github.com/rominf/skillscope@inspect-engine"
           python -m pip install --force-reinstall --no-deps --no-cache-dir \
             "skillscope @ git+https://github.com/rominf/skillscope@inspect-engine"
 
@@ -138,62 +129,35 @@ jobs:
         run: |
           python - <<'CHECK'
           import inspect
-          from skillscope.engine import sandbox
           from skillscope.engine import tools, verify
-          assert hasattr(tools, "workdir_path"), (
-              "installed an older skillscope: the claude-code leg cannot be "
-              "told where to work, so every files_exist check will report an "
-              "empty sandbox"
-          )
+          assert hasattr(tools, "workdir_path"), "older skillscope: no workdir_path"
           assert "cwd=" in inspect.getsource(verify.build_task), (
-              "installed an older skillscope: the claude-code leg still runs "
-              "the agent at the container root"
+              "older skillscope: the claude-code leg still runs at the container root"
           )
           print("harness is current")
           CHECK
 
-      # Routing is the leg to try first. It offers the skill tool and never
-      # calls it, so nothing is executed and no sandbox is started -- whatever
-      # the probe above found cannot block it. It is also the cheap leg: one
-      # model call per case rather than an agent loop.
-      #
-      # `--min-accuracy 0` reports instead of gating. A surprise here is
-      # information, not a broken branch.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install the claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      # Offers the skill tool and never calls it, so nothing is executed and no
+      # sandbox is started. One model call per case. `--min-accuracy 0` reports
+      # instead of gating: a surprise here is information, not a broken branch.
       - name: Routing, whole catalogue
-        if: env.RERUN_SETTLED == 'true'
+        continue-on-error: true
         run: >
           skillscope routing --engine inspect
           --skills-dir 'skills/*'
-          --routing-room 'local-ai-use,local-ai-app-integration,serving-llms-on-instinct,tracelens-analysis-orchestrator,hyperloom-workload-optimizer'
+          --routing-room '${{ env.ROUTING_ROOM }}'
           --min-accuracy 0
-          --output routing-trial.json
+          --output routing-all.json
 
-      # Every skill that belongs on this runner. The two that declare
-      # `mi300x` are left out: they want the Instinct pool, with its own
-      # labels, gate and credentials, which is a different job entirely.
-      #
-      # Two of these are known quantities. `lemonade-router-builder` needs
-      # neither network nor accelerator and runs in the default container.
-      # `local-ai-app-integration` installs a runtime and fetches models, so it
-      # declares its own compose file with egress -- the first real use of
-      # `sandbox:` in machine.yml.
-      #
-      # The other four run on the default sandbox on purpose, undeclared.
-      # Guessing what each needs would hide the answer; letting them fail says
-      # which ones need a `sandbox:` declaration and which need other hardware.
-      # `magpie-kernel-evaluator` is the pointed one -- it is GPU work that
-      # declares no machine.yml at all.
-      #
-      # Runs in whatever the sandbox step found. If that is `local` the agent
-      # works directly in the runner's filesystem, as the legacy engine already
-      # does, and the report records `sandbox_isolated: false` so no reader has
-      # to guess.
-      #
-      # Continues on error deliberately. This is the leg most likely to find
-      # something, and finding something is the point -- a red step here should
-      # not hide the routing result above it.
-      - name: Behavioral, every skill that belongs on this runner
-        if: env.RERUN_SETTLED == 'true'
+      # One invocation per skill: running six in one command meant the last one
+      # dying discarded the reports for the five that had already passed.
+      - name: Behavioral -- inspect (harness-independent agent)
         continue-on-error: true
         env:
           SKILLSCOPE_SANDBOX: ${{ steps.sandbox.outputs.provider }}
@@ -201,136 +165,212 @@ jobs:
           # and the run dies trying to reach the Docker daemon.
           INSPECT_PODMAN_COMPOSE: podman-compose
         run: |
-          # One invocation per skill, which is what CI does anyway -- the real
-          # workflow gives each skill its own job. Running six in one command
-          # meant the last one dying discarded the reports for the five that
-          # had already passed, and only inspect's own .eval logs survived.
           status=0
-          for skill in lemonade-router-builder local-ai-app-integration \
-                       tracelens-analysis-orchestrator serving-llms-on-epyc \
-                       magpie-kernel-evaluator local-ai-use; do
-            echo "::group::$skill"
-            skillscope behavioral --engine inspect \
-              --skills-dir 'skills/*' \
-              --skill "$skill" \
-              --output "behavioral-$skill.json" || { echo "FAILED: $skill"; status=1; }
+          for skill in $SKILLS; do
+            echo "::group::$skill (inspect)"
+            skillscope behavioral --engine inspect --skills-dir 'skills/*' \
+              --skill "$skill" --output "linux-inspect-$skill.json" \
+              || { echo "FAILED: $skill"; status=1; }
             echo "::endgroup::"
           done
           exit $status
 
-      # The same cases again, driven by real Claude Code in the sandbox rather
-      # than a harness-independent agent. This is the leg that answers whether
-      # the two agree: these skills are written for Claude Code and may lean on
-      # its conventions, which is an empirical question rather than a matter of
-      # opinion. `tools/benchmark_engines.py --compare` diffs the two reports.
-      #
-      # Linux only -- inspect_swe shells `bash -c` to locate the CLI and the
-      # proxy it installs in the guest is a Linux binary. This runner is Linux.
-      - name: Behavioral again, on real Claude Code
+      - name: Behavioral -- claude-code (real CLI, in the sandbox)
         continue-on-error: true
         env:
           SKILLSCOPE_SANDBOX: ${{ steps.sandbox.outputs.provider }}
           INSPECT_PODMAN_COMPOSE: podman-compose
         run: |
-          python -m pip install --no-cache-dir \
-            "skillscope[verify] @ git+https://github.com/rominf/skillscope@inspect-engine"
           status=0
-          for skill in lemonade-router-builder local-ai-app-integration \
-                       tracelens-analysis-orchestrator serving-llms-on-epyc; do
+          for skill in $SKILLS; do
             echo "::group::$skill (claude-code)"
-            skillscope behavioral --engine claude-code \
-              --skills-dir 'skills/*' \
-              --skill "$skill" \
-              --output "claude-code-$skill.json" || { echo "FAILED: $skill"; status=1; }
+            skillscope behavioral --engine claude-code --skills-dir 'skills/*' \
+              --skill "$skill" --output "linux-claude-code-$skill.json" \
+              || { echo "FAILED: $skill"; status=1; }
             echo "::endgroup::"
           done
           exit $status
 
-      # The two legs below drive the claude binary directly, and this runner
-      # has neither it nor npm on PATH -- `validate.yml` sets Node up for the
-      # same reason before it installs the CLI.
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      # `local` is not a choice here: the CLI runs on the host, so the sandbox
+      # has to be the host, and the harness refuses any other provider rather
+      # than working in one filesystem and grading another. Unsandboxed, like
+      # the legacy engine this repository's CI already runs.
+      - name: Behavioral -- claude-cli (real CLI, on the host)
+        continue-on-error: true
+        env:
+          SKILLSCOPE_SANDBOX: local
+        run: |
+          status=0
+          for skill in $SKILLS; do
+            echo "::group::$skill (claude-cli)"
+            skillscope behavioral --engine claude-cli --skills-dir 'skills/*' \
+              --skill "$skill" --output "linux-claude-cli-$skill.json" \
+              || { echo "FAILED: $skill"; status=1; }
+            echo "::endgroup::"
+          done
+          exit $status
+
+      - name: Keep the reports and the transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matrix-linux
+          path: |
+            routing-all.json
+            linux-*.json
+            .skillscope/logs/
+          # `.skillscope/logs` starts with a dot, and v4 skips hidden files
+          # unless told otherwise. The transcripts were dropped on every run
+          # before this was set, which is what the step exists to keep.
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  # ------------------------------------------------------------- Instinct ---
+  instinct:
+    name: The two skills that need an Instinct card
+    runs-on: ["self-hosted", "mi300x", "gpu", "rocm"]
+    timeout-minutes: 120
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
+      ANTHROPIC_CUSTOM_HEADERS: |
+        Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
+        user: a1_ucicd
+      SKILLS: hyperloom-workload-optimizer serving-llms-on-instinct
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Choose a sandbox
+        id: sandbox
+        run: |
+          if podman info >/dev/null 2>&1 && podman-compose version >/dev/null 2>&1; then
+            provider=podman
+          elif docker info >/dev/null 2>&1; then
+            provider=docker
+          else
+            provider=local
+          fi
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
+          echo "Behavioral cases will run in: $provider"
+
+      - name: Install the candidate harness
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --no-cache-dir \
+            "skillscope[podman,verify] @ git+https://github.com/rominf/skillscope@inspect-engine"
+          python -m pip install --force-reinstall --no-deps --no-cache-dir \
+            "skillscope @ git+https://github.com/rominf/skillscope@inspect-engine"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install the claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      # Only the two containerized engines run here. `claude-cli` executes on
+      # the host by construction, and this is shared GPU infrastructure rather
+      # than a desktop -- its host-side path is already proven on strix_halo,
+      # so repeating it here buys little against what it risks.
+      - name: Behavioral -- inspect and claude-code
+        continue-on-error: true
+        env:
+          SKILLSCOPE_SANDBOX: ${{ steps.sandbox.outputs.provider }}
+          INSPECT_PODMAN_COMPOSE: podman-compose
+        run: |
+          status=0
+          for engine in inspect claude-code; do
+            for skill in $SKILLS; do
+              echo "::group::$skill ($engine)"
+              skillscope behavioral --engine "$engine" --skills-dir 'skills/*' \
+                --skill "$skill" --output "instinct-$engine-$skill.json" \
+                || { echo "FAILED: $skill ($engine)"; status=1; }
+              echo "::endgroup::"
+            done
+          done
+          exit $status
+
+      - name: Keep the reports and the transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matrix-instinct
+          path: |
+            instinct-*.json
+            .skillscope/logs/
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  # -------------------------------------------------------------- Windows ---
+  windows:
+    name: Real Claude Code on Windows
+    runs-on: ["self-hosted", "strix_halo", "Windows"]
+    timeout-minutes: 180
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
+      ANTHROPIC_CUSTOM_HEADERS: |
+        Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
+        user: a1_ucicd
+      # Unsandboxed by construction: the CLI runs on the host, so the sandbox
+      # is the host. That is what the legacy engine already does on Windows
+      # today, so it is not a regression -- and the report records
+      # `sandbox_isolated: false` rather than leaving a reader to assume.
+      SKILLSCOPE_SANDBOX: local
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Install the claude CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      # The third way to drive the same cases: the real CLI again, but on the
-      # host under inspect_ai rather than inside the sandbox under inspect_swe.
-      # This is the path Windows has to take -- inspect_swe installs a Linux
-      # proxy binary in the guest, so it cannot run there at all -- and this
-      # runner is where it can be checked against the other two before anyone
-      # relies on it.
-      #
-      # `local` is not a choice here: the CLI runs on the host, so the sandbox
-      # has to be the host, and the harness refuses any other provider rather
-      # than working in one filesystem and grading another. Unsandboxed, like
-      # the legacy engine this repository's CI already runs.
-      - name: Behavioral again, on real Claude Code driven from the host
-        if: env.RERUN_SETTLED == 'true'
-        continue-on-error: true
-        env:
-          SKILLSCOPE_SANDBOX: local
+      - name: Install the candidate harness
         run: |
-          status=0
-          for skill in lemonade-router-builder local-ai-app-integration \
-                       tracelens-analysis-orchestrator serving-llms-on-epyc; do
-            echo "::group::$skill (claude-cli)"
-            skillscope behavioral --engine claude-cli \
-              --skills-dir 'skills/*' \
-              --skill "$skill" \
-              --output "claude-cli-$skill.json" || { echo "FAILED: $skill"; status=1; }
-            echo "::endgroup::"
-          done
+          python -m pip install --upgrade pip
+          python -m pip install --no-cache-dir "skillscope @ git+https://github.com/rominf/skillscope@inspect-engine"
+          python -m pip install --force-reinstall --no-deps --no-cache-dir "skillscope @ git+https://github.com/rominf/skillscope@inspect-engine"
+
+      # This job is about the engine, not the skills. Most of this catalogue
+      # targets Linux hardware and tooling, so failures here are expected and
+      # say nothing about those skills -- what is being tested is whether real
+      # Claude Code runs at all under inspect_ai on a Windows host, which is
+      # the claim that makes `inspect_swe` being Linux-only survivable.
+      #
+      # `lemonade-router-builder` is the exception worth reading closely: it is
+      # the one skill here whose subject matter is native to this platform.
+      - name: Behavioral -- claude-cli
+        continue-on-error: true
+        run: |
+          $skills = @(
+            "lemonade-router-builder",
+            "local-ai-use",
+            "tracelens-analysis-orchestrator"
+          )
+          $status = 0
+          foreach ($s in $skills) {
+            Write-Host "::group::$s (claude-cli on Windows)"
+            skillscope behavioral --engine claude-cli --skills-dir "skills/*" `
+              --skill $s --output "windows-claude-cli-$s.json"
+            if ($LASTEXITCODE -ne 0) { Write-Host "FAILED: $s"; $status = 1 }
+            Write-Host "::endgroup::"
+          }
           exit $status
 
-      # The question this trial exists to answer about `claude-cli`: does
-      # wrapping the CLI in inspect change what it concludes? Both engines run
-      # the same binary on the same cases, so agreement means the framework
-      # around the agent is faithful and disagreement is a defect in the
-      # crossing -- a sharper signal than comparing two different agents.
-      #
-      # If they agree, the legacy engine is redundant rather than merely
-      # superseded, and the ~1,200 lines it occupies can go.
-      #
-      # `--noise` runs the baseline twice. Behavioral is nondeterministic, so
-      # without a measured floor a flip cannot be told from ordinary variance.
-      # Two skills rather than six, because that is three runs of each.
-      - name: Does wrapping the CLI change its verdicts?
-        if: env.RERUN_SETTLED == 'true'
-        continue-on-error: true
-        env:
-          SKILLSCOPE_SANDBOX: local
-        run: |
-          curl -fsSL -o benchmark_engines.py \
-            https://raw.githubusercontent.com/rominf/skillscope/inspect-engine/tools/benchmark_engines.py
-          python benchmark_engines.py behavioral \
-            --baseline legacy --candidate claude-cli --noise \
-            --output benchmark-legacy-vs-cli.json \
-            --skills-dir 'skills/*' \
-            --skill lemonade-router-builder,tracelens-analysis-orchestrator \
-            | tee -a "$GITHUB_STEP_SUMMARY"
-
-      # The reports say which expectations failed; the eval logs say what the
-      # agent actually did. Diagnosing the last failure needed the transcript
-      # and it had to be inferred from the judge's phrasing instead, so keep
-      # both. `.skillscope/logs` is where the inspect engine writes them.
       - name: Keep the reports and the transcripts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: inspect-trial-reports
+          name: matrix-windows
           path: |
-            routing-trial.json
-            behavioral-*.json
-            claude-code-*.json
-            claude-cli-*.json
-            benchmark-legacy-vs-cli.json
+            windows-*.json
             .skillscope/logs/
-          if-no-files-found: warn
-          # `.skillscope/logs` starts with a dot, and v4 skips hidden files
-          # unless told otherwise. The transcripts have been dropped on every
-          # run so far, which is exactly what this step exists to keep.
           include-hidden-files: true
+          if-no-files-found: warn
