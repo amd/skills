@@ -39,6 +39,8 @@ Use these values for the placeholders in the prompts below:
 
 - `<framework>`: `vllm` or `sglang`
 - `<gpu_type>`: `MI300X`, `MI325X`, or `MI355X`
+- `<model_path>`: absolute path to a local model directory holding `config.json`.
+  Leave that clause out of a demo prompt to take the demo's own model.
 
 You do **not** need to decide these before Step 2:
 
@@ -98,7 +100,6 @@ Save model selection, workload choices and launch approval for Step 3.
 Verify the setup handoff:
 
 ```bash
-ls hyperloom/inference_optimizer/assets/install.sh
 test -f .env
 grep -E '^(USER_DATA_PATH|HYPERLOOM_RUN_MODE)=' .env
 ```
@@ -110,22 +111,22 @@ Start this step only after Step 2 has written `.env` and prepared the execution
 environment. Step 3 reuses the Docker or bare-metal run mode recorded in `.env`;
 do not choose it again here.
 
-There are three ways to run. Paste the prompt that matches, replacing
-`<framework>` and `<gpu_type>` with your target. The flags in each are a set, so
-pass them together. The two demos carry the same workload and flags as the
-matching Hyperloom demo skill; you can point either one at your own model, and
-**Custom** is for changing the workload itself.
+There are three ways to run. Ask for the one you want; the agent loads the
+matching demo skill the wheel installed, and that skill owns the workload preset,
+the budget and every optimizer flag. Nothing here restates them, so a change to
+the CLI reaches you through the wheel rather than through this page.
+
+Either demo can run your own model instead of its default — name the path in the
+prompt. The preset workload does not change with the model, so if yours is much
+larger or a different architecture, use **Custom** and set the values yourself.
 
 **1. 3-hour demo.** Serving and config parameters only; the kernel agent is
-off. Swap in your own model if you want; with a 3-hour budget keep it at 8B or
+off. The shortest end-to-end check; with a 3-hour budget keep the model at 8B or
 below.
 
 ```text
-Optimize Qwen/Qwen3-8B with <framework> on <gpu_type>: TP=1, conc=64, ISL=1024,
-OSL=1024, precision bf16, target-gain 30, max-hours 3, serving parameters only:
---max-minutes-framework-pct 0.50 --max-minutes-sweep-pct 0.01
---no-kernel --no-enable-conc-sweep --no-enable-roofline.
-Launch and monitor.
+Run the 3-hour Hyperloom demo with <framework> on <gpu_type>, using the model at
+<model_path>. Launch and monitor.
 ```
 
 **2. 12-hour demo.** Every lever, kernel rewrites included. The kernel agent
@@ -133,11 +134,8 @@ needs room to profile, rewrite and revalidate hot kernels, which is where the
 larger gains come from.
 
 ```text
-Optimize Qwen/Qwen3-14B-FP8 with <framework> on <gpu_type>: TP=1, conc=64,
-ISL=1024, OSL=1024, precision fp8, target-gain 50, max-hours 12, all components
-enabled:
---max-minutes-framework-pct 0.43 --max-minutes-kernel-pct 0.42.
-Launch and monitor.
+Run the 12-hour Hyperloom demo with <framework> on <gpu_type>, using the model at
+<model_path>. Launch and monitor.
 ```
 
 **3. Custom.** Ask for a run and let the agent take you through the choices:
@@ -152,9 +150,9 @@ Optimize a model with Hyperloom on this host. Walk me through the choices.
 Whichever of the three you use, the agent shows the full launch plan (every
 resolved value and every flag) and waits for your approval before it starts.
 
-Once workload values are resolved, the agent should run `install.sh` (IR-2),
-the GPU preflight (IR-1), launch `hyperloom.inference_optimizer.cli optimize`
-with those values as CLI flags, then poll `state.json`.
+Once the values are resolved, the agent clears the runtime install and GPU
+preflight gates the optimizer skill owns, starts the run in the background, then
+polls the session state.
 
 ## Step 4: Read results
 
@@ -186,7 +184,7 @@ Use these entries when a step fails.
 
 - Resume: `Resume the most recent Hyperloom session for <model>.`
 - Ran the 3-hour demo and want kernel rewrites? Start the 12-hour run from
-  Step 3 rather than raising `--max-hours` on the 3-hour demo's flags.
+  Step 3 rather than stretching the 3-hour demo's budget.
 - Advanced flags: use **Custom** in Step 3 and let the agent derive them, or read
   the [optimizer skill](https://github.com/AMD-AGI/Hyperloom/blob/main/src/hyperloom/inference_optimizer/SKILL.md)
   the wheel installs.
