@@ -51,11 +51,17 @@ jobs:
     name: Which pools to run
     runs-on: ubuntu-latest
     outputs:
-      linux: "false"
-      instinct: "false"
+      linux: "true"
+      instinct: "true"
       windows: "true"
+      # Routing scored 68/68 over the whole room and is not in question.
+      routing: "false"
+      # Which engines the Linux job drives. `inspect` and `claude-code` have
+      # completed results; `claude-cli` has none, because a dispatch bug sent
+      # every previous attempt to the legacy engine.
+      linux_engines: "claude-cli"
     steps:
-      - run: echo "linux=false instinct=false windows=true"
+      - run: echo "linux=true instinct=true windows=true routing=false engines=claude-cli"
 
   # ---------------------------------------------------------------- Linux ---
   linux:
@@ -145,11 +151,20 @@ jobs:
         run: |
           python - <<'CHECK'
           import inspect
+          from skillscope import cli
           from skillscope.engine import tools, verify
           assert hasattr(tools, "workdir_path"), "older skillscope: no workdir_path"
           assert "cwd=" in inspect.getsource(verify.build_task), (
               "older skillscope: the claude-code leg still runs at the container root"
           )
+          # The one that matters for this run. A literal tuple here meant
+          # --engine claude-cli silently ran the legacy engine, and the report
+          # said claude-cli anyway -- so the reports cannot be trusted to show
+          # it. Assert the dispatch itself.
+          assert "if args.engine in INSPECT_ENGINES:" in inspect.getsource(cli.cmd_behavioral), (
+              "older skillscope: --engine claude-cli falls through to legacy"
+          )
+          assert set(cli.INSPECT_ENGINES) == set(cli.ENGINES) - {"legacy"}
           print("harness is current")
           CHECK
 
@@ -163,6 +178,7 @@ jobs:
       # sandbox is started. One model call per case. `--min-accuracy 0` reports
       # instead of gating: a surprise here is information, not a broken branch.
       - name: Routing, whole catalogue
+        if: needs.config.outputs.routing == 'true'
         continue-on-error: true
         run: >
           skillscope routing --engine inspect
@@ -173,56 +189,33 @@ jobs:
 
       # One invocation per skill: running six in one command meant the last one
       # dying discarded the reports for the five that had already passed.
-      - name: Behavioral -- inspect (harness-independent agent)
+      #
+      # `claude-cli` runs on the host by construction, so it takes `local`
+      # while the other two take whatever the probe found. 2700s because
+      # tracelens needs 850s on Windows and 480-600s here, against a 900s
+      # default that three legs have already died on.
+      - name: Behavioral
         continue-on-error: true
         env:
-          SKILLSCOPE_SANDBOX: ${{ steps.sandbox.outputs.provider }}
-          # Without this, podman picks Docker's compose plugin as its provider
-          # and the run dies trying to reach the Docker daemon.
+          PROBED: ${{ steps.sandbox.outputs.provider }}
+          ENGINES: ${{ needs.config.outputs.linux_engines }}
           INSPECT_PODMAN_COMPOSE: podman-compose
         run: |
           status=0
-          for skill in $SKILLS; do
-            echo "::group::$skill (inspect)"
-            skillscope behavioral --engine inspect --skills-dir 'skills/*' \
-              --skill "$skill" --output "linux-inspect-$skill.json" \
-              || { echo "FAILED: $skill"; status=1; }
-            echo "::endgroup::"
-          done
-          exit $status
-
-      - name: Behavioral -- claude-code (real CLI, in the sandbox)
-        continue-on-error: true
-        env:
-          SKILLSCOPE_SANDBOX: ${{ steps.sandbox.outputs.provider }}
-          INSPECT_PODMAN_COMPOSE: podman-compose
-        run: |
-          status=0
-          for skill in $SKILLS; do
-            echo "::group::$skill (claude-code)"
-            skillscope behavioral --engine claude-code --skills-dir 'skills/*' \
-              --skill "$skill" --output "linux-claude-code-$skill.json" \
-              || { echo "FAILED: $skill"; status=1; }
-            echo "::endgroup::"
-          done
-          exit $status
-
-      # `local` is not a choice here: the CLI runs on the host, so the sandbox
-      # has to be the host, and the harness refuses any other provider rather
-      # than working in one filesystem and grading another. Unsandboxed, like
-      # the legacy engine this repository's CI already runs.
-      - name: Behavioral -- claude-cli (real CLI, on the host)
-        continue-on-error: true
-        env:
-          SKILLSCOPE_SANDBOX: local
-        run: |
-          status=0
-          for skill in $SKILLS; do
-            echo "::group::$skill (claude-cli)"
-            skillscope behavioral --engine claude-cli --skills-dir 'skills/*' \
-              --skill "$skill" --output "linux-claude-cli-$skill.json" \
-              || { echo "FAILED: $skill"; status=1; }
-            echo "::endgroup::"
+          for engine in $ENGINES; do
+            if [ "$engine" = "claude-cli" ]; then
+              export SKILLSCOPE_SANDBOX=local
+            else
+              export SKILLSCOPE_SANDBOX="$PROBED"
+            fi
+            for skill in $SKILLS; do
+              echo "::group::$skill ($engine, sandbox=$SKILLSCOPE_SANDBOX)"
+              skillscope behavioral --engine "$engine" --skills-dir 'skills/*' \
+                --timeout 2700 --skill "$skill" \
+                --output "linux-$engine-$skill.json" \
+                || { echo "FAILED: $skill ($engine)"; status=1; }
+              echo "::endgroup::"
+            done
           done
           exit $status
 
@@ -302,7 +295,8 @@ jobs:
             for skill in $SKILLS; do
               echo "::group::$skill ($engine)"
               skillscope behavioral --engine "$engine" --skills-dir 'skills/*' \
-                --skill "$skill" --output "instinct-$engine-$skill.json" \
+                --timeout 2700 --skill "$skill" \
+                --output "instinct-$engine-$skill.json" \
                 || { echo "FAILED: $skill ($engine)"; status=1; }
               echo "::endgroup::"
             done
@@ -363,7 +357,16 @@ jobs:
       # below reported that as success. Check the import before spending
       # anything.
       - name: Check the harness can actually run
-        run: python -c "import inspect_ai; from skillscope.engine import cli_agent; print('ok', inspect_ai.__version__)"
+        run: |
+          python - <<'CHECK'
+          import inspect, inspect_ai
+          from skillscope import cli
+          from skillscope.engine import cli_agent  # noqa: F401
+          assert "if args.engine in INSPECT_ENGINES:" in inspect.getsource(cli.cmd_behavioral), (
+              "older skillscope: --engine claude-cli falls through to legacy"
+          )
+          print("ok", inspect_ai.__version__)
+          CHECK
 
       # This job is about the engine, not the skills. Most of this catalogue
       # targets Linux hardware and tooling, so failures here are expected and
@@ -376,7 +379,11 @@ jobs:
       - name: Behavioral -- claude-cli
         continue-on-error: true
         run: |
-          $skills = @("tracelens-analysis-orchestrator")
+          $skills = @(
+            "lemonade-router-builder",
+            "local-ai-use",
+            "tracelens-analysis-orchestrator"
+          )
           $status = 0
           foreach ($s in $skills) {
             Write-Host "::group::$s (claude-cli on Windows)"
