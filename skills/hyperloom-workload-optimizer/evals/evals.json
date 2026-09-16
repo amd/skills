@@ -16,11 +16,8 @@
     {
       "id": "hyperloom-workload-intake",
       "skill_should_trigger": true,
-      "note": "Asks about each graded step, otherwise the answer's budget goes to listing workload values and the later steps drop out at random. Whether the answer names the values is deliberately not graded: a judge reads \"the values it needs\" as a request the prompt forbids and splits both ways on it, and logs_contain cannot stand in because those names are all over SKILL.md, which the run reads. Collecting them before a launch is graded by hyperloom-optimize-vllm-first-steps.",
-      "prompt": "The environment is already set up. Walk me through what still has to happen before the optimizer starts: which workload values get collected, and what has to happen once they are known but before the optimizer actually starts. Describe it in five or six sentences -- do not ask me for the values yet, and do not run anything.",
-      "expected_behavior": [
-        "Say a launch plan is presented and confirmed by the user before the optimizer is launched"
-      ]
+      "note": "Trigger only. Every judged expectation tried here has graded both ways over byte-identical inputs, because the prompt forbids running anything and the judge then reads a described launch plan as a plan never presented. That the plan is confirmed before a launch is graded where a run actually reaches it, by hyperloom-optimize-vllm-first-steps and hyperloom-bootstrap-phase-discipline.",
+      "prompt": "The environment is already set up. Walk me through what still has to happen before the optimizer starts: which workload values get collected, and what has to happen once they are known but before the optimizer actually starts. Describe it in five or six sentences -- do not ask me for the values yet, and do not run anything."
     },
     {
       "id": "hyperloom-bootstrap-phase-discipline",
