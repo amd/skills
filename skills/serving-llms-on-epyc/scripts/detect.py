@@ -12,8 +12,9 @@ Usage:
 Output: JSON with cpu_model, is_amd_epyc, logical_cores, physical_cores,
 sockets, threads_per_core, numa_nodes, memory_gb, epyc_generation
 (Naples/Rome/Milan/Genoa/Bergamo/Siena/Turin/Venice or EPYC 4004/4005),
-zen_arch, is_supported_epyc, and avx512. Exits 0 on success, 1 if no CPU info
-could be read.
+zen_arch, is_supported_epyc, and avx512 (true = has AVX-512 BF16 / avx512_bf16,
+the extension zentorch's bf16 CPU path requires). Exits 0 on success, 1 if no CPU
+info could be read.
 
 Env vars (used when --host is not given):
     ZEN_SSH_HOST, ZEN_SSH_USER, ZEN_SSH_PORT
@@ -147,7 +148,10 @@ def main():
     is_epyc = vendor == "AuthenticAMD" and "EPYC" in model.upper()
     generation, zen_arch = _epyc_generation(model)
     is_supported_epyc = is_epyc and generation in SUPPORTED_EPYC_GENERATIONS
-    avx512 = "avx512f" in _lscpu_field(lscpu_out, "Flags").split()
+    # zentorch's bf16 CPU path needs AVX-512 BF16 specifically (avx512_bf16), not
+    # just base AVX-512 (avx512f). On EPYC these coincide (Zen4+ has both, pre-Zen4
+    # neither), but gate on the exact flag zentorch requires.
+    avx512 = "avx512_bf16" in _lscpu_field(lscpu_out, "Flags").split()
 
     print(json.dumps({
         "cpu_model": model,

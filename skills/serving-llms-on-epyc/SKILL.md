@@ -53,16 +53,24 @@ Returns `cpu_model`, `is_amd_epyc`, `epyc_generation`
 `zen_arch`, `is_supported_epyc`, `avx512`, `logical_cores`, `physical_cores`,
 `sockets`, `numa_nodes`, `memory_gb`.
 
-Three hard gates -- stop if any fails:
+Route from detect.py -- decide the serving path:
 - `is_amd_epyc` is `false` -> stop: this skill targets AMD EPYC. (Other x86 may work
   but is unsupported here.)
-- `is_supported_epyc` is `false` -> stop: this recipe supports only the **AMD EPYC
-  9000 series** for now -- Genoa (9004), Turin (9005), and Venice (9006). Other EPYC
-  (Bergamo, Siena, EPYC 4004/4005, pre-Zen4) may even expose AVX-512, but ISA
-  compatibility alone does not make them supported targets for this skill; stop.
-- `avx512` is `false` -> stop: the zentorch CPU path **requires AVX-512**, i.e. Zen4+
-  on the supported 9000-series parts above. Pre-Zen4 EPYC (Naples / Rome / Milan) is
-  not supported -- say so and stop rather than launching into a load-time failure.
+- `avx512` is `false` -> **zentorch cannot run** on this CPU (its bf16 path needs
+  AVX-512 BF16, `avx512_bf16`, which only lands on Zen4+). This is a pre-Zen4 EPYC
+  (Naples / Rome / Milan, 7000 series). Do **not** dead-end -- it is still an EPYC
+  host: **offer the stock vLLM CPU path** (plain vLLM, no zentorch acceleration --
+  slower, but verified working on EPYC 7763/Milan). Proceed only on the user's explicit
+  OK, launching the official stock vLLM CPU image (Step 6 "Stock vLLM" variant); if the
+  user declines, stop.
+- `is_supported_epyc` is `false` but `avx512` is `true` (e.g. Bergamo / Siena /
+  EPYC 4004/4005) -> the zentorch path is **not validated** for this generation. Get
+  explicit confirmation to try zentorch unvalidated, or take the same stock vLLM offer.
+- else (**9000 series** -- Genoa/Turin/Venice -- with AVX-512 BF16) -> the validated
+  zentorch path. Proceed.
+
+`validate.py` (Step 2) reports `zentorch_capable` and sets `requires_confirmation`
+for the stock/unvalidated paths, so this routing is enforced there too.
 
 Carry `epyc_generation` / `avx512` through the later phases -- e.g. Venice packs up
 to 256 cores/socket, which the thread-binding in Step 5 sizes from.
@@ -70,12 +78,20 @@ to 256 cores/socket, which the thread-binding in Step 5 sizes from.
 ## Step 2: Validate the runtime and environment
 
 ```bash
-python3 scripts/validate.py --image <image from data/epyc.json> --generation <epyc_generation from detect>
+python3 scripts/validate.py --image <image from data/epyc.json> --generation <epyc_generation from detect> --avx512 <avx512 from detect>
 ```
 
-Returns `ready`, `requires_confirmation`, `runtime` (`docker`, `podman`, or null),
-`runtime_detail`, `conda_path_available`, `stack`, `compatibility`, `ram_gb`, and
-`errors/warnings/advisories`. Pick the path:
+This also **hard-enforces the AVX-512 gate**: on a CPU without AVX-512, validate.py
+returns a blocking `error` (`ready: false`) so the flow stops here regardless of the
+Step 1 prose -- no image pull, no launch. (It reads the local CPU itself if `--avx512`
+is omitted, so the gate holds even if the value was not passed through.)
+
+Returns `ready`, `requires_confirmation`, `zentorch_capable` (false -> zentorch
+can't run; use the stock vLLM variant in Step 6), `runtime` (`docker`, `podman`, or
+null), `runtime_detail`, `conda_path_available`, `stack`, `compatibility`, `hf_cache`
+(resolved HF cache mount -- use `hf_cache.mount` at launch), `ram_gb`, and
+`errors/warnings/advisories`. If `requires_confirmation` is set (stock/unvalidated
+path), surface that and get the user's OK before launching. Pick the path:
 - `runtime` is `docker` or `podman` -> container path (Step 6), used verbatim.
 - `runtime` null but `conda_path_available: true` -> conda/host path.
 - `runtime` null and no conda -> `ready` is false. Report the one-time
@@ -187,6 +203,7 @@ not launch unprompted. This is the human gate before anything runs:
 | Field | Value |
 |---|---|
 | Model / kind | `<model>` -- `text` or `multimodal` (from `check_model.py`) |
+| Backend | zentorch-accelerated (Zen4+) **or** stock vLLM CPU / no zentorch (`zentorch_capable:false` -- unaccelerated; verified on Milan) |
 | Path | container (`<runtime>`, image from `data/epyc.json`) or conda/host |
 | Precision | `bfloat16` (or the user's choice) |
 | Fit | required `<required_gb>` GB vs `<ram_gb>` GB RAM |
@@ -204,6 +221,15 @@ Build the launch from `data/epyc.json`. The CLI is `vllm serve <model>`.
 auto-selects the CPU platform and `vllm serve` rejects the flag. Only add it if
 `vllm serve --help` lists it (older vLLM).
 
+**Pick a free port first.** With `--network=host` the port is bound directly on
+the host, so a busy port is a **hard failure** (no remapping). Choose one that is
+free -- e.g. `PORT=8000; while ss -ltn "sport = :$PORT" | grep -q LISTEN; do PORT=$((PORT+1)); done`
+-- and use `$PORT` in the launch, health poll, and handover.
+
+**Mount the HF cache that `validate.py` resolved.** Use `hf_cache.mount` from
+validate.py (it follows symlinks and flags NFS/root-squash) rather than a raw
+`~/.cache/huggingface`, or the bind-mount can fail at container start on NFS homes.
+
 **Container path** (`runtime` from validate.py). The agent runs these itself,
 including the pull. `RT` is the resolved runtime verbatim:
 ```bash
@@ -211,8 +237,8 @@ RT="<runtime from validate.py: docker | podman>"
 $RT rm -f vllm-epyc 2>/dev/null               # clear any leftover container from a prior run (name collision otherwise)
 $RT pull <image from data/epyc.json>          # agent pulls; do not ask the user to
 $RT run -d --name vllm-epyc \
-  <run_flags from data/epyc.json>            # --ipc=host --network=host (NO --shm-size: it conflicts with --ipc=host on podman)
-  <hf_cache_mount> \
+  <run_flags from data/epyc.json>            # --ipc=host --network=host --cap-add=SYS_NICE (SYS_NICE = NUMA membind; NO --shm-size with --ipc=host)
+  <hf_cache.mount from validate.py> \        # resolved real path, e.g. -v /scratch/you/hf:/root/.cache/huggingface
   <container_cpuset from cpu_tune>             # --cpuset-cpus=<cores> --cpuset-mems=<nodes>
   --env VLLM_CPU_OMP_THREADS_BIND="$VLLM_CPU_OMP_THREADS_BIND" \
   --env VLLM_CPU_KVCACHE_SPACE=$VLLM_CPU_KVCACHE_SPACE \
@@ -228,6 +254,28 @@ from cpu_tune so memory is bound to the chosen socket (empty → unpinned, with 
 <conda_launch_prefix from cpu_tune> vllm serve <model> --dtype bfloat16 --port <port> --max-model-len <len> &
 # e.g. numactl --cpunodebind=0 --membind=0 vllm serve ...
 ```
+
+**Stock vLLM path (no zentorch)** -- only when `validate.py` reports
+`zentorch_capable: false` (pre-Zen4 EPYC like Milan) **and the user confirmed** the
+unaccelerated fallback. Use the **official stock vLLM CPU image**, not the zentorch
+image: `vllm/vllm-openai-cpu:latest-x86_64` (its ENTRYPOINT is `vllm serve`, so pass
+`<model> --dtype ... --port ...` as args). Same sized env + flags as the container
+launch above (`VLLM_CPU_OMP_THREADS_BIND`, `--cpuset-cpus/--cpuset-mems`,
+`--cap-add=SYS_NICE`, `--ipc=host --network=host`, the resolved HF cache mount):
+```bash
+RT="<runtime>"
+$RT rm -f vllm-epyc 2>/dev/null
+$RT run -d --name vllm-epyc \
+  --ipc=host --network=host --cap-add=SYS_NICE \
+  <container_cpuset from cpu_tune> <hf_cache.mount from validate.py> \
+  --env VLLM_CPU_OMP_THREADS_BIND="$VLLM_CPU_OMP_THREADS_BIND" \
+  --env VLLM_CPU_KVCACHE_SPACE=$VLLM_CPU_KVCACHE_SPACE --env HF_TOKEN=${HF_TOKEN} \
+  vllm/vllm-openai-cpu:latest-x86_64 \
+  <model> --dtype bfloat16 --port <port> --max-model-len <len>
+```
+This path is **unaccelerated** (no zentorch), but **verified working** on EPYC 7763
+(Milan/Zen3) with `--dtype bfloat16` -- bf16 runs on stock vLLM CPU without AVX-512, so
+no fp32 is needed. If it still fails at load, apply the no-retry rule (report + stop).
 
 Optional throughput flags are **opt-in and must move together** (see Gotchas):
 `TORCHINDUCTOR_FREEZING=1` + `VLLM_USE_AOT_COMPILE=0` (+ `ZENTORCH_WEIGHT_PREPACK=1`).
