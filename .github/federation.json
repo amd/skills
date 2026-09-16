@@ -1,6 +1,16 @@
 {
   "sources": [
     {
+      "repo": "AMD-AGI/Hyperloom",
+      "license": "MIT",
+      "skills": [
+        {
+          "path": "examples/skills/hyperloom-workload-optimizer",
+          "as": "hyperloom-workload-optimizer"
+        }
+      ]
+    },
+    {
       "repo": "AMD-AGI/TraceLens",
       "license": "MIT",
       "skills": [

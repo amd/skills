@@ -79,7 +79,7 @@ Install Hyperloom and set up the execution environment for <framework> on <gpu_t
 
 This step prepares the workspace and execution environment only:
 
-1. **Phase 0, Bootstrap:** confirm the install directory, install a pinned
+1. **Phase 0, Bootstrap:** confirm the install directory, install the
    `hyperloom-inference-optimizer` release from PyPI with `pip install --target .`,
    then run `/hyperloom-setup` to write `.env` (credentials + run mode only).
 2. **Phase 1, Environment prep:** choose Docker or bare metal, then prepare
@@ -187,4 +187,6 @@ Use these entries when a step fails.
 - Resume: `Resume the most recent Hyperloom session for <model>.`
 - Ran the 3-hour demo and want kernel rewrites? Start the 12-hour run from
   Step 3 rather than raising `--max-hours` on the 3-hour demo's flags.
-- Advanced flags: see `reference.md` in the skill folder.
+- Advanced flags: use **Custom** in Step 3 and let the agent derive them, or read
+  the [optimizer skill](https://github.com/AMD-AGI/Hyperloom/blob/main/src/hyperloom/inference_optimizer/SKILL.md)
+  the wheel installs.
