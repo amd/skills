@@ -40,7 +40,7 @@ Use these values for the placeholders in the prompts below:
 - `<framework>`: `vllm` or `sglang`
 - `<gpu_type>`: `MI300X`, `MI325X`, or `MI355X`
 - `<model_path>`: absolute path to a local model directory holding `config.json`.
-  Leave that clause out of a demo prompt to take the demo's own model.
+  Drop that sentence from a demo prompt to run the model the demo names.
 
 You do **not** need to decide these before Step 2:
 
@@ -116,26 +116,27 @@ matching demo skill the wheel installed, and that skill owns the workload preset
 the budget and every optimizer flag. Nothing here restates them, so a change to
 the CLI reaches you through the wheel rather than through this page.
 
-Either demo can run your own model instead of its default — name the path in the
-prompt. The preset workload does not change with the model, so if yours is much
-larger or a different architecture, use **Custom** and set the values yourself.
+Each demo names the model it was tuned around, and either can run yours instead —
+give the path, or drop that sentence to take the demo's own. The preset workload
+does not change with the model, so if yours is much larger or a different
+architecture, use **Custom** and set the values yourself.
 
-**1. 3-hour demo.** Serving and config parameters only; the kernel agent is
-off. The shortest end-to-end check; with a 3-hour budget keep the model at 8B or
-below.
+**1. 3-hour demo (Qwen3-8B).** Serving and config parameters only; the kernel
+agent is off. The shortest end-to-end check; with a 3-hour budget keep the model
+at 8B or below.
 
 ```text
-Run the 3-hour Hyperloom demo with <framework> on <gpu_type>, using the model at
-<model_path>. Launch and monitor.
+Run the 3-hour Hyperloom Qwen3-8B demo with <framework> on <gpu_type>. Use the
+model at <model_path> instead of the demo default. Launch and monitor.
 ```
 
-**2. 12-hour demo.** Every lever, kernel rewrites included. The kernel agent
-needs room to profile, rewrite and revalidate hot kernels, which is where the
-larger gains come from.
+**2. 12-hour demo (Qwen3-14B-FP8).** Every lever, kernel rewrites included. The
+kernel agent needs room to profile, rewrite and revalidate hot kernels, which is
+where the larger gains come from.
 
 ```text
-Run the 12-hour Hyperloom demo with <framework> on <gpu_type>, using the model at
-<model_path>. Launch and monitor.
+Run the 12-hour Hyperloom Qwen3-14B-FP8 demo with <framework> on <gpu_type>. Use
+the model at <model_path> instead of the demo default. Launch and monitor.
 ```
 
 **3. Custom.** Ask for a run and let the agent take you through the choices:
