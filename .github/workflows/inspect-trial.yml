@@ -51,8 +51,8 @@ jobs:
     name: Which pools to run
     runs-on: ubuntu-latest
     outputs:
-      linux: "true"
-      instinct: "true"
+      linux: "false"
+      instinct: "false"
       windows: "true"
       # Routing scored 68/68 over the whole room and is not in question.
       routing: "false"
@@ -61,7 +61,7 @@ jobs:
       # every previous attempt to the legacy engine.
       linux_engines: "claude-cli"
     steps:
-      - run: echo "linux=true instinct=true windows=true routing=false engines=claude-cli"
+      - run: echo "linux=false instinct=false windows=true routing=false engines=claude-cli"
 
   # ---------------------------------------------------------------- Linux ---
   linux:
@@ -357,16 +357,10 @@ jobs:
       # below reported that as success. Check the import before spending
       # anything.
       - name: Check the harness can actually run
+        # One line on purpose: PowerShell has no heredoc, and a here-string
+        # needs its terminator at column zero, which YAML indentation forbids.
         run: |
-          python - <<'CHECK'
-          import inspect, inspect_ai
-          from skillscope import cli
-          from skillscope.engine import cli_agent  # noqa: F401
-          assert "if args.engine in INSPECT_ENGINES:" in inspect.getsource(cli.cmd_behavioral), (
-              "older skillscope: --engine claude-cli falls through to legacy"
-          )
-          print("ok", inspect_ai.__version__)
-          CHECK
+          python -c "import inspect, inspect_ai; from skillscope import cli; from skillscope.engine import cli_agent; assert 'if args.engine in INSPECT_ENGINES:' in inspect.getsource(cli.cmd_behavioral), 'older skillscope: --engine claude-cli falls through to legacy'; assert set(cli.INSPECT_ENGINES) == set(cli.ENGINES) - {'legacy'}; print('ok', inspect_ai.__version__)"
 
       # This job is about the engine, not the skills. Most of this catalogue
       # targets Linux hardware and tooling, so failures here are expected and
