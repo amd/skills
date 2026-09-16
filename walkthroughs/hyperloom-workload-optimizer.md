@@ -76,17 +76,18 @@ You should see `hyperloom-workload-optimizer` in the list.
 In the dedicated workspace, ask the agent:
 
 ```text
-Install Hyperloom and set up the execution environment for <framework> on <gpu_type>.
+Install Hyperloom in this workspace and run setup for <framework> on <gpu_type>.
 ```
 
-This step prepares the workspace and execution environment only:
+This step installs Hyperloom and records how the run will happen. It launches
+nothing:
 
-1. **Phase 0, Bootstrap:** confirm the install directory, install the
-   `hyperloom-inference-optimizer` release from PyPI with `pip install --target .`,
-   then run `/hyperloom-setup` to write `.env` (credentials + run mode only).
-2. **Phase 1, Environment prep:** choose Docker or bare metal, then prepare
-   that environment. On bare metal, confirm the host stack; in Docker, start a
-   long-running container and run the in-container setup first.
+1. **Install.** Confirm the install directory, then install the
+   `hyperloom-inference-optimizer` release from PyPI with `pip install --target .`.
+2. **Setup.** Run `/hyperloom-setup`. It asks for credentials, `USER_DATA_PATH`
+   and the run mode, then writes `.env`. On bare metal it also prepares the host
+   stack and can install the serving framework. In Docker it writes `.env` only —
+   the container belongs to Step 3.
 
 Choose **Docker** when you want the validated, reproducible ROCm and framework
 stack and can run containers with GPU devices mapped in. Choose **bare metal**
@@ -95,7 +96,8 @@ containers are unavailable. Bare metal is more sensitive to host packages and
 can modify the environment, so prefer Docker for first-time walkthroughs when it
 is available.
 
-Save model selection, workload choices and launch approval for Step 3.
+Save model selection, workload choices and launch approval for Step 3. Setup
+offers to start a run when it finishes; decline it and come back here at Step 3.
 
 Verify the setup handoff:
 
@@ -107,14 +109,17 @@ grep -E '^(USER_DATA_PATH|HYPERLOOM_RUN_MODE)=' .env
 
 ## Step 3: Launch an optimization
 
-Start this step only after Step 2 has written `.env` and prepared the execution
-environment. Step 3 reuses the Docker or bare-metal run mode recorded in `.env`;
-do not choose it again here.
+Start this step only after Step 2 has written `.env`. Step 3 reuses the Docker or
+bare-metal run mode recorded there; do not choose it again here.
 
 There are three ways to run. Ask for the one you want; the agent loads the
 matching demo skill the wheel installed, and that skill owns the workload preset,
 the budget and every optimizer flag. Nothing here restates them, so a change to
 the CLI reaches you through the wheel rather than through this page.
+
+In Docker mode that skill is also what starts the container and runs setup inside
+it, on the host `/hyperloom-setup` recorded. Expect that to happen here, not in
+Step 2.
 
 Each demo names the model it was tuned around, and either can run yours instead —
 give the path, or drop that sentence to take the demo's own. The preset workload
