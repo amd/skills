@@ -1,0 +1,26 @@
+# These cases need two things the default sandbox withholds: the Instinct card
+# itself, and the network to fetch a model before anything can be served.
+#
+# Without this file both ran in inspect's default container -- no egress, no
+# devices -- and spent forty-five minutes retrying before the timeout killed
+# them. That reads as the skill hanging rather than the sandbox being wrong
+# for it, which is why the declaration belongs here next to machine.yml.
+#
+# Image fully qualified: podman will not guess a registry.
+services:
+  default:
+    image: docker.io/aisiuk/inspect-tool-support
+    command: tail -f /dev/null
+    init: true
+    stop_grace_period: 1s
+    # ROCm reaches the card through these two nodes. `video` and `render` are
+    # the groups that own them on the host.
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+      - render
+    security_opt:
+      - seccomp=unconfined
+    ipc: host

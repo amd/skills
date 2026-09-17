@@ -4,3 +4,7 @@
 # rations it, and the environment whose key pays for the run.
 os: [Linux]
 labels: [mi300x, gpu, rocm]
+
+# The behavioral cases need the card and the network, which the default
+# sandbox gives them neither of. See compose.yaml next to this file.
+sandbox: compose.yaml
