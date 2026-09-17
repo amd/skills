@@ -52,8 +52,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       linux: "false"
-      instinct: "false"
-      windows: "true"
+      instinct: "true"
+      windows: "false"
+      # Four Instinct runs have timed out and none produced a report, so
+      # nothing says whether the container starts, sees the card, or reaches
+      # the network. Ask before spending another two hours.
+      instinct_diagnose: "true"
       # Two Windows failures have each survived a fix aimed at a theory. This
       # run measures instead, and spends nothing on the model.
       windows_diagnose: "true"
@@ -64,7 +68,7 @@ jobs:
       # every previous attempt to the legacy engine.
       linux_engines: "claude-cli"
     steps:
-      - run: echo "linux=false instinct=false windows=true diagnose=true"
+      - run: echo "instinct=true diagnose=true"
 
   # ---------------------------------------------------------------- Linux ---
   linux:
@@ -291,7 +295,12 @@ jobs:
       # the host by construction, and this is shared GPU infrastructure rather
       # than a desktop -- its host-side path is already proven on strix_halo,
       # so repeating it here buys little against what it risks.
+      - name: Does this sandbox have a card and a network?
+        if: needs.config.outputs.instinct_diagnose == 'true'
+        run: python .github/scripts/instinct_diag.py
+
       - name: Behavioral -- inspect and claude-code
+        if: needs.config.outputs.instinct_diagnose != 'true'
         continue-on-error: true
         env:
           SKILLSCOPE_SANDBOX: ${{ steps.sandbox.outputs.provider }}
