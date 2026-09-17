@@ -51,9 +51,12 @@ jobs:
     name: Which pools to run
     runs-on: ubuntu-latest
     outputs:
-      linux: "true"
-      instinct: "true"
+      linux: "false"
+      instinct: "false"
       windows: "true"
+      # Two Windows failures have each survived a fix aimed at a theory. This
+      # run measures instead, and spends nothing on the model.
+      windows_diagnose: "true"
       # Routing scored 68/68 over the whole room and is not in question.
       routing: "false"
       # Which engines the Linux job drives. `inspect` and `claude-code` have
@@ -61,7 +64,7 @@ jobs:
       # every previous attempt to the legacy engine.
       linux_engines: "claude-cli"
     steps:
-      - run: echo "linux=true instinct=true windows=true routing=false engines=claude-cli"
+      - run: echo "linux=false instinct=false windows=true diagnose=true"
 
   # ---------------------------------------------------------------- Linux ---
   linux:
@@ -374,7 +377,12 @@ jobs:
       #
       # `lemonade-router-builder` is the exception worth reading closely: it is
       # the one skill here whose subject matter is native to this platform.
+      - name: What does this runner actually have?
+        if: needs.config.outputs.windows_diagnose == 'true'
+        run: python .github/scripts/win_diag.py
+
       - name: Behavioral -- claude-cli
+        if: needs.config.outputs.windows_diagnose != 'true'
         continue-on-error: true
         run: |
           $skills = @(
