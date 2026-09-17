@@ -89,9 +89,10 @@ From `data/epyc.json`. Unlike the Instinct (GPU) skill there are **no**
 |---|---|
 | `--ipc=host` | vLLM workers need a large `/dev/shm`; sharing the host IPC namespace provides it. **Do not also pass `--shm-size`** -- podman rejects the combination, and it is redundant on docker |
 | `--shm-size=16g` | **only if you drop `--ipc=host`** (isolated IPC). The 64MB container default is too small for vLLM. Use one or the other, never both |
-| `--network=host` | expose the served port directly (or use `-p <port>:<port>`) |
+| `--network=host` | expose the served port directly (or use `-p <port>:<port>`). Port is bound on the host, so a busy port is a **hard failure** -- pick a free one |
+| `--cap-add=SYS_NICE` | lets the container call `set_mempolicy`/`numa_set_membind`; without it NUMA memory binding fails with *"Operation not permitted"* and socket-local memory is silently lost |
 | `--cpuset-cpus` / `--cpuset-mems` | pin the container to the chosen socket's physical cores and its NUMA node(s); from `cpu_tune.py` |
-| `-v ~/.cache/huggingface:/root/.cache/huggingface` | reuse the host model cache |
+| `-v <resolved HF cache>:/root/.cache/huggingface` | reuse the host model cache -- use the real path `validate.py` resolves (`hf_cache.mount`), not a raw `~/.cache/huggingface` symlink (breaks on NFS) |
 
 Image: `amdih/zendnn_zentorch:<tag>` -- the public vLLM + zentorch CPU image on
 Docker Hub (no internal-registry access needed). The exact tag lives in
@@ -211,3 +212,24 @@ its memory**: CPU bind (`VLLM_CPU_OMP_THREADS_BIND` + `--cpuset-cpus`), memory b
 the KV pool never lands on the other socket. The socket is chosen by load (free socket
 preferred; warns if both busy). True multi-socket throughput = **multiple instances**
 (one per socket) -- out of scope for this single-instance recipe.
+
+**NUMA membind needs `--cap-add=SYS_NICE`**
+The socket memory pin (`--cpuset-mems` / the app's `numa_set_membind`) requires the
+`SYS_NICE` capability inside the container. Without it the calls fail with *"Operation
+not permitted"*, and -- because they surface only as warnings -- the server looks
+healthy while silently losing the NUMA locality the sizing depends on. The base
+`run_flags` include `--cap-add=SYS_NICE`.
+
+**HF cache bind-mount breaks on NFS / symlinked homes**
+The default mounts the HF cache into the container. On shared/HPC hosts the cache is
+often on an NFS home, or `~/.cache/huggingface` is a symlink to `/scratch`; docker's
+root-squash over NFS then can't traverse the dir or resolve the symlink, and the run
+dies with a permission-denied mkdir -- something `ready:true` does **not** catch.
+`validate.py` resolves the real path (follows symlinks), flags NFS, and returns the
+mount to use in `hf_cache.mount`. If the resolved path is NFS/root-squashed, fall back
+to a local-disk cache: `export HF_HOME=/scratch/$USER/hf` and mount that.
+
+**`--network=host` port collisions are hard failures**
+With host networking the port binds directly on the host -- a busy port fails outright
+(no remap). Pick a free port before launching (Step 6) and use it consistently in the
+launch, health poll, and handover.

@@ -6,14 +6,17 @@
     "comment": "Pinned public vLLM + zentorch CPU image on Docker Hub (amdih/zendnn_zentorch) -- no internal-registry access needed. Update this image and vllm_version together so model-registry checks match the served runtime. Both docker and podman are supported; the skill prefers docker and falls back to podman.",
     "run_flags": [
       "--ipc=host",
-      "--network=host"
+      "--network=host",
+      "--cap-add=SYS_NICE"
     ],
     "hf_cache_mount": "-v ~/.cache/huggingface:/root/.cache/huggingface",
+    "hf_cache_note": "The default assumes the HF cache is a real local-disk dir at ~/.cache/huggingface. It BREAKS on NFS homes / symlinked caches / root-squash (docker's root cannot traverse the dir or resolve the symlink -> permission-denied mkdir at 'docker run'). Use the RESOLVED path validate.py reports in `hf_cache.mount` (it follows symlinks and flags NFS), or fall back to a local-disk cache (e.g. export HF_HOME=/scratch/$USER/hf and mount that).",
     "flag_notes": {
       "--ipc=host": "vLLM workers need a large /dev/shm; --ipc=host shares the host's (large) shared memory, which covers it. Do NOT also pass --shm-size: podman rejects '--shm-size' together with '--ipc=host' (cannot set shmsize in host IPC namespace), and it is redundant on docker too.",
       "shm_alternative": "If you must isolate IPC (drop --ipc=host), then add --shm-size=16g instead (the 64MB container default is too small for vLLM). Use one or the other, never both.",
-      "--network=host": "Expose the served port directly. Alternative: -p <port>:<port>.",
-      "numa": "A single instance is pinned to ONE socket plus its memory. cpu_tune.py picks a free socket by CPU load on dual-socket hosts (warns if both busy; --socket N forces), sizes KV from that socket's local RAM, and emits --cpuset-cpus + --cpuset-mems (container) or numactl --cpunodebind/--membind (conda). True multi-socket scaling = multiple instances (one per socket), out of scope here."
+      "--network=host": "Expose the served port directly (no -p needed). Because the port is bound directly on the host, a busy port is a HARD failure (no remap) -- pick a free one (see the port note in SKILL.md Step 6). Alternative: drop --network=host and use -p <hostport>:<port>.",
+      "--cap-add=SYS_NICE": "Required so the container can call set_mempolicy/numa_set_membind for NUMA memory binding. Without it those calls fail with 'Operation not permitted' and the socket-local memory pin (which cpu_tune.py treats as load-bearing) is silently lost -- the server still looks healthy but loses NUMA locality.",
+      "numa": "A single instance is pinned to ONE socket plus its memory. cpu_tune.py picks a free socket by CPU load on dual-socket hosts (warns if both busy; --socket N forces), sizes KV from that socket's local RAM, and emits --cpuset-cpus + --cpuset-mems (container) or numactl --cpunodebind/--membind (conda). Memory binding needs --cap-add=SYS_NICE (above). True multi-socket scaling = multiple instances (one per socket), out of scope here."
     }
   },
   "launch": {
@@ -24,6 +27,13 @@
     "native": ["bf16", "fp16", "fp32"],
     "default": "bfloat16",
     "notes": "bf16 is the throughput default on EPYC (Zen). fp32 is slower and for debugging only. WOQ (per-channel/per-group int) is supported by zentorch but out of scope for the base recipe."
+  },
+  "no_zentorch_fallback": {
+    "when": "detect.py avx512 == false (pre-Zen4 EPYC: Naples/Rome/Milan, 7000 series) -- zentorch's bf16 CPU path needs avx512_bf16 (Zen4+), so zentorch cannot run.",
+    "offer": "Do not dead-end -- it is still an EPYC host. Offer STOCK vLLM CPU serving (no zentorch), on explicit user confirmation (validate.py sets requires_confirmation + zentorch_capable:false).",
+    "stock_image": "vllm/vllm-openai-cpu:latest-x86_64 -- the official stock vLLM CPU image on Docker Hub (pin a version with vllm/vllm-openai-cpu:v<ver>-x86_64). Use THIS for the no-zentorch path; do NOT pull the zentorch image just to disable it. Its ENTRYPOINT is `vllm serve`, so pass `<model> --dtype ... --port ...` as args (no leading 'vllm serve').",
+    "verified": "VERIFIED on AMD EPYC 7763 (Milan/Zen3, AVX2, no AVX-512), 2026-09-17: vLLM 0.29.0 came up healthy and returned a real Qwen/Qwen3-0.6B chat completion with --dtype bfloat16. bf16 WORKS on stock vLLM CPU without avx512_bf16 (no fp32 needed). The same sized env applies: VLLM_CPU_OMP_THREADS_BIND, --cpuset-cpus/--cpuset-mems, --cap-add=SYS_NICE.",
+    "caveat": "Unaccelerated (no zentorch) -- slower than the zentorch path. If it fails at load, apply the no-retry rule (report + stop). Note the stock image tracks upstream vLLM (e.g. 0.29.x), which may differ from vllm_version above."
   },
   "model_support": {
     "check_script": "scripts/check_model.py",

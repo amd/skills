@@ -5,9 +5,12 @@ Validate the environment before serving vLLM + zentorch on an EPYC CPU host.
 Checks a container runtime (docker or podman); probes the SELECTED runtime
 (container image if present, else conda/host) for its exact vLLM/zentorch/torch
 versions and the active vLLM platform; applies the Venice stack-compatibility
-gate; and checks host perf libraries (tcmalloc / OpenMP via LD_PRELOAD),
-HF_TOKEN, and RAM. Each issue is error (blocks launch) / warning (degrades) /
-advisory (info).
+gate; checks AVX-512 BF16 (zentorch bf16 needs Zen4+) and, when absent, offers the
+stock no-zentorch path via `requires_confirmation` + `zentorch_capable:false` rather
+than dead-ending; resolves the HF cache mount (follows symlinks, flags NFS/root-squash
+and returns the real -v mount to use); and checks host perf libraries (tcmalloc /
+OpenMP via LD_PRELOAD), HF_TOKEN, and RAM. Each issue is error (blocks launch) /
+warning (degrades) / advisory (info).
 
 The stack probe distinguishes zentorch-accelerated serving (a Zen platform is
 active) from an unaccelerated stock CPU platform. Pass `--generation` (from
@@ -25,6 +28,7 @@ Exits 0 if no error-severity issues remain, 1 otherwise. JSON to stdout.
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -59,6 +63,20 @@ def _sh(cmd, timeout=20):
         return r.returncode, r.stdout.strip(), r.stderr.strip()
     except subprocess.TimeoutExpired:
         return 1, "", f"timed out after {timeout}s"
+
+
+def _host_avx512():
+    """Read AVX-512 BF16 support from the local CPU (lscpu flags). Returns
+    True/False, or None if it could not be determined. Checks `avx512_bf16` -- the
+    exact extension zentorch's bf16 CPU path needs -- mirroring detect.py, so the
+    gate does not depend on the agent passing the value through."""
+    rc, out, _ = _sh("lscpu")
+    if rc != 0 or not out:
+        return None
+    for ln in out.splitlines():
+        if ln.strip().lower().startswith("flags:"):
+            return "avx512_bf16" in ln.lower().split()
+    return None
 
 
 def _detect_runtime():
@@ -103,15 +121,15 @@ def _probe_stack(run_prefix, source):
     return stack, None
 
 
-def stack_compatibility(generation, stack, default_vllm=DEFAULT_VLLM_VERSION):
+def stack_compatibility(generation, stack, zentorch_capable=True, default_vllm=DEFAULT_VLLM_VERSION):
     """Pure policy over the detected EPYC generation and the probed stack.
 
     Returns {"status", "message"} where status is one of:
-    - "blocked": zentorch/Zen platform is not active -> serving would be
-      unaccelerated stock CPU; a hard stop.
-    - "confirmation_required": Venice on a vLLM other than the validated default
-      -> warn, nudge to the pinned default image, and require explicit user
-      confirmation before continuing.
+    - "blocked": the CPU CAN run zentorch (Zen4+) but the Zen platform is not
+      active -> a misconfigured unaccelerated stack; a hard stop.
+    - "confirmation_required": either Venice on a vLLM other than the validated
+      default, OR the intentional stock (no-zentorch) path on a pre-Zen4 CPU that
+      cannot run zentorch -> warn and require explicit user confirmation.
     - "proceed": validated/expected stack.
     Returns None when there is no stack to judge.
     """
@@ -119,11 +137,16 @@ def stack_compatibility(generation, stack, default_vllm=DEFAULT_VLLM_VERSION):
         return None
     vllm_v = str(stack.get("vllm", "")).split("+")[0]
     if not stack.get("zen_active"):
+        if not zentorch_capable:
+            return {"status": "confirmation_required",
+                    "message": (f"Serving with STOCK vLLM CPU ({stack.get('platform', '?')}) -- this CPU "
+                                "cannot run zentorch (no AVX-512 BF16), so this is the no-zentorch fallback. "
+                                "It is UNACCELERATED and not perf-validated by this recipe; confirm to proceed.")}
         return {"status": "blocked",
                 "message": (f"vLLM {vllm_v or '?'} is on the stock CPU platform "
                             f"({stack.get('platform', '?')}), not a Zen/zentorch platform -- zentorch "
-                            "acceleration is NOT active. Enable zentorch or use the pinned container "
-                            "image in data/epyc.json; do not serve an unaccelerated CPU stack.")}
+                            "acceleration is NOT active though this CPU supports it. Enable zentorch or use "
+                            "the pinned container image in data/epyc.json; do not serve an unaccelerated stack.")}
     if generation == "Venice" and vllm_v != default_vllm:
         return {"status": "confirmation_required",
                 "message": (f"Venice (6th Gen EPYC) is on vLLM {vllm_v or '?'}, which this recipe has "
@@ -140,10 +163,34 @@ def main():
     p.add_argument("--image", default="", help="container image to check for (advisory)")
     p.add_argument("--generation", default="",
                    help="epyc_generation from detect.py; enables the Venice stack-compatibility gate")
+    p.add_argument("--avx512", default="", choices=["", "true", "false"],
+                   help="avx512 from detect.py; overrides the local lscpu read for the AVX-512 gate")
     args = p.parse_args()
 
     issues = []
     stack = None  # the probed runtime stack for the SELECTED path
+
+    # 0. AVX-512 BF16 -> zentorch viability. zentorch's bf16 CPU path needs
+    #    avx512_bf16 (Zen4+: Genoa/Turin). Pre-Zen4 EPYC (Naples/Rome/Milan, 7000
+    #    series) lacks it, so zentorch CANNOT run. This is still an EPYC host, so
+    #    rather than dead-ending we OFFER stock vLLM CPU (no zentorch acceleration)
+    #    -- a warning that needs explicit user confirmation, NOT a hard error. Prefer
+    #    the passed --avx512 (from detect.py; works for remote too); else read the
+    #    local CPU so the signal holds even if it was not threaded through.
+    if args.avx512:
+        avx512 = args.avx512 == "true"
+    else:
+        avx512 = _host_avx512()
+    zentorch_capable = avx512 is not False  # True, or None (undetermined) -> assume capable
+    if avx512 is False:
+        issues.append({"check": "avx512", "severity": "warning",
+                       "message": "CPU lacks AVX-512 BF16 (avx512_bf16), so zentorch acceleration is NOT "
+                                  "available -- it needs Zen4+ (Genoa/Turin, the supported 9000 series). This "
+                                  "is a pre-Zen4 EPYC (Naples/Rome/Milan, 7000 series). You can still serve "
+                                  "with STOCK vLLM CPU (no zentorch): UNACCELERATED, but verified working on "
+                                  "EPYC 7763/Milan with bf16. Requires your explicit OK.",
+                       "fix": "Confirm to serve on the stock (no-zentorch) path -- use the official stock image "
+                              "vllm/vllm-openai-cpu:latest-x86_64 (see SKILL.md Step 6) -- or use a Zen4+ EPYC for zentorch."})
 
     # 1. Container runtime (prerequisite): docker > podman, else conda fallback.
     runtime, detail = _detect_runtime()
@@ -199,8 +246,9 @@ def main():
         issues.append({"check": "host_stack", "severity": "advisory",
                        "message": "Host `import vllm, zentorch` not available; use the container path."})
 
-    # 4. Venice stack-compatibility gate (needs a probed stack + a generation).
-    compatibility = stack_compatibility(args.generation, stack)
+    # 4. Stack-compatibility gate (needs a probed stack). Also decides the
+    #    intentional stock (no-zentorch) path for pre-Zen4 CPUs.
+    compatibility = stack_compatibility(args.generation, stack, zentorch_capable)
     if compatibility:
         status = compatibility["status"]
         if status == "blocked":
@@ -243,16 +291,56 @@ def main():
                            "message": f"LD_PRELOAD is missing {', '.join(missing)}; vLLM CPU warns about this and throughput suffers without them (host/conda path).",
                            "fix": "export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4:$CONDA_PREFIX/lib/libiomp5.so:$LD_PRELOAD"})
 
+    # 8. HF cache mount (container path). The default bind-mounts the HF cache into
+    #    the container; on NFS homes / symlinked caches / root-squash that fails at
+    #    `docker run` with permission-denied mkdir -- and it is NOT caught by "ready".
+    #    Resolve the real path (follow symlinks), detect NFS, and hand back the mount
+    #    the agent should actually use (or a local-disk fallback).
+    hf_cache = None
+    if runtime:
+        raw = os.environ.get("HF_HOME") or os.path.expanduser("~/.cache/huggingface")
+        real = os.path.realpath(raw)
+        symlinked = real != os.path.abspath(raw)
+        fstype = ""
+        if os.path.exists(real):
+            fstype = _sh(f"stat -f -c %T {shlex.quote(real)}")[1]
+        on_nfs = "nfs" in fstype.lower()
+        mount = f"-v {real}:/root/.cache/huggingface"
+        hf_cache = {"requested": raw, "resolved": real, "symlinked": symlinked,
+                    "fstype": fstype or "unknown", "on_nfs": on_nfs, "mount": mount}
+        if on_nfs or symlinked:
+            issues.append({"check": "hf_cache", "severity": "warning",
+                           "message": (f"HF cache {raw} -> {real} (fstype {fstype or '?'}"
+                                       + (", symlink" if symlinked else "")
+                                       + (", NFS" if on_nfs else "") + "). A container bind-mount of an "
+                                       "NFS/symlinked cache can fail at container start with permission-denied "
+                                       "(root-squash cannot traverse it) -- and `ready` above does NOT test the mount."),
+                           "fix": (f"Mount the RESOLVED path: {mount}. If it is NFS/root-squashed, use a local-disk "
+                                   "cache instead: mkdir -p /scratch/$USER/hf && export HF_HOME=/scratch/$USER/hf, "
+                                   "then -v /scratch/$USER/hf:/root/.cache/huggingface.")})
+        elif not os.path.exists(real):
+            issues.append({"check": "hf_cache", "severity": "advisory",
+                           "message": f"HF cache {real} does not exist yet; it is created on first run (models download then). "
+                                      f"Mount it with: {mount}"})
+        else:
+            issues.append({"check": "hf_cache", "severity": "advisory",
+                           "message": f"HF cache OK: {real} (local {fstype or '?'}). Mount with: {mount}"})
+
     errors = [i for i in issues if i["severity"] == "error"]
-    requires_confirmation = bool(compatibility and compatibility["status"] == "confirmation_required")
+    # Confirmation is required for a Venice-on-unvalidated-vLLM stack, or for the
+    # stock (no-zentorch) fallback on a CPU that can't run zentorch.
+    requires_confirmation = (avx512 is False) or bool(
+        compatibility and compatibility["status"] == "confirmation_required")
     result = {
         "ready": len(errors) == 0,
         "requires_confirmation": requires_confirmation,
+        "zentorch_capable": zentorch_capable,
         "runtime": runtime,
         "runtime_detail": detail,
         "conda_path_available": conda_ok,
         "stack": stack,
         "compatibility": compatibility,
+        "hf_cache": hf_cache,
         "ram_gb": ram_gb,
         "errors": errors,
         "warnings": [i for i in issues if i["severity"] == "warning"],
