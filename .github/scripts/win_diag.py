@@ -43,6 +43,44 @@ def buffer_dir() -> None:
         print(f"   {task:44s} {total:4d} {'OVER 260' if total > 260 else 'ok'}")
 
 
+def buffer_write() -> None:
+    """Try to create the database inspect would, and report what happens.
+
+    Two readings of `unable to open database file` have now been wrong: first
+    MAX_PATH discarded on an arithmetic slip, then MAX_PATH accepted and
+    worked around with a short LOCALAPPDATA that changed nothing. So stop
+    reasoning about the path and write to it.
+    """
+    import hashlib
+    import sqlite3
+
+    from inspect_ai._util.appdirs import inspect_data_dir
+
+    base = inspect_data_dir("samplebuffer")
+    print(f"LOCALAPPDATA env  -> {os.environ.get('LOCALAPPDATA')!r}")
+    print(f"samplebuffer      -> {base}")
+
+    digest = hashlib.sha256(b"/some/log/dir").hexdigest()
+    for task in ("behavioral-local-ai-use", "behavioral-tracelens-analysis-orchestrator"):
+        name = f"2026-09-17T07-59-38-00-00_{task}_mg8LZ95E9DANGaFmoZ9E7k.eval.12345.db"
+        target = base / digest / name
+        print(f"\n  {task}")
+        print(f"    path len {len(str(target))}")
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            print(f"    mkdir -> {type(exc).__name__}: {exc}")
+            continue
+        try:
+            conn = sqlite3.connect(str(target))
+            conn.execute("create table if not exists t (x int)")
+            conn.close()
+            target.unlink(missing_ok=True)
+            print("    sqlite -> OK")
+        except Exception as exc:  # noqa: BLE001 -- the failure is the result
+            print(f"    sqlite -> {type(exc).__name__}: {exc}")
+
+
 def launches(found: str | None) -> None:
     """Sync works today under the legacy engine; async is what inspect uses."""
     if not found:
@@ -77,5 +115,7 @@ if __name__ == "__main__":
     found = resolved()
     print()
     buffer_dir()
+    print()
+    buffer_write()
     print()
     launches(found)

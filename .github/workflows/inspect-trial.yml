@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       linux: "false"
-      instinct: "true"
+      instinct: "false"
       windows: "true"
       # Four Instinct runs have timed out and none produced a report, so
       # nothing says whether the container starts, sees the card, or reaches
@@ -60,7 +60,7 @@ jobs:
       instinct_diagnose: "false"
       # Two Windows failures have each survived a fix aimed at a theory. This
       # run measures instead, and spends nothing on the model.
-      windows_diagnose: "false"
+      windows_diagnose: "true"
       # Routing scored 68/68 over the whole room and is not in question.
       routing: "false"
       # Which engines the Linux job drives. `inspect` and `claude-code` have
