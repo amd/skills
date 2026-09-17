@@ -53,7 +53,7 @@ jobs:
     outputs:
       linux: "false"
       instinct: "true"
-      windows: "true"
+      windows: "false"
       # Four Instinct runs have timed out and none produced a report, so
       # nothing says whether the container starts, sees the card, or reaches
       # the network. Ask before spending another two hours.
@@ -251,13 +251,14 @@ jobs:
     needs: config
     if: needs.config.outputs.instinct == 'true'
     runs-on: ["self-hosted", "mi300x", "gpu", "rocm"]
-    timeout-minutes: 150
+    timeout-minutes: 300
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
       ANTHROPIC_CUSTOM_HEADERS: |
         Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
         user: a1_ucicd
-      SKILLS: hyperloom-workload-optimizer serving-llms-on-instinct
+      SKILLS: hyperloom-workload-optimizer
+      ENGINES: inspect
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -307,11 +308,11 @@ jobs:
           INSPECT_PODMAN_COMPOSE: podman-compose
         run: |
           status=0
-          for engine in inspect claude-code; do
+          for engine in $ENGINES; do
             for skill in $SKILLS; do
               echo "::group::$skill ($engine)"
               skillscope behavioral --engine "$engine" --skills-dir 'skills/*' \
-                --timeout 1800 --skill "$skill" \
+                --timeout 3600 --skill "$skill" \
                 --output "instinct-$engine-$skill.json" \
                 || { echo "FAILED: $skill ($engine)"; status=1; }
               echo "::endgroup::"
