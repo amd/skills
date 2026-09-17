@@ -13,14 +13,17 @@ services:
     command: tail -f /dev/null
     init: true
     stop_grace_period: 1s
-    # ROCm reaches the card through these two nodes. `video` and `render` are
-    # the groups that own them on the host.
+    # ROCm reaches the card through these two nodes.
     devices:
       - /dev/kfd
       - /dev/dri
-    group_add:
-      - video
-      - render
+    # No `group_add`. Naming `video` and `render` is the usual advice, and it
+    # stopped the container from starting at all here -- "unable to find group
+    # render: no matching entries in group file" -- which cost four timed-out
+    # runs before anyone looked. The container runs as root, which reaches both
+    # device nodes without belonging to either group; a host that needs the
+    # groups can add them by numeric gid, which exists everywhere the names do
+    # not.
     security_opt:
       - seccomp=unconfined
     ipc: host
