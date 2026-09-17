@@ -347,6 +347,20 @@ jobs:
       # today, so it is not a regression -- and the report records
       # `sandbox_isolated: false` rather than leaving a reader to assume.
       SKILLSCOPE_SANDBOX: local
+      # inspect keeps its sample buffer under platformdirs' user data path,
+      # which on this runner is the SYSTEM profile:
+      #   C:\WINDOWS\system32\config\systemprofile\AppData\Local\...
+      # That is 89 characters before the 64-character hash and the eval
+      # filename, and a task named `behavioral-tracelens-analysis-orchestrator`
+      # lands on exactly 260 -- the MAX_PATH limit -- so sqlite reports
+      # "unable to open database file" and the whole task dies. The two
+      # shorter task names on this runner fit and pass, which is what made it
+      # look like something other than a length problem.
+      #
+      # platformdirs reads LOCALAPPDATA on Windows, so a short one buys back
+      # fifty characters. The real fix belongs upstream; this keeps the trial
+      # moving.
+      LOCALAPPDATA: C:\ia
     defaults:
       run:
         shell: powershell
