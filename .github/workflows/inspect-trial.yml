@@ -53,14 +53,14 @@ jobs:
     outputs:
       linux: "false"
       instinct: "true"
-      windows: "false"
+      windows: "true"
       # Four Instinct runs have timed out and none produced a report, so
       # nothing says whether the container starts, sees the card, or reaches
       # the network. Ask before spending another two hours.
-      instinct_diagnose: "true"
+      instinct_diagnose: "false"
       # Two Windows failures have each survived a fix aimed at a theory. This
       # run measures instead, and spends nothing on the model.
-      windows_diagnose: "true"
+      windows_diagnose: "false"
       # Routing scored 68/68 over the whole room and is not in question.
       routing: "false"
       # Which engines the Linux job drives. `inspect` and `claude-code` have
@@ -68,7 +68,7 @@ jobs:
       # every previous attempt to the legacy engine.
       linux_engines: "claude-cli"
     steps:
-      - run: echo "instinct=true diagnose=true"
+      - run: echo "instinct=true windows=true diagnose=false"
 
   # ---------------------------------------------------------------- Linux ---
   linux:
@@ -376,7 +376,7 @@ jobs:
         # One line on purpose: PowerShell has no heredoc, and a here-string
         # needs its terminator at column zero, which YAML indentation forbids.
         run: |
-          python -c "import inspect, inspect_ai; from skillscope import cli; from skillscope.engine import cli_agent; assert 'if args.engine in INSPECT_ENGINES:' in inspect.getsource(cli.cmd_behavioral), 'older skillscope: --engine claude-cli falls through to legacy'; assert set(cli.INSPECT_ENGINES) == set(cli.ENGINES) - {'legacy'}; assert hasattr(cli_agent, 'install_skill'), 'older skillscope: the CLI runs with no skill installed'; print('ok', inspect_ai.__version__)"
+          python -c "import inspect, inspect_ai; from skillscope import cli; from skillscope.engine import cli_agent; assert 'if args.engine in INSPECT_ENGINES:' in inspect.getsource(cli.cmd_behavioral), 'older skillscope: --engine claude-cli falls through to legacy'; assert set(cli.INSPECT_ENGINES) == set(cli.ENGINES) - {'legacy'}; assert hasattr(cli_agent, 'install_skill'), 'older skillscope: the CLI runs with no skill installed'; from skillscope.engine import tools; assert 'FileNotFoundError' in inspect.getsource(tools.shell_prefix), 'older skillscope: the shell probe dies where there is no bash'; print('ok', inspect_ai.__version__)"
 
       # This job is about the engine, not the skills. Most of this catalogue
       # targets Linux hardware and tooling, so failures here are expected and
