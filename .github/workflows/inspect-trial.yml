@@ -51,8 +51,8 @@ jobs:
     name: Which pools to run
     runs-on: ubuntu-latest
     outputs:
-      linux: "false"
-      instinct: "false"
+      linux: "true"
+      instinct: "true"
       windows: "true"
       # Routing scored 68/68 over the whole room and is not in question.
       routing: "false"
@@ -61,7 +61,7 @@ jobs:
       # every previous attempt to the legacy engine.
       linux_engines: "claude-cli"
     steps:
-      - run: echo "linux=false instinct=false windows=true routing=false engines=claude-cli"
+      - run: echo "linux=true instinct=true windows=true routing=false engines=claude-cli"
 
   # ---------------------------------------------------------------- Linux ---
   linux:
@@ -165,6 +165,10 @@ jobs:
               "older skillscope: --engine claude-cli falls through to legacy"
           )
           assert set(cli.INSPECT_ENGINES) == set(cli.ENGINES) - {"legacy"}
+          from skillscope.engine import cli_agent
+          assert hasattr(cli_agent, "install_skill"), (
+              "older skillscope: claude-cli runs the CLI with no skill installed"
+          )
           print("harness is current")
           CHECK
 
@@ -240,7 +244,7 @@ jobs:
     needs: config
     if: needs.config.outputs.instinct == 'true'
     runs-on: ["self-hosted", "mi300x", "gpu", "rocm"]
-    timeout-minutes: 120
+    timeout-minutes: 150
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
       ANTHROPIC_CUSTOM_HEADERS: |
@@ -295,7 +299,7 @@ jobs:
             for skill in $SKILLS; do
               echo "::group::$skill ($engine)"
               skillscope behavioral --engine "$engine" --skills-dir 'skills/*' \
-                --timeout 2700 --skill "$skill" \
+                --timeout 1800 --skill "$skill" \
                 --output "instinct-$engine-$skill.json" \
                 || { echo "FAILED: $skill ($engine)"; status=1; }
               echo "::endgroup::"
@@ -360,7 +364,7 @@ jobs:
         # One line on purpose: PowerShell has no heredoc, and a here-string
         # needs its terminator at column zero, which YAML indentation forbids.
         run: |
-          python -c "import inspect, inspect_ai; from skillscope import cli; from skillscope.engine import cli_agent; assert 'if args.engine in INSPECT_ENGINES:' in inspect.getsource(cli.cmd_behavioral), 'older skillscope: --engine claude-cli falls through to legacy'; assert set(cli.INSPECT_ENGINES) == set(cli.ENGINES) - {'legacy'}; print('ok', inspect_ai.__version__)"
+          python -c "import inspect, inspect_ai; from skillscope import cli; from skillscope.engine import cli_agent; assert 'if args.engine in INSPECT_ENGINES:' in inspect.getsource(cli.cmd_behavioral), 'older skillscope: --engine claude-cli falls through to legacy'; assert set(cli.INSPECT_ENGINES) == set(cli.ENGINES) - {'legacy'}; assert hasattr(cli_agent, 'install_skill'), 'older skillscope: the CLI runs with no skill installed'; print('ok', inspect_ai.__version__)"
 
       # This job is about the engine, not the skills. Most of this catalogue
       # targets Linux hardware and tooling, so failures here are expected and
