@@ -158,14 +158,6 @@ A vendored skill mirrors its upstream folder with one exception: for now
 federation does not carry the skill's `evals/` folder in either direction, so
 the datasets this repo grades skills against live and are maintained here.
 
-Two things follow from that model, and the `federation-guard` workflow holds
-pull requests to both. A vendored copy is not source, so a pull request editing
-one is closed with a pointer to the folder upstream to edit instead (`evals/`
-excepted). And a product repo federates its first skill only once its
-engineering owner and product release owner have signed off through the
-`product-repo-approval` workflow, which records them in
-[`.github/skill_owners.json`](.github/skill_owners.json).
-
 See [CONTRIBUTING.md](CONTRIBUTING.md) to register a repo.
 
 ## Manual installation
