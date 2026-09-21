@@ -17,7 +17,7 @@ body:
     id: engineering_owner
     attributes:
       label: Engineering owner
-      description: GitHub handle of the person who owns the underlying product. They must approve from this account, so get the handle exactly right — edit the issue if it is wrong.
+      description: GitHub handle of the person who owns the underlying product.
       placeholder: e.g. @octocat
     validations:
       required: true
