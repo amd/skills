@@ -1,0 +1,239 @@
+name: federation-guard
+
+# Holds a pull request to the two rules federation depends on. What it reports
+# is computed by `.github/scripts/federation_guard.py`, which explains both
+# rules and can be run by hand; this workflow is the half that needs a token.
+#
+# 1. A pull request that edits a vendored skill is closed with an explanation.
+#    Vendored copies are mirrors: the nightly `federate-skills` run re-imports
+#    each one with rmtree + copytree, so an edit landed here is deleted by the
+#    next run. Closing is kinder than merging something that will silently
+#    revert -- the change belongs in the product repo the skill comes from.
+#    A skill's own `evals/` folder is the catalog's, and edits there are fine.
+#
+# 2. A pull request that federates a *new* skill from a product repo missing
+#    from `.github/skill_owners.json` fails this check and gets a comment
+#    pointing at the approval issue. Skills already declared on the base
+#    branch are left alone, so the gate applies to what is being added rather
+#    than to what is already shipping.
+#
+# Both rules read the base branch: whether a skill is vendored, which skills
+# are already declared, and which repos are approved all come from `main`, not
+# from the pull request. Otherwise a pull request could approve itself.
+#
+# `pull_request_target` rather than `pull_request`, because a fork's
+# `pull_request` token is read-only and could neither close a pull request nor
+# comment on one -- the rules would apply to branches and quietly skip forks.
+# The usual caveat applies and is respected here: the checkout is the base
+# branch, and nothing from the pull request is ever executed. The one thing
+# read from the pull request is `.github/federation.json`, as data, parsed by
+# the base branch's copy of the script.
+#
+# There is no `paths:` filter, so this check reports on every pull request and
+# can be made required in branch protection. A filtered workflow leaves the
+# check permanently pending on the pull requests it skips.
+
+on:
+  pull_request_target:
+    # `labeled`/`unlabeled` so adding or removing the override label below
+    # re-evaluates an open pull request instead of needing a new commit.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: federation-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # Lets a maintainer land a change to a vendored copy when that is the point
+  # of the pull request -- retiring a federated skill deletes its folder, and
+  # forcing a re-import deletes its marker. Rule 2 has no such escape hatch:
+  # approval is the thing being enforced.
+  OVERRIDE_LABEL: federation-override
+
+jobs:
+  # One job, so branch protection has a single check to require. Its name is
+  # that check's name; renaming it renames the required check.
+  federation-guard:
+    name: Federation guard
+    runs-on: ubuntu-latest
+    steps:
+      # Base branch, which is what `pull_request_target` checks out by default.
+      - name: Check out the base branch
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Collect the pull request's changed paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          CHANGED: ${{ runner.temp }}/changed-files.txt
+        run: |
+          gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename' > "$CHANGED"
+          echo "Changed paths:"
+          cat "$CHANGED"
+
+      # Fetched from the pull request head ref, which GitHub keeps in this repo
+      # even for forks, and read with `git show` into a file. Data, not code:
+      # the script that parses it is the base branch's.
+      - name: Read the federation file the pull request proposes
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_FEDERATION: ${{ runner.temp }}/head-federation.json
+        run: |
+          git fetch --depth=1 origin "refs/pull/$PR/head"
+          if git cat-file -e FETCH_HEAD:.github/federation.json 2>/dev/null; then
+            git show FETCH_HEAD:.github/federation.json > "$HEAD_FEDERATION"
+            echo "Read .github/federation.json from the pull request head."
+          else
+            echo "The pull request head has no .github/federation.json; the approval rule has nothing to check."
+          fi
+
+      - name: Evaluate the federation rules
+        env:
+          CHANGED: ${{ runner.temp }}/changed-files.txt
+          HEAD_FEDERATION: ${{ runner.temp }}/head-federation.json
+          REPORT: ${{ runner.temp }}/report.json
+        run: |
+          args=(--changed-files "$CHANGED" --report "$REPORT")
+          if [ -f "$HEAD_FEDERATION" ]; then
+            args+=(--head-federation "$HEAD_FEDERATION")
+          fi
+          uv run .github/scripts/federation_guard.py "${args[@]}"
+
+      - name: Close or comment on the pull request
+        uses: actions/github-script@v7
+        env:
+          REPORT: ${{ runner.temp }}/report.json
+        with:
+          script: |
+            const fs = require("fs");
+            const report = JSON.parse(fs.readFileSync(process.env.REPORT, "utf8"));
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const issue_number = pr.number;
+
+            // Comments are keyed on a hidden marker and rewritten in place, so
+            // a pull request that is pushed to five times ends up with one
+            // current comment rather than five stale ones.
+            async function upsert(marker, body) {
+              const comments = await github.paginate(
+                github.rest.issues.listComments,
+                { owner, repo, issue_number, per_page: 100 },
+              );
+              const existing = comments.find(c => (c.body || "").includes(marker));
+              const full = `${marker}\n${body}`;
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner, repo, comment_id: existing.id, body: full,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number, body: full,
+                });
+              }
+            }
+
+            // --- Rule 1: vendored skills are edited upstream --------------
+            const edits = report.vendored_edits;
+            if (edits.length > 0) {
+              const labels = (pr.labels || []).map(l => l.name);
+              const overrideLabel = process.env.OVERRIDE_LABEL;
+              // The nightly federation run's own pull request edits vendored
+              // copies by definition, and is the one thing that may. A pull
+              // request created with GITHUB_TOKEN triggers no workflow at all,
+              // so today this branch is unreachable; it is here so that giving
+              // `federate-skills` a real token does not start closing its own
+              // pull requests. The branch name is deliberately not part of the
+              // test: a fork can call its branch anything, including `bot/...`.
+              const fromBot =
+                pr.user.type === "Bot" &&
+                pr.head.repo &&
+                pr.head.repo.full_name === `${owner}/${repo}`;
+              // Only someone with write access can label, so the escape hatch
+              // is a maintainer's rather than an author's.
+              const override = labels.includes(overrideLabel) || fromBot;
+
+              const skills = edits.map(e => `\`skills/${e.skill}\``).join(", ");
+              if (override) {
+                core.notice(
+                  `This pull request edits ${edits.length} vendored skill(s) (${skills}), ` +
+                  `allowed because it is ${fromBot ? "opened by automation" : `labeled \`${overrideLabel}\``}.`
+                );
+              } else {
+                const rows = edits.map(e => {
+                  const upstream = e.source_path
+                    ? `[\`${e.repo}/${e.source_path}\`](https://github.com/${e.repo}/tree/main/${e.source_path})`
+                    : `[\`${e.repo}\`](https://github.com/${e.repo})`;
+                  return `| \`skills/${e.skill}\` | ${upstream} |`;
+                });
+                await upsert("<!-- federation-guard:vendored-edit -->", [
+                  `## Closed: this is a vendored copy`,
+                  ``,
+                  `${skills} ${edits.length === 1 ? "is a mirror" : "are mirrors"} of a product repo, not source. ` +
+                  `The nightly \`federate-skills\` run re-imports the folder wholesale, so a change merged here is ` +
+                  `deleted the next time the source repo moves. Please make it upstream instead:`,
+                  ``,
+                  `| Vendored copy | Edit it here |`,
+                  `| --- | --- |`,
+                  ...rows,
+                  ``,
+                  `Once it is on \`main\` there, this catalog picks it up on its own (nightly, or by dispatching`,
+                  `\`federate-skills\`). See [CONTRIBUTING.md](https://github.com/${owner}/${repo}/blob/main/CONTRIBUTING.md#update-or-remove).`,
+                  ``,
+                  `A skill's own \`evals/\` folder is the exception — the catalog owns those datasets, so edit them here.`,
+                  ``,
+                  `Maintainers: if the change has to land here (retiring a federated skill, forcing a re-import), ` +
+                  `add the \`${overrideLabel}\` label and reopen.`,
+                ].join("\n"));
+
+                await github.rest.pulls.update({
+                  owner, repo, pull_number: issue_number, state: "closed",
+                });
+                core.notice(`Closed this pull request: it edits vendored skill(s) ${skills}.`);
+                return;
+              }
+            }
+
+            if (report.federation_error) {
+              core.setFailed(
+                `.github/federation.json could not be read, so the product repo ` +
+                `approval rule could not be checked: ${report.federation_error}`
+              );
+              return;
+            }
+
+            // --- Rule 2: a new federated skill needs an approved repo -----
+            const pending = report.new_skills_needing_approval;
+            if (pending.length === 0) {
+              core.info("No vendored copy was edited and every newly federated skill comes from an approved product repo.");
+              return;
+            }
+
+            const repos = [...new Set(pending.map(p => p.repo))];
+            const newIssue = `https://github.com/${owner}/${repo}/issues/new?template=product-repo-approval.yml`;
+            await upsert("<!-- federation-guard:approval -->", [
+              `## Product repo approval required`,
+              ``,
+              `${repos.map(r => `\`${r}\``).join(", ")} ${repos.length === 1 ? "is" : "are"} not in ` +
+              `[\`.github/skill_owners.json\`](https://github.com/${owner}/${repo}/blob/main/.github/skill_owners.json), ` +
+              `so ${pending.map(p => `\`${p.skill}\``).join(", ")} cannot be federated yet.`,
+              ``,
+              `1. Open a [Product repo approval issue](${newIssue}) for ${repos.map(r => `\`${r}\``).join(", ")}.`,
+              `2. The engineering owner and the product release owner each comment \`/approve\` on it.`,
+              `3. Merge the registry pull request that opens, then push here again.`,
+              ``,
+              `Skills already in the catalog are unaffected; this applies to the ones this pull request adds.`,
+            ].join("\n"));
+
+            core.setFailed(
+              `${pending.length} newly federated skill(s) come from product repo(s) that have not been ` +
+              `approved: ${repos.join(", ")}.`
+            );

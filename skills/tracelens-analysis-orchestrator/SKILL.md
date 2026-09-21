@@ -42,7 +42,7 @@ Follow **[reference.md](reference.md)** for every step (user prompts, `<prefix>`
 
 ## Rules
 
-- **Subagents:** Use the Task tool **only** where reference.md says “subagent” (Steps **7**, **8**, **10**). The orchestrator runs everything else, including Step 8.5, using the command prefix from `<output_dir>/cache/cmd_prefix.txt` (`{CMD}` substitution).
+- **Subagents:** Use your runner's subagent primitive (the Task tool in Claude Code or Cursor, `spawn_agent` under Codex) **only** where reference.md says “subagent” (Steps **7**, **8**, **10**). The orchestrator runs everything else, including Step 8.5, using the command prefix from `<output_dir>/cache/cmd_prefix.txt` (`{CMD}` substitution).
 - **Language:** Prefer vendor-agnostic terms (GPU kernels, collective communication, vendor GEMM library, DNN primitives, GPU graph). When quoting trace data, real kernel names are fine.
 - **Subagent prompts:** Point each subagent at the checked-in agent file under `TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/<name>.md` (see reference.md for exact paths and prompt shells).
 
