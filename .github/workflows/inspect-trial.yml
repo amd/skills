@@ -51,9 +51,9 @@ jobs:
     name: Which pools to run
     runs-on: ubuntu-latest
     outputs:
-      linux: "false"
+      linux: "true"
       instinct: "false"
-      windows: "true"
+      windows: "false"
       # Four Instinct runs have timed out and none produced a report, so
       # nothing says whether the container starts, sees the card, or reaches
       # the network. Ask before spending another two hours.
@@ -66,7 +66,7 @@ jobs:
       # Which engines the Linux job drives. `inspect` and `claude-code` have
       # completed results; `claude-cli` has none, because a dispatch bug sent
       # every previous attempt to the legacy engine.
-      linux_engines: "claude-cli"
+      linux_engines: "claude-code"
     steps:
       - run: echo "windows=true only; three repetitions to measure variance"
 
@@ -85,10 +85,7 @@ jobs:
       # Everything that does not declare mi300x. `magpie-kernel-evaluator` is
       # GPU work that declares no machine.yml at all, so it runs here by
       # default rather than by intent -- keep an eye on what it reports.
-      SKILLS: >-
-        lemonade-router-builder local-ai-app-integration local-ai-use
-        magpie-kernel-evaluator serving-llms-on-epyc
-        tracelens-analysis-orchestrator
+      SKILLS: local-ai-use
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
