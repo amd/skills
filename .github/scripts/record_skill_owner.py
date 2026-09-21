@@ -2,7 +2,7 @@
 """Record an approved product repo in `.github/skill_owners.json`.
 
 Called by the `product-repo-approval` workflow once both the engineering owner
-and the product manager named on an approval issue have approved. The workflow
+and the product release owner named on an approval issue have approved. The workflow
 puts the result up for review as a pull request, so this script only edits the
 registry; it never decides whether an approval is valid.
 
@@ -11,9 +11,9 @@ Registry schema:
     {
       "repos": [
         {
-          "repo": "AMD-AGI/TraceLens",       # owner/repo, unique per entry
-          "engineering_owner": "octocat",    # GitHub handle, no leading @
-          "product_manager": "octocat",      # GitHub handle, no leading @
+          "repo": "AMD-AGI/TraceLens",          # owner/repo, unique per entry
+          "engineering_owner": "octocat",       # GitHub handle, no leading @
+          "product_release_owner": "octocat",   # GitHub handle, no leading @
         }
       ]
     }
@@ -65,7 +65,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--engineering-owner", required=True, help="GitHub handle of the engineering owner."
     )
     parser.add_argument(
-        "--product-manager", required=True, help="GitHub handle of the product manager."
+        "--product-release-owner",
+        required=True,
+        help="GitHub handle of the product release owner.",
     )
     parser.add_argument(
         "--registry",
@@ -86,9 +88,9 @@ def main(argv: list[str] | None = None) -> int:
     entry = {
         "repo": repo,
         "engineering_owner": handle(args.engineering_owner),
-        "product_manager": handle(args.product_manager),
+        "product_release_owner": handle(args.product_release_owner),
     }
-    for field in ("engineering_owner", "product_manager"):
+    for field in ("engineering_owner", "product_release_owner"):
         if not entry[field]:
             raise SystemExit(f"--{field.replace('_', '-')} cannot be empty.")
 

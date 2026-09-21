@@ -23,10 +23,10 @@ body:
       required: true
 
   - type: input
-    id: product_manager
+    id: product_release_owner
     attributes:
-      label: Product manager
-      description: GitHub handle of the product manager who manages this product. They must approve from this account.
+      label: Product release owner
+      description: GitHub handle of the person who owns this product's releases — usually a product manager or engineering manager. They must approve from this account.
       placeholder: e.g. @octocat
     validations:
       required: true
