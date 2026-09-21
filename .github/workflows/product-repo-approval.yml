@@ -2,11 +2,11 @@ name: product-repo-approval
 
 # Turns a "Product repo approval" issue into a reviewable registry entry.
 #
-# On open, a bot comment tells the named engineering owner and product manager
-# what `/approve` signs and how to leave it. Those two accounts then sign off
-# by commenting `/approve`: the engineering owner, who owns the underlying
-# product, and the product manager, who vouches for the product repo and for
-# the product being in Tech Preview or GA. Those can be the same person. This
+# On open, a bot comment tells the named engineering owner and product release
+# owner what `/approve` signs and how to leave it. Those two accounts then sign
+# off by commenting `/approve`: the engineering owner, who owns the underlying
+# product, and the product release owner, who vouches for the product repo and
+# for the product being in Tech Preview or GA. Those can be the same person. This
 # workflow only records approvals from the named accounts, so a `/approve`
 # from anyone else -- including whoever filed the issue -- does nothing but
 # get an explanation.
@@ -83,7 +83,7 @@ jobs:
 
             const handle = (value) => value.trim().replace(/^@/, "").trim();
             const engOwner = handle(field("Engineering owner"));
-            const productManager = handle(field("Product manager"));
+            const releaseOwner = handle(field("Product release owner"));
             const productRepo = field("Product repo")
               .replace(/^https?:\/\/github\.com\//i, "")
               .replace(/\/$/, "");
@@ -108,7 +108,7 @@ jobs:
             await github.rest.issues.createComment({
               owner, repo, issue_number,
               body: [
-                `This issue is asking ${mention(engOwner, "the engineering owner")} and ${mention(productManager, "the product manager")} to sign off on ${repoRef} before it can add skills to this catalog.`,
+                `This issue is asking ${mention(engOwner, "the engineering owner")} and ${mention(releaseOwner, "the product release owner")} to sign off on ${repoRef} before it can add skills to this catalog.`,
                 ``,
                 `## How to approve`,
                 ``,
@@ -116,7 +116,7 @@ jobs:
                 ``,
                 `**Engineering owner**${engOwner ? ` (@${engOwner})` : ""}: you confirm that you own the product behind this repo, and that you will be resposible for maintaining it and its skills.`,
                 ``,
-                `**Product manager**${productManager ? ` (@${productManager})` : ""}: you are comfortable with skills from ${repoRef} being vendored into this catalog, and you confirm the product is in Tech Preview or GA (not experimental).`,
+                `**Product release owner**${releaseOwner ? ` (@${releaseOwner})` : ""}: you are comfortable with skills from ${repoRef} being vendored into this catalog, and you confirm the product is in Tech Preview or GA (not experimental).`,
                 ``,
                 `Once both roles have approved, a pull request is opened automatically adding the repo to \`.github/skill_owners.json\`. Merging that pull request closes this issue.`,
               ].join("\n"),
@@ -151,7 +151,7 @@ jobs:
             const body = issue.body || "";
 
             const ENG_LABEL = "eng-owner-approved";
-            const PM_LABEL = "pm-approved";
+            const RELEASE_OWNER_LABEL = "release-owner-approved";
 
             // Issue forms render each answer as an `### <label>` heading followed
             // by the response, so the form's labels are the parsing contract.
@@ -176,7 +176,7 @@ jobs:
 
             const handle = (value) => value.trim().replace(/^@/, "").trim();
             const engOwner = handle(field("Engineering owner"));
-            const productManager = handle(field("Product manager"));
+            const releaseOwner = handle(field("Product release owner"));
             const sameHandle = (a, b) => !!a && a.toLowerCase() === b.toLowerCase();
 
             async function comment(comment_body) {
@@ -189,16 +189,16 @@ jobs:
             if (sameHandle(commenter, engOwner)) {
               roles.push({ label: ENG_LABEL, who: "engineering owner" });
             }
-            if (sameHandle(commenter, productManager)) {
-              roles.push({ label: PM_LABEL, who: "product manager" });
+            if (sameHandle(commenter, releaseOwner)) {
+              roles.push({ label: RELEASE_OWNER_LABEL, who: "product release owner" });
             }
 
             if (roles.length === 0) {
-              core.info(`${commenter} is neither the named engineering owner nor the named product manager.`);
+              core.info(`${commenter} is neither the named engineering owner nor the named product release owner.`);
               await comment(
                 `@${commenter} — this approval was not recorded, because this issue names ` +
                 `${engOwner ? "`" + engOwner + "`" : "nobody"} as the engineering owner and ` +
-                `${productManager ? "`" + productManager + "`" : "nobody"} as the product manager. ` +
+                `${releaseOwner ? "`" + releaseOwner + "`" : "nobody"} as the product release owner. ` +
                 `Approval has to come from those two accounts. If a handle is wrong, edit the issue and ask them to approve again.`
               );
               core.setOutput("ready", "false");
@@ -227,7 +227,7 @@ jobs:
               toAdd.forEach(l => present.add(l));
             }
 
-            const ready = present.has(ENG_LABEL) && present.has(PM_LABEL);
+            const ready = present.has(ENG_LABEL) && present.has(RELEASE_OWNER_LABEL);
 
             if (toAdd.length > 0) {
               const recorded = roles
@@ -235,7 +235,7 @@ jobs:
                 .map(r => r.who)
                 .join(" and ");
               const waiting = present.has(ENG_LABEL)
-                ? `@${productManager} (product manager)`
+                ? `@${releaseOwner} (product release owner)`
                 : `@${engOwner} (engineering owner)`;
               await comment(
                 ready
@@ -284,7 +284,7 @@ jobs:
             core.setOutput("ready", "true");
             core.setOutput("product_repo", productRepo);
             core.setOutput("engineering_owner", engOwner);
-            core.setOutput("product_manager", productManager);
+            core.setOutput("product_release_owner", releaseOwner);
 
       - name: Set up uv
         if: steps.approval.outputs.ready == 'true'
@@ -298,13 +298,13 @@ jobs:
         env:
           PRODUCT_REPO: ${{ steps.approval.outputs.product_repo }}
           ENGINEERING_OWNER: ${{ steps.approval.outputs.engineering_owner }}
-          PRODUCT_MANAGER: ${{ steps.approval.outputs.product_manager }}
+          PRODUCT_RELEASE_OWNER: ${{ steps.approval.outputs.product_release_owner }}
         run: |
           uv run .github/scripts/record_skill_owner.py \
             --registry "$REGISTRY" \
             --repo "$PRODUCT_REPO" \
             --engineering-owner "$ENGINEERING_OWNER" \
-            --product-manager "$PRODUCT_MANAGER"
+            --product-release-owner "$PRODUCT_RELEASE_OWNER"
 
       # A pull request rather than a commit to main, so the entry gets the same
       # review as any other change to the catalog's registries. Re-approving
@@ -322,7 +322,7 @@ jobs:
           body: |
             Approved on #${{ github.event.issue.number }} by
             @${{ steps.approval.outputs.engineering_owner }} (engineering owner) and
-            @${{ steps.approval.outputs.product_manager }} (product manager).
+            @${{ steps.approval.outputs.product_release_owner }} (product release owner).
 
             Closes #${{ github.event.issue.number }}
 
