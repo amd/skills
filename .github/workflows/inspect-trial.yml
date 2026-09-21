@@ -52,8 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       linux: "false"
-      instinct: "true"
-      windows: "false"
+      instinct: "false"
+      windows: "true"
       # Four Instinct runs have timed out and none produced a report, so
       # nothing says whether the container starts, sees the card, or reaches
       # the network. Ask before spending another two hours.
@@ -68,7 +68,7 @@ jobs:
       # every previous attempt to the legacy engine.
       linux_engines: "claude-cli"
     steps:
-      - run: echo "instinct=true windows=true diagnose=false"
+      - run: echo "windows=true only; three repetitions to measure variance"
 
   # ---------------------------------------------------------------- Linux ---
   linux:
@@ -395,7 +395,17 @@ jobs:
         if: needs.config.outputs.windows_diagnose == 'true'
         run: python .github/scripts/win_diag.py
 
-      - name: Behavioral -- claude-cli
+      # Three repetitions of the same set, because one run of a
+      # nondeterministic agent measures nothing. The same engine scored
+      # `lemonade-router-builder` 21/21 and then 15/21 on this machine with no
+      # change in between, so no per-skill Windows number is quotable until the
+      # spread across repeats is known. That spread is the noise floor, and it
+      # is what tells a real platform difference from ordinary variance.
+      #
+      # Repetition-major rather than skill-major: if the job is cut short, two
+      # complete rounds across every skill beats three rounds of the first two
+      # and none of the third.
+      - name: Behavioral -- claude-cli, three times
         if: needs.config.outputs.windows_diagnose != 'true'
         continue-on-error: true
         run: |
@@ -405,12 +415,14 @@ jobs:
             "tracelens-analysis-orchestrator"
           )
           $status = 0
-          foreach ($s in $skills) {
-            Write-Host "::group::$s (claude-cli on Windows)"
-            skillscope behavioral --engine claude-cli --skills-dir "skills/*" `
-              --timeout 2700 --skill $s --output "windows-claude-cli-$s.json"
-            if ($LASTEXITCODE -ne 0) { Write-Host "FAILED: $s"; $status = 1 }
-            Write-Host "::endgroup::"
+          foreach ($run in 1..3) {
+            foreach ($s in $skills) {
+              Write-Host "::group::$s (claude-cli on Windows, run $run)"
+              skillscope behavioral --engine claude-cli --skills-dir "skills/*" `
+                --timeout 2700 --skill $s --output "windows-claude-cli-$s-run$run.json"
+              if ($LASTEXITCODE -ne 0) { Write-Host "FAILED: $s (run $run)"; $status = 1 }
+              Write-Host "::endgroup::"
+            }
           }
           exit $status
 
