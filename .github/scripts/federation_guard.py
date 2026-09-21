@@ -13,17 +13,24 @@ from that report, because those need a token and this needs to be runnable by
 hand.
 
 Rule 1 -- vendored skills are edited upstream, not here.
-    A skill folder carrying a `.federated.json` marker is a mirror of a folder
-    in a product repo. `federate_skills.py` re-imports it with rmtree +
-    copytree, so anything committed here is deleted by the next nightly run:
-    an edit that looks merged is really just pending its own reversal. The one
-    exception is the skill's top-level `evals/` folder, which federation never
-    carries -- the catalog owns those datasets, so editing them here is the
-    only way to edit them at all.
+    A federated skill folder is a mirror of a folder in a product repo.
+    `federate_skills.py` re-imports it with rmtree + copytree, so anything
+    committed here is deleted by the next nightly run: an edit that looks
+    merged is really just pending its own reversal. The one exception is the
+    skill's top-level `evals/` folder, which federation never carries -- the
+    catalog owns those datasets, so editing them here is the only way to edit
+    them at all.
 
-    Whether a skill is federated is read from the *base* branch, so the pull
-    request that first vendors a skill (and therefore adds the marker) does not
-    trip over itself.
+    Federated means declared in `.github/federation.json`, and nothing else.
+    The vendored copies carry a `.federated.json` marker too, but the marker is
+    the importer's bookkeeping and the two disagree on `main` today; the
+    declaration is the catalog's statement of intent, and it is the file a
+    reviewer reads.
+
+    The declarations are read from the *base* branch, so the pull request that
+    federates a skill for the first time does not trip over its own new entry,
+    and deleting an entry in the same commit that edits the skill does not slip
+    past the rule.
 
 Rule 2 -- a new federated skill needs its product repo approved.
     `.github/skill_owners.json` records the repos whose engineering owner and
@@ -107,54 +114,7 @@ def load_approved_repos(registry: Path) -> set[str]:
     }
 
 
-def federated_skills(base_dir: Path) -> dict[str, dict]:
-    """Map each federated skill on the base branch to where it comes from.
-
-    Two things say a skill is federated and they are deliberately unioned,
-    because on `main` today they disagree in both directions:
-
-      * a `.federated.json` marker, written by the importer. `magpie-kernel-
-        evaluator` has one but is no longer declared, so nothing refreshes it;
-        it is still a mirror of AMD-AGI/Magpie and still the wrong place to
-        change it.
-      * a declaration in `.github/federation.json`. `hyperloom-workload-
-        optimizer` is declared but shipped without a marker, and a skill with
-        no marker is exactly the case the importer treats as stale: the next
-        nightly run rmtree's the folder and copies upstream over it. Protecting
-        only marked skills would leave the one most certain to be overwritten
-        unprotected.
-
-    Marker values win where both exist, since the marker records what was
-    actually imported. A malformed federation file reads as "declares nothing"
-    rather than raising; rule 2 is where that file's health is reported.
-    """
-    federated: dict[str, dict] = {}
-    try:
-        sources = fed.parse_federation(base_dir / ".github" / "federation.json")
-    except (ValueError, FileNotFoundError):
-        sources = []
-    for source in sources:
-        for spec in source.skills:
-            federated[spec.dest_name] = {
-                "repo": source.repo,
-                "source_path": spec.path,
-            }
-
-    skills_dir = base_dir / "skills"
-    if skills_dir.is_dir():
-        for skill_dir in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
-            if not (skill_dir / fed.MARKER_FILENAME).is_file():
-                continue
-            marker = fed.read_marker(skill_dir)
-            declared = federated.get(skill_dir.name, {})
-            federated[skill_dir.name] = {
-                "repo": marker.get("repo") or declared.get("repo", ""),
-                "source_path": marker.get("path") or declared.get("source_path", ""),
-            }
-    return federated
-
-
-def vendored_edits(changed: list[str], federated: dict[str, dict]) -> list[dict]:
+def vendored_edits(changed: list[str], declared: dict[str, dict]) -> list[dict]:
     """Group the changed paths that edit a vendored skill, by skill.
 
     The `evals/` exemption mirrors `federate_skills.UNFEDERATED_DIR_NAMES` and
@@ -172,15 +132,15 @@ def vendored_edits(changed: list[str], federated: dict[str, dict]) -> list[dict]
         parts = tail.split("/")
         if len(parts) > 1 and parts[0] in fed.UNFEDERATED_DIR_NAMES:
             continue
-        source = federated.get(name)
-        if source is None:
+        entry = declared.get(name)
+        if entry is None:
             continue
         hit = hits.setdefault(
             name,
             {
                 "skill": name,
-                "repo": source["repo"],
-                "source_path": source["source_path"],
+                "repo": entry["repo"],
+                "source_path": entry["path"],
                 "paths": [],
             },
         )
@@ -254,17 +214,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def build_report(args: argparse.Namespace) -> dict:
     base_dir = args.base_dir
     report: dict = {
-        "vendored_edits": vendored_edits(
-            read_changed_files(args.changed_files), federated_skills(base_dir)
-        ),
+        "vendored_edits": [],
         "new_skills_needing_approval": [],
         "federation_error": "",
     }
 
+    # `.github/federation.json` on the base branch is the only thing that says
+    # which skills are federated, so an unreadable one leaves both rules with
+    # nothing to go on. Report that instead of passing every pull request.
+    try:
+        base = declared_skills(
+            fed.parse_federation(base_dir / ".github" / "federation.json")
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        report["federation_error"] = f"base branch copy: {exc}"
+        return report
+
+    report["vendored_edits"] = vendored_edits(
+        read_changed_files(args.changed_files),
+        {entry["skill"]: entry for entry in base.values()},
+    )
+
     if args.head_federation is None:
         return report
 
-    base_federation = base_dir / ".github" / "federation.json"
     try:
         head = declared_skills(fed.parse_federation(args.head_federation))
     except (ValueError, FileNotFoundError) as exc:
@@ -272,11 +245,6 @@ def build_report(args: argparse.Namespace) -> dict:
         # in detail; recording it here keeps this rule from passing a pull
         # request whose declarations could not be read at all.
         report["federation_error"] = str(exc)
-        return report
-    try:
-        base = declared_skills(fed.parse_federation(base_federation))
-    except (ValueError, FileNotFoundError) as exc:
-        report["federation_error"] = f"base branch copy: {exc}"
         return report
 
     report["new_skills_needing_approval"] = new_skills_needing_approval(
