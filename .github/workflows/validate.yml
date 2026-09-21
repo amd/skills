@@ -51,6 +51,13 @@ jobs:
       - name: Test the federation importer
         run: uv run .github/scripts/test_federate_skills.py
 
+      # Guards the rules the `federation-guard` workflow enforces by closing a
+      # pull request or failing a required check. Both directions are costly to
+      # get wrong, and neither shows up until it has already turned someone
+      # away or let an edit land that the next nightly run deletes.
+      - name: Test the federation guard
+        run: uv run .github/scripts/test_federation_guard.py
+
       - name: Validate marketplace manifest
         run: uv run .github/scripts/validate_marketplace.py
 
