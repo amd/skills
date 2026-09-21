@@ -26,6 +26,14 @@ For repository structure and the broader catalog model, see the
 The source repo must be under an AMD GitHub org (e.g. `AMD-AGI/...`). Non-AMD
 repos are not accepted at this time.
 
+It must also be **approved once**, before its first skill lands here. File a
+[Product repo approval](https://github.com/amd/skills/issues/new?template=product-repo-approval.yml)
+issue and the workflow walks the two named accounts — the engineering owner and
+the product release owner — through commenting `/approve`. That opens a pull
+request adding the repo to
+[`.github/skill_owners.json`](.github/skill_owners.json); once it merges, the
+repo can federate as many skills as it likes and never needs approving again.
+
 ## 1. Author the skill in your repo
 
 Each skill is a folder holding a valid `SKILL.md`, a `skill-card.md`, and an
@@ -141,8 +149,3 @@ The `federate-skills` workflow runs nightly (and on demand), re-vendors any
 skill whose upstream folder contents changed, and opens a pull request titled
 `Bump <skill> to <short commit>`. A night with no upstream change produces no
 pull request, so the only ones you see are real bumps.
-
-To remove a skill, open a pull request that drops its entry from
-`.github/federation.json`, deletes the vendored `skills/<name>/` folder, and
-regenerates the manifests. Federation never deletes anything on its own: a
-nightly run only reports a vendored copy that no source declares any more.
