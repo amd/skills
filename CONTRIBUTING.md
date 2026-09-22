@@ -93,10 +93,18 @@ The scripts read `.github/federation.json` from your working tree.
 
 ```bash
 uv run .github/scripts/federate_skills.py --check-catalog  # schema only, no clone
-uv run .github/scripts/federate_skills.py                  # vendor into skills/<name>/
+uv run .github/scripts/federate_skills.py --only <skill>   # vendor into skills/<skill>/ (repeat --only per skill)
 ./.github/scripts/publish.sh                               # regenerate the manifests
 ./.github/scripts/check.sh                                 # validate (same command CI runs)
 ```
+
+Pass `--only` once for each skill you added, using its local catalog name (the
+`as:` value). Always pass it: without `--only`, the importer also bumps every
+existing federated skill whose upstream has moved, and the federation guard
+closes a pull request that edits those. For the same reason, do not name a
+skill that is already federated on `main`, and make sure your `as:` name does
+not match a skill already under `skills/`, since the import replaces that
+folder.
 
 The importer also adds your skill to the published bundle, so there is no
 manifest to edit by hand.
