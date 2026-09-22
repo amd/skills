@@ -50,13 +50,7 @@ The catalog tracks one branch of your repo, **`main`** unless your
   candidate sorts after the previous release but before its own final
   release:
   `release/0.9` < `release/0.12` < `release/0.13-rc1` < `release/0.13-rc2` < `release/0.13`.
-  Branches like `release/next` or `release/0.13-wip` never match. The catalog
-  moves to a new release on the first run after its branch is pushed. Use
-  this when your skills ship with your releases (Quark does this).
 
-Tags and commits can't be tracked. Whatever lands on the tracked branch
-reaches users, so it should be a branch your own review process protects. Land
-skill changes there and the catalog follows.
 
 Everything in the folder ships, so the requirements are yours to maintain
 upstream alongside the skill. See
