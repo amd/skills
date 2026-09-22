@@ -35,8 +35,7 @@ request adding the repo to
 repo can federate as many skills as it likes and never needs approving again.
 
 The issue also asks which **branch** to federate from. Leave it blank for
-`main`. The approval covers that branch, so switching branches later means a
-new approval issue.
+`main`.
 
 ## 1. Author the skill in your repo
 
@@ -50,8 +49,9 @@ named another. It can be:
 - a branch name, such as `main` or `develop`, followed as it moves;
 - a release pattern, such as `release/*`, which follows your newest release
   branch. The `*` stands for a version number, so `release/0.12` wins over
-  `release/0.9`. Branches like `release/next` never match. The catalog moves to
-  a new release as soon as its branch is pushed. Use this when your skills
+  `release/0.9`. Branches like `release/next` never match. The nightly
+  federation run moves the catalog to a new release branch once you push it.
+  Use this when your skills
   ship with your releases (Quark does this).
 
 Only the approved branch can be tracked, and tags and commits can't be tracked

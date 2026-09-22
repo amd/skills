@@ -11,7 +11,7 @@ A branch is one of:
 - a release pattern with a single `*` standing for a version number, e.g.
   `release/*`. It resolves to the matching branch with the highest version,
   so `release/0.12` wins over `release/0.9`, and a new `release/0.13` is
-  picked up as soon as it is pushed. Branches whose `*` part is not a version
+  picked up by the next federation run after it is pushed. Branches whose `*` part is not a version
   (`release/next`, `release/0.13-wip`) never match.
 
 Omitting the branch means `main`.
