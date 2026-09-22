@@ -33,7 +33,7 @@ for credentials and run mode, the demo skills for a workload preset, and
 runtime, so they always match the installed version.
 
 This is the agent-facing form of the human quickstart in
-[examples/README.md](https://github.com/AMD-AGI/Hyperloom/blob/main/examples/README.md).
+[examples/README.md](https://github.com/AMD-AGI/Hyperloom/blob/f6a17b3330863383516f525e65fc199b49dd180d/examples/README.md).
 
 ## Out of scope for this skill
 
