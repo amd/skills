@@ -142,8 +142,7 @@ The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integr
 
 [`.github/federation.json`](.github/federation.json) is the whole registry: each
 entry names a source repo and the exact path of every skill folder to vendor
-from it. Sources are tracked at `main` only, so nothing reaches users that the
-owning team has not already merged.
+from it.
 
 The `federate-skills` workflow runs nightly and on demand. It clones each
 declared repo, compares a content hash of the upstream skill folder against the

@@ -198,6 +198,33 @@ class TestVendoredEdits(unittest.TestCase):
             self.assertEqual(len(edits), 1)
             self.assertEqual(edits[0]["repo"], "AMD-AGI/Hyperloom")
             self.assertEqual(edits[0]["source_path"], "examples/skills/optimizer")
+            self.assertEqual(edits[0]["branch"], "main")
+            self.assertEqual(edits[0]["source_ref"], "main")
+
+    def test_the_upstream_link_follows_the_tracked_branch(self):
+        # The comment tells the contributor where to land the change, so a
+        # source on a release pattern links to the release it last resolved
+        # to rather than to a `main` it may not even have.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            quark = source("amd/Quark", {"path": ".claude/skills/q", "as": "q"})
+            quark["branch"] = "release/*"
+            base = build_base(tmp, local=("q",), sources=[quark])
+
+            def edit() -> dict:
+                return report(tmp, base, changed=("skills/q/SKILL.md",))[
+                    "vendored_edits"
+                ][0]
+
+            # Before the first import there is no release to point at yet.
+            self.assertEqual(edit()["branch"], "release/*")
+            self.assertEqual(edit()["source_ref"], "HEAD")
+
+            (base / "skills" / "q" / guard.fed.MARKER_FILENAME).write_text(
+                json.dumps({"ref": "release/*", "resolved_ref": "release/0.12"}),
+                encoding="utf-8",
+            )
+            self.assertEqual(edit()["source_ref"], "release/0.12")
 
     def test_a_marker_no_source_declares_does_not_make_a_skill_federated(self):
         # `magpie-kernel-evaluator` on main: a vendored copy left behind by a

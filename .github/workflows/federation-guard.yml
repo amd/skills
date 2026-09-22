@@ -168,11 +168,12 @@ jobs:
                   `allowed because it is ${fromBot ? "opened by automation" : `labeled \`${overrideLabel}\``}.`
                 );
               } else {
+                const branchText = b => b.includes("*") ? `the newest \`${b}\` branch` : `\`${b}\``;
                 const rows = edits.map(e => {
                   const upstream = e.source_path
-                    ? `[\`${e.repo}/${e.source_path}\`](https://github.com/${e.repo}/tree/main/${e.source_path})`
+                    ? `[\`${e.repo}/${e.source_path}\`](https://github.com/${e.repo}/tree/${e.source_ref}/${e.source_path})`
                     : `[\`${e.repo}\`](https://github.com/${e.repo})`;
-                  return `| \`skills/${e.skill}\` | ${upstream} |`;
+                  return `| \`skills/${e.skill}\` | ${upstream} | ${branchText(e.branch)} |`;
                 });
                 await upsert("<!-- federation-guard:vendored-edit -->", [
                   `## Closed: this is a vendored copy`,
@@ -181,11 +182,11 @@ jobs:
                   `The nightly \`federate-skills\` run re-imports the folder wholesale, so a change merged here is ` +
                   `deleted the next time the source repo moves. Please make it upstream instead:`,
                   ``,
-                  `| Vendored copy | Edit it here |`,
-                  `| --- | --- |`,
+                  `| Vendored copy | Edit it here | Land it on |`,
+                  `| --- | --- | --- |`,
                   ...rows,
                   ``,
-                  `Once it is on \`main\` there, this catalog picks it up on its own (nightly, or by dispatching`,
+                  `Once it is on that branch there, this catalog picks it up on its own (nightly, or by dispatching`,
                   `\`federate-skills\`). See [CONTRIBUTING.md](https://github.com/${owner}/${repo}/blob/main/CONTRIBUTING.md#update-or-remove).`,
                   ``,
                   `A skill's own \`evals/\` folder is the exception — the catalog owns those datasets, so edit them here.`,
