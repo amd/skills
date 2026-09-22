@@ -433,6 +433,52 @@ class TestProductRepoApproval(unittest.TestCase):
             self.assertTrue(result["federation_error"])
             self.assertEqual(result["new_skills_needing_approval"], [])
 
+    def test_added_skills_carries_the_set_the_approval_rule_filters(self):
+        # `/federate` vendors this set, so an approved repo has to stay in it
+        # even though it drops out of `new_skills_needing_approval`.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(tmp, approved=("amd-org/myproject",))
+            result = report(
+                tmp,
+                base,
+                head_sources=[
+                    source(TRACELENS, {"path": "agent/orchestrator"}),
+                    source("AMD-Org/MyProject", {"path": "skills/mine", "as": "mp-mine"}),
+                    source("AMD-Org/Other", {"path": "skills/theirs", "as": "o-theirs"}),
+                ],
+            )
+            self.assertEqual(
+                [e["skill"] for e in result["added_skills"]], ["mp-mine", "o-theirs"]
+            )
+            self.assertEqual(
+                [e["skill"] for e in result["new_skills_needing_approval"]],
+                ["o-theirs"],
+            )
+
+    def test_added_skills_is_empty_when_the_pull_request_declares_nothing_new(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(
+                tmp,
+                sources=[
+                    source(TRACELENS, {"path": "agent/orchestrator", "as": "tl-orch"})
+                ],
+            )
+            self.assertEqual(
+                report(
+                    tmp,
+                    base,
+                    head_sources=[
+                        source(
+                            TRACELENS,
+                            {"path": "tools/agents/orchestrator", "as": "tl-orch"},
+                        )
+                    ],
+                )["added_skills"],
+                [],
+            )
+
     def test_an_unreadable_file_on_the_base_branch_is_reported_too(self):
         # The declarations are the only thing either rule reads, so a base
         # branch whose federation.json cannot be parsed has to fail the check

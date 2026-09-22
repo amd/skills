@@ -89,6 +89,10 @@ There is no ref, branch, or commit field. Federation is `main`-only by design.
 
 ## 3. Vendor and validate locally
 
+Optional. You can commit just `.github/federation.json`, open the pull request,
+and ask a maintainer to comment `/federate` on it — see step 4. Do it locally if
+you would rather see the vendored result before anyone else does.
+
 The scripts read `.github/federation.json` from your working tree.
 
 ```bash
@@ -103,10 +107,22 @@ manifest to edit by hand.
 
 ## 4. Open a pull request
 
-Commit `.github/federation.json`, `skills/**`, and the regenerated manifests. A
-maintainer reviews and merges once CI passes. The `validate` workflow checks the
-manifests; the `evals` workflow runs [skillscope](https://github.com/amd/skillscope)
-— the structural checks, then your prompts against a real agent.
+Commit `.github/federation.json`, and — if you vendored locally — `skills/**`
+and the regenerated manifests. A maintainer reviews and merges once CI passes.
+The `validate` workflow checks the manifests; the `evals` workflow runs
+[skillscope](https://github.com/amd/skillscope) — the structural checks, then
+your prompts against a real agent.
+
+If you did not vendor locally, ask a maintainer to comment `/federate` on the
+pull request. That vendors every skill the pull request adds onto your branch and
+regenerates the manifests, so the reviewer sees the same diff either way. It
+works on branches in this repo only, not on forks, and covers new skills only —
+an existing one is refreshed by the nightly run. Naming skills (`/federate
+myproject-my-skill`) narrows it to those.
+
+The commit is pushed by the workflow, so the checks on it start in an
+approval-required state; the maintainer clicks **Approve workflows to run** in
+the merge box.
 
 Never hand-edit vendored skills under `skills/`. Changes must come from your
 repo via re-import, or they will be overwritten.

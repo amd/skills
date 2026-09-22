@@ -1,0 +1,315 @@
+name: federate-pr
+
+# Vendors a newly declared skill onto the pull request's own branch, so a
+# contributor registering a skill only has to edit `.github/federation.json`.
+# A maintainer comments `/federate` (optionally naming skills) and this run
+# pushes `skills/<name>/` and the regenerated manifests to the head branch.
+#
+# Only skills the pull request *adds* are in scope. A skill already declared on
+# `main` is refreshed by the nightly `federate-skills` run, and writing to its
+# folder here would trip `federation-guard` rule 1 and close the pull request.
+#
+# `issue_comment` always runs `main`'s copy of this file, which is the security
+# property that makes the rest safe -- but it also means a branch cannot test
+# itself. The `workflow_dispatch` input is that test path.
+#
+# The push uses `GITHUB_TOKEN`, so the resulting `pull_request` runs are created
+# in an approval-required state: the merge box shows a banner and a maintainer
+# clicks "Approve workflows to run". Swapping in a GitHub App token on the push
+# step is the whole of removing that click.
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Pull request number to federate into."
+        required: true
+        type: string
+      skills:
+        description: "Space-separated local skill names (blank = every skill the PR adds)."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+# Two commands on one pull request would race for the same branch.
+concurrency:
+  group: federate-pr-${{ github.event.issue.number || github.event.inputs.pr }}
+  cancel-in-progress: false
+
+jobs:
+  federate:
+    name: Federate onto the pull request branch
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.issue.pull_request &&
+        github.event.issue.state == 'open' &&
+        contains(github.event.comment.body, '/federate') &&
+        github.event.comment.user.type != 'Bot'
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authorize the command and resolve the branch
+        id: resolve
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const dispatch = context.eventName === "workflow_dispatch";
+            const number = Number(dispatch ? context.payload.inputs.pr : context.payload.issue.number);
+
+            let names = dispatch ? (context.payload.inputs.skills || "") : "";
+            if (!dispatch) {
+              const body = context.payload.comment.body || "";
+              // Start of a line, so trailing prose ("please /federate now")
+              // is not mistaken for a list of skill names.
+              const match = body.match(/^[ \t]*\/federate\b([^\n]*)/m);
+              if (!match) {
+                return core.setFailed(
+                  "`/federate` has to start a line, on its own or followed by skill names."
+                );
+              }
+              names = match[1];
+            }
+            const skills = names.replace(/[`,]/g, " ").trim().split(/\s+/).filter(Boolean);
+
+            // One current comment per pull request, rewritten in place, rather
+            // than one per command. The later steps key on the same marker.
+            async function refuse(body) {
+              const marker = "<!-- federate-pr -->";
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: number, per_page: 100,
+              });
+              const existing = comments.find(c => (c.body || "").includes(marker));
+              const full = `${marker}\n${body}`;
+              if (existing) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: full });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number: number, body: full });
+              }
+              core.setFailed(body.replace(/[`*]/g, ""));
+            }
+
+            if (!dispatch) {
+              await github.rest.reactions.createForIssueComment({
+                owner, repo, comment_id: context.payload.comment.id, content: "eyes",
+              });
+            }
+
+            // Write access, not `author_association`: its `MEMBER` value means
+            // AMD org membership, which is not permission to push here.
+            const actor = dispatch ? context.actor : context.payload.comment.user.login;
+            const { data: access } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner, repo, username: actor,
+            });
+            if (!["admin", "maintain", "write"].includes(access.permission)) {
+              return refuse(
+                `@${actor} — \`/federate\` pushes a commit to this branch, so it needs write ` +
+                `access to \`${owner}/${repo}\`. Ask a maintainer to run it.`
+              );
+            }
+
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+            if (pr.state !== "open") {
+              return refuse(`This pull request is ${pr.state}, so there is no branch to federate onto.`);
+            }
+            if (!pr.head.repo || pr.head.repo.full_name !== `${owner}/${repo}`) {
+              return refuse(
+                `\`/federate\` can only push to a branch in \`${owner}/${repo}\`, and this pull ` +
+                `request comes from \`${pr.head.repo ? pr.head.repo.full_name : "a deleted fork"}\`. ` +
+                `Push your branch here instead, or vendor locally — see ` +
+                `[CONTRIBUTING.md](https://github.com/${owner}/${repo}/blob/main/CONTRIBUTING.md#3-vendor-and-validate-locally).`
+              );
+            }
+
+            core.setOutput("pr", String(number));
+            core.setOutput("head_ref", pr.head.ref);
+            core.setOutput("requested", skills.join(" "));
+
+      - name: Check out the pull request branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.head_ref }}
+          path: pr
+
+      - name: Check out the base branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: base
+
+      # Everything that runs is `main`'s. The pull request supplies
+      # `.github/federation.json` as data and nothing else.
+      - name: Run the base branch's federation scripts
+        run: |
+          rm -rf pr/.github/scripts
+          cp -r base/.github/scripts pr/.github/scripts
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Report what the pull request adds
+        run: |
+          : > empty.txt
+          uv run base/.github/scripts/federation_guard.py \
+            --base-dir base \
+            --changed-files empty.txt \
+            --head-federation pr/.github/federation.json \
+            --report report.json
+
+      - name: Decide what to vendor
+        id: plan
+        uses: actions/github-script@v7
+        env:
+          REQUESTED: ${{ steps.resolve.outputs.requested }}
+          PR: ${{ steps.resolve.outputs.pr }}
+        with:
+          script: |
+            const fs = require("fs");
+            const { owner, repo } = context.repo;
+            const issue_number = Number(process.env.PR);
+            const report = JSON.parse(fs.readFileSync("report.json", "utf8"));
+
+            async function say(body, fail) {
+              const marker = "<!-- federate-pr -->";
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number, per_page: 100,
+              });
+              const existing = comments.find(c => (c.body || "").includes(marker));
+              const full = `${marker}\n${body}`;
+              if (existing) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: full });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number, body: full });
+              }
+              if (fail) core.setFailed(body.replace(/[`*]/g, ""));
+            }
+
+            if (report.federation_error) {
+              return say(
+                `\`.github/federation.json\` could not be read, so there is nothing to act on: ` +
+                `\`${report.federation_error}\``,
+                true,
+              );
+            }
+
+            const added = new Map(report.added_skills.map(e => [e.skill, e]));
+            if (added.size === 0) {
+              return say(
+                `Nothing to federate: this pull request declares no skill that \`main\` does not ` +
+                `already have. An existing skill is refreshed by the nightly \`federate-skills\` run.`,
+                true,
+              );
+            }
+
+            const requested = (process.env.REQUESTED || "").split(/\s+/).filter(Boolean);
+            const unknown = requested.filter(name => !added.has(name));
+            if (unknown.length > 0) {
+              return say(
+                `${unknown.map(n => `\`${n}\``).join(", ")} ${unknown.length === 1 ? "is" : "are"} not ` +
+                `among the skills this pull request adds. It adds ` +
+                `${[...added.keys()].map(n => `\`${n}\``).join(", ")}.`,
+                true,
+              );
+            }
+
+            const targets = requested.length > 0 ? requested : [...added.keys()];
+            const blocked = report.new_skills_needing_approval.filter(e => targets.includes(e.skill));
+            if (blocked.length > 0) {
+              const repos = [...new Set(blocked.map(e => e.repo))];
+              return say(
+                `${repos.map(r => `\`${r}\``).join(", ")} ${repos.length === 1 ? "is" : "are"} not in ` +
+                `[\`.github/skill_owners.json\`](https://github.com/${owner}/${repo}/blob/main/.github/skill_owners.json), ` +
+                `so ${blocked.map(e => `\`${e.skill}\``).join(", ")} cannot be vendored yet. The ` +
+                `\`Federation guard\` check on this pull request explains how to get the repo approved.`,
+                true,
+              );
+            }
+
+            core.setOutput("targets", targets.join(" "));
+
+      - name: Vendor the skills and regenerate the manifests
+        working-directory: pr
+        env:
+          TARGETS: ${{ steps.plan.outputs.targets }}
+        run: |
+          args=(--summary-json "$GITHUB_WORKSPACE/summary.json")
+          for name in $TARGETS; do args+=(--only "$name"); done
+          uv run .github/scripts/federate_skills.py "${args[@]}"
+          ./.github/scripts/publish.sh
+
+      - name: Commit to the pull request branch
+        id: push
+        working-directory: pr
+        env:
+          TARGETS: ${{ steps.plan.outputs.targets }}
+          HEAD_REF: ${{ steps.resolve.outputs.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for name in $TARGETS; do git add -- "skills/$name"; done
+          git add -- .claude-plugin .cursor-plugin .codex-plugin .agents/plugins
+          if git diff --cached --quiet; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git status --short --cached
+          git commit -m "Vendor $(echo "$TARGETS" | tr ' ' ',' | sed 's/,/, /g')"
+          git push origin "HEAD:refs/heads/$HEAD_REF"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Report on the pull request
+        uses: actions/github-script@v7
+        env:
+          PUSHED: ${{ steps.push.outputs.pushed }}
+          TARGETS: ${{ steps.plan.outputs.targets }}
+          PR: ${{ steps.resolve.outputs.pr }}
+        with:
+          script: |
+            const fs = require("fs");
+            const { owner, repo } = context.repo;
+            const issue_number = Number(process.env.PR);
+            const targets = process.env.TARGETS.split(/\s+/).filter(Boolean);
+            const summary = JSON.parse(fs.readFileSync("summary.json", "utf8"));
+            const vendored = summary.updated.filter(u => targets.includes(u.skill));
+
+            const body = process.env.PUSHED === "true"
+              ? [
+                  `## Vendored onto this branch`,
+                  ``,
+                  `| Skill | Source |`,
+                  `| --- | --- |`,
+                  ...vendored.map(u =>
+                    `| \`skills/${u.skill}\` | [\`${u.repo}@${u.short_commit}\`]` +
+                    `(https://github.com/${u.repo}/commit/${u.commit}) \`${u.path}\` |`
+                  ),
+                  ``,
+                  `**The checks on this commit are waiting to be started.** The push came from ` +
+                  `\`GITHUB_TOKEN\`, so \`validate\` and \`evals\` were created in an approval-required ` +
+                  `state — click **Approve workflows to run** in the merge box above.`,
+                ].join("\n")
+              : [
+                  `## Already up to date`,
+                  ``,
+                  `${targets.map(t => `\`${t}\``).join(", ")} already ${targets.length === 1 ? "matches" : "match"} ` +
+                  `${targets.length === 1 ? "its" : "their"} source repo at \`main\`, so this branch needs no commit.`,
+                ].join("\n");
+
+            const marker = "<!-- federate-pr -->";
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+            const existing = comments.find(c => (c.body || "").includes(marker));
+            const full = `${marker}\n${body}`;
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: full });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: full });
+            }
+            core.notice(body.split("\n")[0].replace("## ", ""));

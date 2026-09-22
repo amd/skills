@@ -60,6 +60,9 @@ Usage:
 the pull request's copy of `.github/federation.json`; leave it out when the
 pull request does not change that file and rule 2 is skipped.
 
+The report's `added_skills` is the base-vs-head difference rule 2 filters, and
+is read by the `federate-pr` workflow to decide what `/federate` vendors.
+
 The exit status is 0 whenever the evaluation itself succeeded, violations or
 not. What to do about a violation is the workflow's call.
 """
@@ -164,16 +167,23 @@ def declared_skills(sources: list[fed.Source]) -> dict[tuple[str, str], dict]:
     return declared
 
 
-def new_skills_needing_approval(
+def added_skills(
     base: dict[tuple[str, str], dict],
     head: dict[tuple[str, str], dict],
+) -> list[dict]:
+    """Every skill the pull request declares that the base branch does not.
+
+    This is also what `/federate` vendors, so the set the approval rule holds
+    and the set the command acts on cannot drift apart.
+    """
+    return [entry for key, entry in sorted(head.items()) if key not in base]
+
+
+def new_skills_needing_approval(
+    added: list[dict],
     approved: set[str],
 ) -> list[dict]:
-    return [
-        entry
-        for key, entry in sorted(head.items())
-        if key not in base and key[0] not in approved
-    ]
+    return [entry for entry in added if entry["repo"].lower() not in approved]
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -215,6 +225,7 @@ def build_report(args: argparse.Namespace) -> dict:
     base_dir = args.base_dir
     report: dict = {
         "vendored_edits": [],
+        "added_skills": [],
         "new_skills_needing_approval": [],
         "federation_error": "",
     }
@@ -247,9 +258,9 @@ def build_report(args: argparse.Namespace) -> dict:
         report["federation_error"] = str(exc)
         return report
 
+    report["added_skills"] = added_skills(base, head)
     report["new_skills_needing_approval"] = new_skills_needing_approval(
-        base,
-        head,
+        report["added_skills"],
         load_approved_repos(base_dir / ".github" / "skill_owners.json"),
     )
     return report
@@ -266,6 +277,12 @@ def print_summary(report: dict) -> None:
 
     if report["federation_error"]:
         print(f".github/federation.json could not be read: {report['federation_error']}")
+
+    added = report["added_skills"]
+    if added:
+        print("Federated skills this pull request adds:")
+        for entry in added:
+            print(f"  {entry['skill']} from {entry['repo']} ({entry['path']})")
 
     pending = report["new_skills_needing_approval"]
     if pending:
