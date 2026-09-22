@@ -3,7 +3,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["pyyaml>=6.0"]
 # ///
-"""Report the two federation rules a pull request can break.
+"""Report the three federation rules a pull request can break.
 
 Pure reporting: this script decides nothing and touches nothing. It reads the
 base branch's tree, the pull request's changed paths, and the
@@ -49,6 +49,17 @@ Rule 2 -- a new federated skill needs its product repo approved.
     copy would let the same pull request that federates a skill also grant it
     approval, which is the gate approving itself.
 
+Rule 3 -- a source tracks the branch its owners approved.
+    Whatever lands on the tracked branch reaches users with no review here, so
+    the branch is part of what the product release owner signs off on: the
+    registry entry records it (`main` when it names none). A pull request that
+    sets a source's branch -- a new source, or a change to an existing one --
+    must set the approved one. Anything else means a fresh approval issue.
+
+    Sources whose branch the pull request leaves alone are not held to this,
+    for the same reason rule 2 grandfathers existing skills. A new source from
+    a repo nobody approved is left to rule 2, so it is reported once.
+
 Usage:
     uv run .github/scripts/federation_guard.py \
         --changed-files changed.txt \
@@ -58,7 +69,7 @@ Usage:
 `--changed-files` is a file holding one repo-relative path per line (what
 `gh api .../pulls/N/files --jq '.[].filename'` prints). `--head-federation` is
 the pull request's copy of `.github/federation.json`; leave it out when the
-pull request does not change that file and rule 2 is skipped.
+pull request does not change that file and rules 2 and 3 are skipped.
 
 The exit status is 0 whenever the evaluation itself succeeded, violations or
 not. What to do about a violation is the workflow's call.
@@ -91,27 +102,45 @@ def read_changed_files(path: Path) -> list[str]:
     return [line.strip().replace("\\", "/") for line in lines if line.strip()]
 
 
-def load_approved_repos(registry: Path) -> set[str]:
-    """Return the approved repos from `.github/skill_owners.json`, lowercased.
+def load_approved_repos(registry: Path) -> dict[str, str]:
+    """Map each approved repo (lowercased) to the branch it was approved for.
 
     A missing or malformed registry reads as "nothing is approved" rather than
     as an error: the strict reading is the safe one, and `record_skill_owner.py`
-    is what validates the file when it writes it.
+    is what validates the file when it writes it. An entry without a `branch`
+    approves `main`.
     """
     if not registry.is_file():
-        return set()
+        return {}
     try:
         data = json.loads(registry.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        return set()
+        return {}
     repos = data.get("repos") if isinstance(data, dict) else None
     if not isinstance(repos, list):
-        return set()
-    return {
-        entry["repo"].strip().lower()
-        for entry in repos
-        if isinstance(entry, dict) and isinstance(entry.get("repo"), str)
-    }
+        return {}
+    approved: dict[str, str] = {}
+    for entry in repos:
+        if not isinstance(entry, dict) or not isinstance(entry.get("repo"), str):
+            continue
+        branch = entry.get("branch")
+        approved[entry["repo"].strip().lower()] = (
+            branch.strip()
+            if isinstance(branch, str) and branch.strip()
+            else fed.branches.DEFAULT_BRANCH
+        )
+    return approved
+
+
+def source_ref(skill_dir: Path, branch: str) -> str:
+    """A ref that github.com can browse for a skill tracked at `branch`.
+
+    A pattern is not a ref, so it is swapped for the release branch the last
+    import resolved it to, or for the repo's default branch before any import.
+    """
+    if not fed.branches.is_pattern(branch):
+        return branch
+    return fed.read_marker(skill_dir).get("resolved_ref") or "HEAD"
 
 
 def vendored_edits(changed: list[str], declared: dict[str, dict]) -> list[dict]:
@@ -141,6 +170,8 @@ def vendored_edits(changed: list[str], declared: dict[str, dict]) -> list[dict]:
                 "skill": name,
                 "repo": entry["repo"],
                 "source_path": entry["path"],
+                "branch": entry["branch"],
+                "source_ref": entry.get("source_ref", entry["branch"]),
                 "paths": [],
             },
         )
@@ -160,6 +191,7 @@ def declared_skills(sources: list[fed.Source]) -> dict[tuple[str, str], dict]:
                 "skill": spec.dest_name,
                 "repo": source.repo,
                 "path": spec.path,
+                "branch": source.branch,
             }
     return declared
 
@@ -167,13 +199,39 @@ def declared_skills(sources: list[fed.Source]) -> dict[tuple[str, str], dict]:
 def new_skills_needing_approval(
     base: dict[tuple[str, str], dict],
     head: dict[tuple[str, str], dict],
-    approved: set[str],
+    approved: dict[str, str],
 ) -> list[dict]:
     return [
-        entry
+        {k: entry[k] for k in ("skill", "repo", "path")}
         for key, entry in sorted(head.items())
         if key not in base and key[0] not in approved
     ]
+
+
+def branches_needing_approval(
+    base: list[fed.Source],
+    head: list[fed.Source],
+    approved: dict[str, str],
+) -> list[dict]:
+    """Sources whose branch the pull request sets to one nobody approved."""
+    base_branch = {source.repo.lower(): source.branch for source in base}
+    flagged = []
+    for source in sorted(head, key=lambda s: s.repo.lower()):
+        repo = source.repo.lower()
+        if source.branch == base_branch.get(repo):
+            continue
+        if repo not in approved and repo not in base_branch:
+            continue
+        if approved.get(repo) == source.branch:
+            continue
+        flagged.append(
+            {
+                "repo": source.repo,
+                "branch": source.branch,
+                "approved_branch": approved.get(repo),
+            }
+        )
+    return flagged
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -216,30 +274,39 @@ def build_report(args: argparse.Namespace) -> dict:
     report: dict = {
         "vendored_edits": [],
         "new_skills_needing_approval": [],
+        "branches_needing_approval": [],
         "federation_error": "",
     }
 
     # `.github/federation.json` on the base branch is the only thing that says
-    # which skills are federated, so an unreadable one leaves both rules with
+    # which skills are federated, so an unreadable one leaves every rule with
     # nothing to go on. Report that instead of passing every pull request.
     try:
-        base = declared_skills(
-            fed.parse_federation(base_dir / ".github" / "federation.json")
-        )
+        base_sources = fed.parse_federation(base_dir / ".github" / "federation.json")
     except (ValueError, FileNotFoundError) as exc:
         report["federation_error"] = f"base branch copy: {exc}"
         return report
+    base = declared_skills(base_sources)
 
     report["vendored_edits"] = vendored_edits(
         read_changed_files(args.changed_files),
-        {entry["skill"]: entry for entry in base.values()},
+        {
+            entry["skill"]: {
+                **entry,
+                "source_ref": source_ref(
+                    base_dir / SKILLS_PREFIX / entry["skill"], entry["branch"]
+                ),
+            }
+            for entry in base.values()
+        },
     )
 
     if args.head_federation is None:
         return report
 
     try:
-        head = declared_skills(fed.parse_federation(args.head_federation))
+        head_sources = fed.parse_federation(args.head_federation)
+        head = declared_skills(head_sources)
     except (ValueError, FileNotFoundError) as exc:
         # The `validate` workflow is what explains a malformed federation file
         # in detail; recording it here keeps this rule from passing a pull
@@ -247,10 +314,12 @@ def build_report(args: argparse.Namespace) -> dict:
         report["federation_error"] = str(exc)
         return report
 
+    approved = load_approved_repos(base_dir / ".github" / "skill_owners.json")
     report["new_skills_needing_approval"] = new_skills_needing_approval(
-        base,
-        head,
-        load_approved_repos(base_dir / ".github" / "skill_owners.json"),
+        base, head, approved
+    )
+    report["branches_needing_approval"] = branches_needing_approval(
+        base_sources, head_sources, approved
     )
     return report
 
@@ -273,9 +342,22 @@ def print_summary(report: dict) -> None:
         for entry in pending:
             print(f"  {entry['skill']} from {entry['repo']} ({entry['path']})")
 
-    if not edits and not pending and not report["federation_error"]:
-        print("Nothing to flag: no vendored skill was edited and no new skill "
-              "comes from an unapproved product repo.")
+    unapproved_branches = report["branches_needing_approval"]
+    if unapproved_branches:
+        print("Sources set to a branch their owners did not approve:")
+        for entry in unapproved_branches:
+            approved = entry["approved_branch"] or "nothing (not in the registry)"
+            print(f"  {entry['repo']} tracks {entry['branch']}; approved: {approved}")
+
+    if (
+        not edits
+        and not pending
+        and not unapproved_branches
+        and not report["federation_error"]
+    ):
+        print("Nothing to flag: no vendored skill was edited, no new skill "
+              "comes from an unapproved product repo, and every branch set "
+              "is the approved one.")
 
 
 def main(argv: list[str] | None = None) -> int:

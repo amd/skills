@@ -5,15 +5,19 @@
 # ///
 """Vendor skills from the external repositories declared in `.github/federation.json`.
 
-Each entry in that file names a GitHub repo and the exact path of every
-skill folder to vendor from it. Sources are always tracked at `main`: the
-catalog cannot be pointed at an arbitrary branch, tag, or commit, so a
-source repo can never route unreviewed work into the catalog through a
-side branch.
+Each entry in that file names a GitHub repo, the branch to track, and the
+exact path of every skill folder to vendor from it. The branch defaults to
+`main`. It can also be a release pattern such as `release/*`, which tracks
+the matching branch with the highest version (see `federation_branches.py`).
+Tags and commits cannot be tracked, and the federation guard only lets a
+pull request set the branch that the repo's owners approved in
+`.github/skill_owners.json`, so a source repo cannot route unreviewed work
+into the catalog through a side branch.
 
 For each declared skill, the script:
 
-1. Shallow-clones the source repo at `main` into a temp directory, using
+1. Resolves the source's branch (picking the newest release branch for a
+   pattern) and shallow-clones the repo at it into a temp directory, using
    sparse-checkout so only the declared skill paths are fetched.
 2. Hashes the upstream skill folder and compares it against the hash
    recorded in the vendored copy's `.federated.json`. A skill whose
@@ -37,7 +41,8 @@ For each declared skill, the script:
    value. The upstream folder name is still used to locate the skill in
    its source repo.
 4. Writes `.federated.json` inside each copy with the source repo, the
-   tracked ref, the resolved commit, and the content hash, so we can tell
+   tracked branch (plus the branch it resolved to, for a pattern), the
+   resolved commit, and the content hash, so we can tell
    vendored skills apart from skills authored in this repo and detect the
    next real upstream change.
 5. Rewrites relative markdown links that point outside the copied skill
@@ -83,6 +88,7 @@ import posixpath
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -91,12 +97,12 @@ from typing import Iterable
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import federation_branches as branches  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CATALOG_FILE = REPO_ROOT / ".github" / "federation.json"
-# Federation tracks source repos at `main` only. Allowing arbitrary refs
-# would let a source repo ship into the catalog from an unreviewed branch,
-# so the branch is a constant here rather than a per-source setting.
-FEDERATED_REF = "main"
 SKILLS_DIR = REPO_ROOT / "skills"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 MARKER_FILENAME = ".federated.json"
@@ -136,12 +142,12 @@ URI_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 MARKETPLACE_DESCRIPTION_MAX = 320
 
 REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
-SOURCE_KEYS = {"repo", "license", "skills"}
+SOURCE_KEYS = {"repo", "license", "branch", "skills"}
 SKILL_KEYS = {"path", "as", "marketplace_description"}
-# Keys that used to select a ref in the old YAML catalog. They are rejected
-# with a pointed message rather than ignored, so an entry that tries to track
-# something other than `main` fails loudly instead of silently tracking `main`.
-PINNING_KEYS = {"ref", "branch", "tag", "commit", "rev", "revision"}
+# Keys that would pin a source to something other than a branch. They are
+# rejected with a pointed message rather than ignored, so an entry that tries
+# to track a tag or commit fails loudly instead of silently tracking `main`.
+PINNING_KEYS = {"ref", "tag", "commit", "rev", "revision"}
 
 
 @dataclass
@@ -168,15 +174,13 @@ class Source:
     repo: str
     license: str
     skills: list[SkillSpec] = field(default_factory=list)
+    # As declared: a branch name, or a pattern such as `release/*`.
+    branch: str = branches.DEFAULT_BRANCH
 
     @property
     def name(self) -> str:
         """Stable slug for the source, derived from `owner/repo`."""
         return re.sub(r"[^a-z0-9]+", "-", self.repo.lower()).strip("-")
-
-    @property
-    def ref(self) -> str:
-        return FEDERATED_REF
 
 
 @dataclass
@@ -186,6 +190,9 @@ class ImportResult:
     path: str
     commit: str
     updated: bool
+    # The branch actually cloned: `source.branch` itself, or the newest
+    # release branch it matched.
+    branch: str = branches.DEFAULT_BRANCH
     skill_description: str = ""
     marketplace_description: str = ""
 
@@ -221,9 +228,10 @@ def parse_federation(catalog: Path) -> list[Source]:
         pinning = PINNING_KEYS & set(raw)
         if pinning:
             raise ValueError(
-                f"{where} sets {sorted(pinning)}, but federated sources are "
-                f"always tracked at {FEDERATED_REF!r}. Remove the key and land "
-                "the change on your default branch instead."
+                f"{where} sets {sorted(pinning)}, but federated sources track a "
+                "branch, never a tag or commit. Use `branch` instead (e.g. "
+                f"{branches.DEFAULT_BRANCH!r} or 'release/*'), or leave it out "
+                f"to track {branches.DEFAULT_BRANCH!r}."
             )
         unknown = set(raw) - SOURCE_KEYS
         if unknown:
@@ -237,6 +245,7 @@ def parse_federation(catalog: Path) -> list[Source]:
                 f'{where}.repo must be a GitHub "<owner>/<repo>" string, got '
                 f"{repo!r}."
             )
+        branch = branches.validate_branch(raw.get("branch"), f"{where}.branch")
 
         skills_raw = raw.get("skills")
         if not isinstance(skills_raw, list) or not skills_raw:
@@ -288,6 +297,7 @@ def parse_federation(catalog: Path) -> list[Source]:
                 repo=repo,
                 license=raw.get("license") or "UNKNOWN",
                 skills=skills,
+                branch=branch,
             )
         )
     return sources
@@ -305,8 +315,33 @@ def run(cmd: list[str], cwd: Path | None = None) -> str:
     return result.stdout.strip()
 
 
-def shallow_clone(repo: str, sub_paths: Iterable[str], dest: Path) -> str:
-    """Sparse + blobless clone of `repo` at `main`, restricted to `sub_paths`.
+def remote_branches(repo: str) -> list[str]:
+    """Names of every branch on `repo`, read without cloning."""
+    out = run(["git", "ls-remote", "--heads", f"https://github.com/{repo}.git"])
+    prefix = "refs/heads/"
+    names = []
+    for line in out.splitlines():
+        _, _, ref = line.partition("\t")
+        if ref.startswith(prefix):
+            names.append(ref[len(prefix) :])
+    return names
+
+
+def resolve_branch(source: Source) -> str:
+    """The branch to clone for `source`: its own, or its newest release branch."""
+    if not branches.is_pattern(source.branch):
+        return source.branch
+    resolved = branches.latest_matching(source.branch, remote_branches(source.repo))
+    if resolved is None:
+        raise ValueError(
+            f"{source.repo} has no branch matching {source.branch!r} with a "
+            "version number in place of the '*'."
+        )
+    return resolved
+
+
+def shallow_clone(repo: str, branch: str, sub_paths: Iterable[str], dest: Path) -> str:
+    """Sparse + blobless clone of `repo` at `branch`, restricted to `sub_paths`.
 
     Returns the resolved commit SHA. Sparse-checkout avoids pulling the
     whole repo when only a few sub-trees are needed (the AMD-AGI/Apex tree
@@ -336,6 +371,9 @@ def shallow_clone(repo: str, sub_paths: Iterable[str], dest: Path) -> str:
             "--filter=blob:none",
             "--sparse",
             "--no-checkout",
+            "--single-branch",
+            "--branch",
+            branch,
             url,
             str(dest),
         ]
@@ -343,7 +381,7 @@ def shallow_clone(repo: str, sub_paths: Iterable[str], dest: Path) -> str:
     run(["git", "config", "core.autocrlf", "false"], cwd=dest)
     run(["git", "config", "core.eol", "lf"], cwd=dest)
     run(["git", "sparse-checkout", "set", "--cone", *sub_paths], cwd=dest)
-    run(["git", "checkout", FEDERATED_REF], cwd=dest)
+    run(["git", "checkout", branch], cwd=dest)
     return run(["git", "rev-parse", "HEAD"], cwd=dest)
 
 
@@ -555,13 +593,15 @@ def is_up_to_date(
     what the vendored copy should contain: markdown links are rewritten to
     absolute URLs under the source repo, so re-pointing a skill at a
     different repo or path has to re-vendor even if the files are identical.
+    The declared branch is compared rather than the one a pattern resolved
+    to, so a new release branch with the same skill contents is not a bump.
     """
     return (
         bool(upstream_hash)
         and marker.get("content_hash") == upstream_hash
         and marker.get("repo") == source.repo
         and marker.get("path") == spec.path
-        and marker.get("ref") == FEDERATED_REF
+        and marker.get("ref") == source.branch
     )
 
 
@@ -600,6 +640,7 @@ def copy_skill(src: Path, dest: Path) -> None:
 def write_marker(
     skill_dir: Path,
     source: Source,
+    branch: str,
     commit: str,
     relative_path: str,
     upstream_hash: str,
@@ -607,7 +648,11 @@ def write_marker(
     marker = {
         "source": source.name,
         "repo": source.repo,
-        "ref": source.ref,
+        "ref": source.branch,
+    }
+    if branch != source.branch:
+        marker["resolved_ref"] = branch
+    marker |= {
         "commit": commit,
         "path": relative_path,
         "license": source.license,
@@ -729,9 +774,12 @@ def import_source(
         prefix="amd-skills-import-", ignore_cleanup_errors=True
     ) as tmpdir:
         tmp_path = Path(tmpdir) / source.name
-        log.append(f"[{source.name}] cloning {source.repo}@{source.ref}")
+        branch = resolve_branch(source)
+        if branch != source.branch:
+            log.append(f"[{source.name}] {source.branch} resolved to {branch}")
+        log.append(f"[{source.name}] cloning {source.repo}@{branch}")
         commit = shallow_clone(
-            source.repo, [spec.path for spec in source.skills], tmp_path
+            source.repo, branch, [spec.path for spec in source.skills], tmp_path
         )
         log.append(f"[{source.name}] resolved to commit {commit}")
         repo_files = list_repo_files(tmp_path, commit)
@@ -741,7 +789,7 @@ def import_source(
             if not src_skill.is_dir():
                 raise FileNotFoundError(
                     f"Skill path {spec.path!r} not found in "
-                    f"{source.repo}@{source.ref}."
+                    f"{source.repo}@{branch}."
                 )
             skill_md = src_skill / "SKILL.md"
             if not skill_md.exists():
@@ -765,6 +813,7 @@ def import_source(
                         path=spec.path,
                         commit=marker.get("commit", commit),
                         updated=False,
+                        branch=branch,
                     )
                 )
                 continue
@@ -797,7 +846,7 @@ def import_source(
             )
 
             copy_skill(src_skill, dest_skill)
-            write_marker(dest_skill, source, commit, spec.path, upstream_hash)
+            write_marker(dest_skill, source, branch, commit, spec.path, upstream_hash)
             write_card(dest_skill, source, marketplace_description)
             rewrite_skill_name(dest_skill, dest_name, log)
             rewrite_external_references(
@@ -812,9 +861,13 @@ def import_source(
             # The marker is bookkeeping, not content. If re-vendoring produced
             # the same files as the copy already on disk, put the old marker
             # back: a pull request whose entire diff is a hash and a timestamp
-            # tells a reviewer nothing.
-            if previous_marker is not None and previous_content == content_hash(
-                dest_skill, exclude=[MARKER_FILENAME]
+            # tells a reviewer nothing. A marker still naming the branch the
+            # source used to track is kept out of that, or it would never move.
+            if (
+                previous_marker is not None
+                and marker.get("ref") == source.branch
+                and previous_content
+                == content_hash(dest_skill, exclude=[MARKER_FILENAME])
             ):
                 marker_path.write_bytes(previous_marker)
                 log.append(
@@ -829,6 +882,7 @@ def import_source(
                         path=spec.path,
                         commit=marker.get("commit", commit),
                         updated=False,
+                        branch=branch,
                     )
                 )
                 continue
@@ -840,6 +894,7 @@ def import_source(
                     path=spec.path,
                     commit=commit,
                     updated=True,
+                    branch=branch,
                     skill_description=description.strip(),
                     marketplace_description=marketplace_description,
                 )
@@ -895,8 +950,9 @@ def pr_body(
     lines = [
         "Automated federation refresh driven by `.github/federation.json`.",
         "",
-        f"Every source is tracked at `{FEDERATED_REF}`, and a skill is "
-        "re-vendored only when the contents of its upstream folder change.",
+        "Each source is tracked at the branch its entry names "
+        f"(`{branches.DEFAULT_BRANCH}` unless set), and a skill is re-vendored "
+        "only when the contents of its upstream folder change.",
     ]
     if updated:
         lines += ["", "**Bumped**", ""]
@@ -905,7 +961,13 @@ def pr_body(
                 f"- `{result.folder}` to "
                 f"[`{result.short_commit}`]"
                 f"({commit_url(result.source.repo, result.commit)}) "
-                f"from `{result.source.repo}/{result.path}`"
+                f"from `{result.source.repo}/{result.path}` "
+                f"on `{result.branch}`"
+                + (
+                    f" (newest `{result.source.branch}`)"
+                    if result.branch != result.source.branch
+                    else ""
+                )
             )
     if unchanged:
         lines += ["", "**Unchanged**", ""]
@@ -914,7 +976,7 @@ def pr_body(
     lines += [
         "",
         "Each vendored skill carries a `.federated.json` marker recording the "
-        "source repo, the tracked ref, the resolved commit, and the content "
+        "source repo, the tracked branch, the resolved commit, and the content "
         "hash used for change detection.",
     ]
     return "\n".join(lines) + "\n"
@@ -925,7 +987,6 @@ def build_summary(results: list[ImportResult]) -> dict:
     updated = [r for r in results if r.updated]
     unchanged = [r for r in results if not r.updated]
     return {
-        "ref": FEDERATED_REF,
         "changed": bool(updated),
         "title": pr_title(updated),
         "body": pr_body(updated, unchanged),
@@ -934,6 +995,7 @@ def build_summary(results: list[ImportResult]) -> dict:
                 "skill": r.folder,
                 "repo": r.source.repo,
                 "path": r.path,
+                "branch": r.branch,
                 "commit": r.commit,
                 "short_commit": r.short_commit,
             }
@@ -989,7 +1051,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 seen.add(spec.dest_name)
                 print(
-                    f"{source.repo}@{FEDERATED_REF} {spec.path} "
+                    f"{source.repo}@{source.branch} {spec.path} "
                     f"-> skills/{spec.dest_name}"
                 )
         print("")

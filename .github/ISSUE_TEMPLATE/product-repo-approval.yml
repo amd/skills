@@ -14,6 +14,18 @@ body:
       required: true
 
   - type: input
+    id: branch
+    attributes:
+      label: Federation branch
+      description: >-
+        The branch the catalog vendors skills from. Leave blank for `main`. Use a pattern
+        such as `release/*` to always track the newest release branch (`release/0.12`
+        over `release/0.9`), for repos that ship skills with their releases.
+      placeholder: main
+    validations:
+      required: false
+
+  - type: input
     id: engineering_owner
     attributes:
       label: Engineering owner

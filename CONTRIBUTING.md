@@ -34,16 +34,30 @@ request adding the repo to
 [`.github/skill_owners.json`](.github/skill_owners.json); once it merges, the
 repo can federate as many skills as it likes and never needs approving again.
 
+The issue also asks which **branch** to federate from. Leave it blank for
+`main`. The approval covers that branch, so switching branches later means a
+new approval issue.
+
 ## 1. Author the skill in your repo
 
 Each skill is a folder holding a valid `SKILL.md`, a `skill-card.md`, and an
 `evals/evals.json` dataset. Put the folders anywhere in your repo, commonly
 `skills/` or `.agents/skills/`.
 
-The catalog always tracks your **`main`** branch. That is deliberate: the
-catalog cannot be pointed at a side branch, so what reaches users is what your
-own review process has already merged. Land skill changes on `main` and the
-catalog follows.
+The catalog tracks one branch of your repo, **`main`** unless your approval
+named another. It can be:
+
+- a branch name, such as `main` or `develop`, followed as it moves;
+- a release pattern, such as `release/*`, which follows your newest release
+  branch. The `*` stands for a version number, so `release/0.12` wins over
+  `release/0.9`. Branches like `release/next` never match. The catalog moves to
+  a new release as soon as its branch is pushed. Use this when your skills
+  ship with your releases (Quark does this).
+
+Only the approved branch can be tracked, and tags and commits can't be tracked
+at all. Whatever lands on that branch reaches users, so it should be a branch
+your own review process protects. Land skill changes there and the catalog
+follows.
 
 Everything in the folder ships, so the requirements are yours to maintain
 upstream alongside the skill. See
@@ -73,6 +87,17 @@ one repo can federate as many skills as it likes from wherever they live:
           "as": "myproject-other-skill"
         }
       ]
+    },
+    {
+      "repo": "amd/Quark",
+      "license": "MIT",
+      "branch": "release/*",
+      "skills": [
+        {
+          "path": ".claude/skills/quark-install",
+          "as": "quark-install"
+        }
+      ]
     }
   ]
 }
@@ -80,12 +105,13 @@ one repo can federate as many skills as it likes from wherever they live:
 
 | Field | Meaning |
 | --- | --- |
-| `repo` | GitHub `<owner>/<repo>`, must be AMD-owned. Always tracked at `main` |
+| `repo` | GitHub `<owner>/<repo>`, must be AMD-owned |
 | `license` | SPDX id, carried into each vendored copy's marker file |
+| `branch` | Optional. The branch to track, or a release pattern such as `release/*`. Defaults to `main`. Must match the branch in your approval, or the federation guard fails the pull request |
 | `skills[].path` | Path of the skill folder inside your repo, from the repo root |
 | `skills[].as` | Optional local catalog name; use it to namespace as `<project>-<skill>` so names stay unique |
 
-There is no ref, branch, or commit field. Federation is `main`-only by design.
+There is no tag or commit field. A source always follows a branch.
 
 ## 3. Vendor and validate locally
 
@@ -152,7 +178,8 @@ URLs on a schedule to catch link rot.
 
 ## Update or remove
 
-Merge the change to `main` in your repo and the catalog picks it up on its own.
+Merge the change to your tracked branch (or push a new release branch, if you
+track `release/*`) and the catalog picks it up on its own.
 The `federate-skills` workflow runs nightly (and on demand), re-vendors any
 skill whose upstream folder contents changed, and opens a pull request titled
 `Bump <skill> to <short commit>`. A night with no upstream change produces no

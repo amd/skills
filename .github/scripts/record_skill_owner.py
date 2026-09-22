@@ -14,13 +14,19 @@ Registry schema:
           "repo": "AMD-AGI/TraceLens",          # owner/repo, unique per entry
           "engineering_owner": "octocat",       # GitHub handle, no leading @
           "product_release_owner": "octocat",   # GitHub handle, no leading @
+          "branch": "release/*",                # only when not `main`
         }
       ]
     }
 
+`branch` is the branch the owners approved federating from: a branch name, or
+a release pattern such as `release/*` that tracks the newest release branch
+(see `federation_branches.py`). An entry without one approves `main`.
+
 Entries are keyed on `repo` and kept sorted by it. Approving a repo that is
 already listed replaces the existing entry rather than adding a second one,
-so a re-approval after an ownership change reads as the current truth.
+so a re-approval after an ownership or branch change reads as the current
+truth.
 """
 
 from __future__ import annotations
@@ -30,6 +36,10 @@ import json
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import federation_branches as branches  # noqa: E402
 
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 DEFAULT_REGISTRY = Path(__file__).resolve().parents[1] / "skill_owners.json"
@@ -70,6 +80,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="GitHub handle of the product release owner.",
     )
     parser.add_argument(
+        "--branch",
+        default="",
+        help=(
+            "Branch approved for federation, or a pattern such as 'release/*' "
+            f"(default: {branches.DEFAULT_BRANCH})."
+        ),
+    )
+    parser.add_argument(
         "--registry",
         type=Path,
         default=DEFAULT_REGISTRY,
@@ -93,6 +111,12 @@ def main(argv: list[str] | None = None) -> int:
     for field in ("engineering_owner", "product_release_owner"):
         if not entry[field]:
             raise SystemExit(f"--{field.replace('_', '-')} cannot be empty.")
+    try:
+        branch = branches.validate_branch(args.branch.strip() or None, "--branch")
+    except ValueError as err:
+        raise SystemExit(str(err)) from err
+    if branch != branches.DEFAULT_BRANCH:
+        entry["branch"] = branch
 
     registry = load_registry(args.registry)
     existing = next(

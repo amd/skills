@@ -1,8 +1,8 @@
 name: federation-guard
 
-# Holds a pull request to the two rules federation depends on. What it reports
-# is computed by `.github/scripts/federation_guard.py`, which explains both
-# rules and can be run by hand; this workflow is the half that needs a token.
+# Holds a pull request to the three rules federation depends on. What it
+# reports is computed by `.github/scripts/federation_guard.py`, which explains
+# the rules and can be run by hand; this workflow is the half that needs a token.
 #
 # 1. A pull request that edits a vendored skill is closed with an explanation.
 #    Vendored copies are mirrors: the nightly `federate-skills` run re-imports
@@ -17,9 +17,14 @@ name: federation-guard
 #    branch are left alone, so the gate applies to what is being added rather
 #    than to what is already shipping.
 #
-# Both rules read the base branch: whether a skill is vendored, which skills
-# are already declared, and which repos are approved all come from `main`, not
-# from the pull request. Otherwise a pull request could approve itself.
+# 3. A pull request that sets a source's `branch` to one other than the branch
+#    recorded for that repo in `.github/skill_owners.json` (`main` when none is
+#    recorded) fails this check and gets a comment. What lands on the tracked
+#    branch ships without review here, so the owners approve the branch too.
+#
+# Every rule reads the base branch: whether a skill is vendored, which skills
+# are already declared, and which repos and branches are approved all come from
+# `main`, not from the pull request. Otherwise a pull request could approve itself.
 #
 # `pull_request_target` rather than `pull_request`, because a fork's
 # `pull_request` token is read-only and could neither close a pull request nor
@@ -168,11 +173,12 @@ jobs:
                   `allowed because it is ${fromBot ? "opened by automation" : `labeled \`${overrideLabel}\``}.`
                 );
               } else {
+                const branchText = b => b.includes("*") ? `the newest \`${b}\` branch` : `\`${b}\``;
                 const rows = edits.map(e => {
                   const upstream = e.source_path
-                    ? `[\`${e.repo}/${e.source_path}\`](https://github.com/${e.repo}/tree/main/${e.source_path})`
+                    ? `[\`${e.repo}/${e.source_path}\`](https://github.com/${e.repo}/tree/${e.source_ref}/${e.source_path})`
                     : `[\`${e.repo}\`](https://github.com/${e.repo})`;
-                  return `| \`skills/${e.skill}\` | ${upstream} |`;
+                  return `| \`skills/${e.skill}\` | ${upstream} | ${branchText(e.branch)} |`;
                 });
                 await upsert("<!-- federation-guard:vendored-edit -->", [
                   `## Closed: this is a vendored copy`,
@@ -181,11 +187,11 @@ jobs:
                   `The nightly \`federate-skills\` run re-imports the folder wholesale, so a change merged here is ` +
                   `deleted the next time the source repo moves. Please make it upstream instead:`,
                   ``,
-                  `| Vendored copy | Edit it here |`,
-                  `| --- | --- |`,
+                  `| Vendored copy | Edit it here | Land it on |`,
+                  `| --- | --- | --- |`,
                   ...rows,
                   ``,
-                  `Once it is on \`main\` there, this catalog picks it up on its own (nightly, or by dispatching`,
+                  `Once it is on that branch there, this catalog picks it up on its own (nightly, or by dispatching`,
                   `\`federate-skills\`). See [CONTRIBUTING.md](https://github.com/${owner}/${repo}/blob/main/CONTRIBUTING.md#update-or-remove).`,
                   ``,
                   `A skill's own \`evals/\` folder is the exception — the catalog owns those datasets, so edit them here.`,
@@ -210,15 +216,48 @@ jobs:
               return;
             }
 
+            const newIssue = `https://github.com/${owner}/${repo}/issues/new?template=product-repo-approval.yml`;
+            const failures = [];
+
+            // --- Rule 3: a source tracks the branch its owners approved ---
+            const branches = report.branches_needing_approval;
+            if (branches.length > 0) {
+              const rows = branches.map(b =>
+                `| \`${b.repo}\` | \`${b.branch}\` | ${b.approved_branch ? `\`${b.approved_branch}\`` : "none — not in the registry"} |`
+              );
+              await upsert("<!-- federation-guard:branch -->", [
+                `## Branch approval required`,
+                ``,
+                `Whatever lands on a tracked branch reaches users without review here, so the branch a source ` +
+                `federates from is part of its [product repo approval](https://github.com/${owner}/${repo}/blob/main/.github/skill_owners.json). ` +
+                `This pull request sets a branch that was not approved:`,
+                ``,
+                `| Source | Branch set here | Approved branch |`,
+                `| --- | --- | --- |`,
+                ...rows,
+                ``,
+                `Either set \`branch\` in \`.github/federation.json\` to the approved one (leave it out for \`main\`), or open a ` +
+                `[Product repo approval issue](${newIssue}) naming the new branch under **Federation branch**, ` +
+                `get it approved, merge the registry pull request, and push here again.`,
+              ].join("\n"));
+              failures.push(
+                `${branches.length} source(s) set to a branch that was not approved: ` +
+                branches.map(b => `${b.repo}@${b.branch}`).join(", ") + "."
+              );
+            }
+
             // --- Rule 2: a new federated skill needs an approved repo -----
             const pending = report.new_skills_needing_approval;
             if (pending.length === 0) {
-              core.info("No vendored copy was edited and every newly federated skill comes from an approved product repo.");
+              if (failures.length > 0) {
+                core.setFailed(failures.join(" "));
+              } else {
+                core.info("No vendored copy was edited, every newly federated skill comes from an approved product repo, and every branch set is the approved one.");
+              }
               return;
             }
 
             const repos = [...new Set(pending.map(p => p.repo))];
-            const newIssue = `https://github.com/${owner}/${repo}/issues/new?template=product-repo-approval.yml`;
             await upsert("<!-- federation-guard:approval -->", [
               `## Product repo approval required`,
               ``,
@@ -233,7 +272,8 @@ jobs:
               `Skills already in the catalog are unaffected; this applies to the ones this pull request adds.`,
             ].join("\n"));
 
-            core.setFailed(
+            failures.push(
               `${pending.length} newly federated skill(s) come from product repo(s) that have not been ` +
               `approved: ${repos.join(", ")}.`
             );
+            core.setFailed(failures.join(" "));

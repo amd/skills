@@ -30,8 +30,11 @@ import federation_guard as guard  # noqa: E402
 TRACELENS = "AMD-AGI/TraceLens"
 
 
-def source(repo: str, *skills: dict) -> dict:
-    return {"repo": repo, "license": "MIT", "skills": list(skills)}
+def source(repo: str, *skills: dict, branch: str | None = None) -> dict:
+    entry = {"repo": repo, "license": "MIT", "skills": list(skills)}
+    if branch is not None:
+        entry["branch"] = branch
+    return entry
 
 
 def build_base(
@@ -40,7 +43,7 @@ def build_base(
     vendored: dict[str, str] | None = None,
     local: tuple[str, ...] = (),
     sources: list[dict] | None = None,
-    approved: tuple[str, ...] = (),
+    approved: tuple[str, ...] | dict[str, str | None] = (),
 ) -> Path:
     """Lay out a base-branch checkout for the guard to read.
 
@@ -49,7 +52,11 @@ def build_base(
     `federation.json` entry that declares it. `local` names skills authored in
     the catalog, which nothing declares. Pass `sources` to set the declarations
     independently of what is on disk, which is how the two get to disagree.
+    `approved` is a tuple of repos approved for `main`, or a mapping of repo to
+    the branch its registry entry records (None for an entry without one).
     """
+    if not isinstance(approved, dict):
+        approved = dict.fromkeys(approved)
     base = tmp / "base"
     (base / ".github").mkdir(parents=True)
     vendored = vendored or {}
@@ -84,8 +91,9 @@ def build_base(
                         "repo": repo,
                         "engineering_owner": "octocat",
                         "product_release_owner": "octocat",
+                        **({"branch": branch} if branch else {}),
                     }
-                    for repo in approved
+                    for repo, branch in approved.items()
                 ]
             }
         ),
@@ -448,6 +456,153 @@ class TestProductRepoApproval(unittest.TestCase):
             )
             self.assertTrue(result["federation_error"])
             self.assertEqual(result["vendored_edits"], [])
+
+
+QUARK = "amd/Quark"
+QUARK_SKILL = {"path": ".claude/skills/quark-install", "as": "quark-install"}
+
+
+class TestBranchApproval(unittest.TestCase):
+    def branches(self, tmp: Path, base: Path, head_sources: list[dict]) -> list[dict]:
+        return report(tmp, base, head_sources=head_sources)["branches_needing_approval"]
+
+    def test_a_source_on_its_approved_release_pattern_passes(self):
+        # Quark ships skills with its releases and has no `main` at all, so
+        # its owners approve `release/*` and the entry tracks exactly that.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(tmp, approved={QUARK: "release/*"})
+            result = report(
+                tmp,
+                base,
+                head_sources=[
+                    source(TRACELENS, {"path": "agent/orchestrator"}),
+                    source(QUARK, QUARK_SKILL, branch="release/*"),
+                ],
+            )
+            self.assertEqual(result["new_skills_needing_approval"], [])
+            self.assertEqual(result["branches_needing_approval"], [])
+
+    def test_leaving_the_branch_out_means_main_which_was_not_approved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(tmp, approved={QUARK: "release/*"})
+            self.assertEqual(
+                self.branches(
+                    tmp,
+                    base,
+                    [
+                        source(TRACELENS, {"path": "agent/orchestrator"}),
+                        source(QUARK, QUARK_SKILL),
+                    ],
+                ),
+                [{"repo": QUARK, "branch": "main", "approved_branch": "release/*"}],
+            )
+
+    def test_an_entry_without_a_branch_approves_main_only(self):
+        # Every registry entry written before branches existed approves `main`,
+        # and must not read as approval for any branch at all.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(
+                tmp,
+                sources=[source("AMD-Org/MyProject", {"path": "skills/mine"})],
+                approved=("AMD-Org/MyProject",),
+            )
+            flagged = self.branches(
+                tmp,
+                base,
+                [source("AMD-Org/MyProject", {"path": "skills/mine"}, branch="develop")],
+            )
+            self.assertEqual(
+                flagged,
+                [{"repo": "AMD-Org/MyProject", "branch": "develop", "approved_branch": "main"}],
+            )
+            self.assertEqual(
+                self.branches(
+                    tmp, base, [source("AMD-Org/MyProject", {"path": "skills/mine"}, branch="main")]
+                ),
+                [],
+            )
+
+    def test_a_grandfathered_source_cannot_switch_branch_without_approval(self):
+        # TraceLens predates the registry. Keeping it on `main` needs nothing;
+        # moving it is a change nobody has signed off on.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(tmp)
+            self.assertEqual(
+                self.branches(
+                    tmp, base, [source(TRACELENS, {"path": "agent/orchestrator"}, branch="dev")]
+                ),
+                [{"repo": TRACELENS, "branch": "dev", "approved_branch": None}],
+            )
+
+    def test_a_branch_the_pull_request_leaves_alone_is_not_its_problem(self):
+        # The registry moved to `release/*` after the source was declared on
+        # `main`. An unrelated pull request should not be the one that fails.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(
+                tmp,
+                sources=[source(QUARK, QUARK_SKILL)],
+                approved={QUARK: "release/*"},
+            )
+            self.assertEqual(self.branches(tmp, base, [source(QUARK, QUARK_SKILL)]), [])
+
+    def test_an_unapproved_new_repo_is_reported_once_by_the_repo_rule(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(tmp)
+            result = report(
+                tmp,
+                base,
+                head_sources=[
+                    source(TRACELENS, {"path": "agent/orchestrator"}),
+                    source(QUARK, QUARK_SKILL, branch="release/*"),
+                ],
+            )
+            self.assertEqual(
+                [p["repo"] for p in result["new_skills_needing_approval"]], [QUARK]
+            )
+            self.assertEqual(result["branches_needing_approval"], [])
+
+    def test_the_pull_requests_own_registry_branch_does_not_count(self):
+        # Same as for repos: only the base branch's registry approves.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(
+                tmp, sources=[source(QUARK, QUARK_SKILL)], approved=(QUARK,)
+            )
+            self.assertEqual(
+                [
+                    b["branch"]
+                    for b in self.branches(
+                        tmp, base, [source(QUARK, QUARK_SKILL, branch="release/*")]
+                    )
+                ],
+                ["release/*"],
+            )
+
+    def test_an_edit_to_a_release_tracked_skill_links_to_its_release(self):
+        # `release/*` is not something github.com can browse, so the redirect
+        # points at the release branch the last import actually came from.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(
+                tmp,
+                local=("quark-install",),
+                sources=[source(QUARK, QUARK_SKILL, branch="release/*")],
+            )
+            (base / "skills" / "quark-install" / guard.fed.MARKER_FILENAME).write_text(
+                json.dumps({"ref": "release/*", "resolved_ref": "release/0.12"}),
+                encoding="utf-8",
+            )
+            edits = report(tmp, base, changed=("skills/quark-install/SKILL.md",))[
+                "vendored_edits"
+            ]
+            self.assertEqual(edits[0]["branch"], "release/*")
+            self.assertEqual(edits[0]["source_ref"], "release/0.12")
 
 
 if __name__ == "__main__":

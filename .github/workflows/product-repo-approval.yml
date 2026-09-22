@@ -5,7 +5,8 @@ name: product-repo-approval
 # On open, a bot comment tells the named engineering owner and product release
 # owner what `/approve` signs and how to leave it. Those two accounts then sign
 # off by commenting `/approve`: the engineering owner, who owns the underlying
-# product, and the product release owner, who vouches for the product repo and
+# product, and the product release owner, who vouches for the product repo, for
+# the branch it federates from (`main` unless the issue names another), and
 # for the product being in Tech Preview or GA. Those can be the same person. This
 # workflow only records approvals from the named accounts, so a `/approve`
 # from anyone else -- including whoever filed the issue -- does nothing but
@@ -89,6 +90,10 @@ jobs:
               .replace(/\/$/, "");
             const mention = (login, fallback) => login ? `@${login}` : fallback;
             const repoRef = productRepo ? `\`${productRepo}\`` : "this repo";
+            const branch = field("Federation branch") || "main";
+            const branchRef = branch.includes("*")
+              ? `the newest \`${branch}\` branch`
+              : `\`${branch}\``;
 
             try {
               await github.rest.issues.createLabel({
@@ -116,7 +121,7 @@ jobs:
                 ``,
                 `**Engineering owner**${engOwner ? ` (@${engOwner})` : ""}: you confirm that you own the product behind this repo, and that you will be resposible for maintaining it and its skills.`,
                 ``,
-                `**Product release owner**${releaseOwner ? ` (@${releaseOwner})` : ""}: you are comfortable with skills from ${repoRef} being vendored into this catalog, and you confirm the product is in Tech Preview or GA (not experimental).`,
+                `**Product release owner**${releaseOwner ? ` (@${releaseOwner})` : ""}: you are comfortable with skills from ${repoRef} being vendored into this catalog from ${branchRef}, and you confirm the product is in Tech Preview or GA (not experimental). Whatever lands on that branch reaches users without further review here, so if it is the wrong one, fix **Federation branch** on this issue before approving.`,
                 ``,
                 `Once both roles have approved, a pull request is opened automatically adding the repo to \`.github/skill_owners.json\`. Merging that pull request closes this issue.`,
               ].join("\n"),
@@ -262,10 +267,20 @@ jobs:
             const status = /^Tech Preview/i.test(statusAnswer)
               ? "tech-preview"
               : /^GA\b/i.test(statusAnswer) ? "ga" : "";
+            const branch = field("Federation branch") || "main";
 
             const problems = [];
             if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(productRepo)) {
               problems.push(`**Product repo** reads \`${productRepo || "(empty)"}\`, which is not an \`owner/repo\` slug.`);
+            }
+            // Same rule as `validate_branch` in `.github/scripts/federation_branches.py`,
+            // which rejects anything this lets through after the approvers are done.
+            const branchOk =
+              /^(?!-)(?!.*\.\.)(?!.*\/\/)[A-Za-z0-9._\/*-]+(?<![\/.])$/.test(branch) &&
+              !branch.endsWith(".lock") &&
+              (branch.match(/\*/g) || []).length <= 1;
+            if (!branchOk) {
+              problems.push(`**Federation branch** reads \`${branch}\`, which is not a branch name or a release pattern such as \`release/*\`.`);
             }
             if (!status) {
               problems.push(`**Product status** reads \`${statusAnswer || "(empty)"}\`. The registry only accepts Tech Preview or GA.`);
@@ -283,6 +298,7 @@ jobs:
 
             core.setOutput("ready", "true");
             core.setOutput("product_repo", productRepo);
+            core.setOutput("branch", branch);
             core.setOutput("engineering_owner", engOwner);
             core.setOutput("product_release_owner", releaseOwner);
 
@@ -290,19 +306,21 @@ jobs:
         if: steps.approval.outputs.ready == 'true'
         uses: astral-sh/setup-uv@v7
 
-      # The repo and handles come from an issue body, so they reach the
-      # shell through the environment rather than through expression
+      # The repo, branch, and handles come from an issue body, so they reach
+      # the shell through the environment rather than through expression
       # interpolation, which would let a crafted issue run commands here.
       - name: Add the repo to the skill owners registry
         if: steps.approval.outputs.ready == 'true'
         env:
           PRODUCT_REPO: ${{ steps.approval.outputs.product_repo }}
+          FEDERATION_BRANCH: ${{ steps.approval.outputs.branch }}
           ENGINEERING_OWNER: ${{ steps.approval.outputs.engineering_owner }}
           PRODUCT_RELEASE_OWNER: ${{ steps.approval.outputs.product_release_owner }}
         run: |
           uv run .github/scripts/record_skill_owner.py \
             --registry "$REGISTRY" \
             --repo "$PRODUCT_REPO" \
+            --branch "$FEDERATION_BRANCH" \
             --engineering-owner "$ENGINEERING_OWNER" \
             --product-release-owner "$PRODUCT_RELEASE_OWNER"
 
@@ -322,7 +340,8 @@ jobs:
           body: |
             Approved on #${{ github.event.issue.number }} by
             @${{ steps.approval.outputs.engineering_owner }} (engineering owner) and
-            @${{ steps.approval.outputs.product_release_owner }} (product release owner).
+            @${{ steps.approval.outputs.product_release_owner }} (product release owner),
+            for federation from `${{ steps.approval.outputs.branch }}`.
 
             Closes #${{ github.event.issue.number }}
 
