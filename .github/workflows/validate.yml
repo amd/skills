@@ -30,6 +30,24 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The serving recipe cache controls model compatibility and the container
+  # image agents deploy. Exercise its fail-closed freshness and immutable-image
+  # selection without making network requests.
+  test-serving-recipe-cache:
+    name: Test serving recipe cache
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Test recipe cache
+        run: >-
+          uv run --with pyyaml python -m unittest discover
+          -s skills/serving-llms-on-instinct/scripts/tests -v
+
   validate-manifests:
     name: Validate plugin manifests
     runs-on: ubuntu-latest
@@ -83,14 +101,16 @@ jobs:
   # stays put when a job is added beside it.
   validate:
     name: Validate plugin manifests and federation
-    needs: [validate-manifests]
+    needs: [validate-manifests, test-serving-recipe-cache]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Verify all validation jobs passed
         run: |
           echo "validate-manifests result: ${{ needs.validate-manifests.result }}"
-          if [ "${{ needs.validate-manifests.result }}" != "success" ]; then
+          echo "test-serving-recipe-cache result: ${{ needs.test-serving-recipe-cache.result }}"
+          if [ "${{ needs.validate-manifests.result }}" != "success" ] || \
+             [ "${{ needs.test-serving-recipe-cache.result }}" != "success" ]; then
             echo "One or more validation jobs failed." >&2
             exit 1
           fi
