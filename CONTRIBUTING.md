@@ -80,17 +80,6 @@ one repo can federate as many skills as it likes from wherever they live:
           "as": "myproject-other-skill"
         }
       ]
-    },
-    {
-      "repo": "amd/Quark",
-      "license": "MIT",
-      "branch": "release/*",
-      "skills": [
-        {
-          "path": ".claude/skills/quark-install",
-          "as": "quark-install"
-        }
-      ]
     }
   ]
 }
