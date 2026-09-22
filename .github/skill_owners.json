@@ -1,3 +1,9 @@
 {
-  "repos": []
+  "repos": [
+    {
+      "repo": "ROCm/rocm-systems",
+      "engineering_owner": "sadikarmagan",
+      "product_release_owner": "serap-suvari"
+    }
+  ]
 }
