@@ -21,7 +21,8 @@ name: inspect-engine trial
 #   windows  strix_halo, Windows  the claim this whole design rests on
 #
 # The Windows job is the one that matters most. `inspect_swe` installs a Linux
-# proxy binary in the guest and cannot run on Windows at all, so `claude-cli`
+# proxy binary in the guest and cannot run on Windows at all, so
+# `claude-code-no-sandbox`
 # -- the real CLI driven from the host under inspect_ai -- is the only way real
 # Claude Code reaches a Windows runner. That has been verified by hand on a
 # laptop and never in CI.
@@ -61,12 +62,21 @@ jobs:
       # Two Windows failures have each survived a fix aimed at a theory. This
       # run measures instead, and spends nothing on the model.
       windows_diagnose: "false"
-      # Routing scored 68/68 over the whole room and is not in question.
-      routing: "false"
-      # Which engines the Linux job drives. `inspect` and `claude-code` have
-      # completed results; `claude-cli` has none, because a dispatch bug sent
-      # every previous attempt to the legacy engine.
-      linux_engines: "claude-code"
+      # Behavioral has completed results for both remaining engines, under
+      # their former names. The rename and the guards did not change what the
+      # agent does, so re-running buys a second copy of numbers already in
+      # hand at an hour of model spend. Turn it on when the behavioral path
+      # itself changes.
+      behavioral: "false"
+      # Back on: routing used to run on one engine, and now runs on three.
+      # This measures them against each other, with a second baseline pass for
+      # the noise floor -- the flips between engines cannot be read without it.
+      routing: "true"
+      # Which engines the Linux job drives. The harness-independent `inspect`
+      # engine has been removed, and `claude-cli` is now
+      # `claude-code-no-sandbox`. Both remaining engines drive the real CLI;
+      # what differs is where it runs.
+      linux_engines: "claude-code claude-code-no-sandbox"
     steps:
       - run: echo "windows=true only; three repetitions to measure variance"
 
@@ -162,16 +172,29 @@ jobs:
               "older skillscope: the claude-code leg still runs at the container root"
           )
           # The one that matters for this run. A literal tuple here meant
-          # --engine claude-cli silently ran the legacy engine, and the report
-          # said claude-cli anyway -- so the reports cannot be trusted to show
+          # the host-CLI engine silently ran the legacy one, and the report
+          # named the engine asked for anyway -- so reports cannot be trusted
           # it. Assert the dispatch itself.
           assert "if args.engine in INSPECT_ENGINES:" in inspect.getsource(cli.cmd_behavioral), (
-              "older skillscope: --engine claude-cli falls through to legacy"
+              "older skillscope: the behavioral dispatch can fall through to legacy"
           )
           assert set(cli.INSPECT_ENGINES) == set(cli.ENGINES) - {"legacy"}
-          from skillscope.engine import cli_agent
-          assert hasattr(cli_agent, "install_skill"), (
-              "older skillscope: claude-cli runs the CLI with no skill installed"
+          # Renamed: the old name said which binary it drove, which stopped
+          # distinguishing anything once every engine drove the same one.
+          from skillscope.engine import no_sandbox
+          assert hasattr(no_sandbox, "install_skill"), (
+              "older skillscope: the host leg runs the CLI with no skill installed"
+          )
+          assert "inspect" not in cli.ENGINES, (
+              "older skillscope: the harness-independent engine is still present"
+          )
+          # The reason this trial is being re-run: routing used to have one leg.
+          assert set(cli.ROUTING_ENGINES) == set(cli.ENGINES), (
+              "older skillscope: routing does not yet run on every engine"
+          )
+          from skillscope.engine import routing as engine_routing
+          assert hasattr(engine_routing, "routing_decision"), (
+              "older skillscope: routing cannot stop at the decision"
           )
           print("harness is current")
           CHECK
@@ -182,27 +205,60 @@ jobs:
       - name: Install the claude CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      # Offers the skill tool and never calls it, so nothing is executed and no
-      # sandbox is started. One model call per case. `--min-accuracy 0` reports
-      # instead of gating: a surprise here is information, not a broken branch.
-      - name: Routing, whole catalogue
+      # Routing now has a leg on every engine, which is the point of this
+      # re-run. `legacy` is the baseline every recorded result was graded
+      # against; `claude-code` is the only leg whose room is guaranteed to hold
+      # exactly the skills asked for, because its guest has no `~/.claude` to
+      # contribute; `claude-code-no-sandbox` is what Windows gets, and it
+      # refuses to start without ANTHROPIC_API_KEY because that credential is
+      # what lets it redirect the config dir.
+      #
+      # `--min-accuracy 0` reports instead of gating: a surprise here is
+      # information, not a broken branch.
+      - name: Routing, whole catalogue, every leg
         if: needs.config.outputs.routing == 'true'
         continue-on-error: true
-        run: >
-          skillscope routing --engine inspect
-          --skills-dir 'skills/*'
-          --routing-room '${{ env.ROUTING_ROOM }}'
-          --min-accuracy 0
-          --output routing-all.json
+        env:
+          PROBED: ${{ steps.sandbox.outputs.provider }}
+        run: |
+          status=0
+          for engine in legacy claude-code claude-code-no-sandbox; do
+            if [ "$engine" = "claude-code" ]; then
+              export SKILLSCOPE_SANDBOX="$PROBED"
+            else
+              export SKILLSCOPE_SANDBOX=local
+            fi
+            echo "::group::routing ($engine, sandbox=$SKILLSCOPE_SANDBOX)"
+            skillscope routing --engine "$engine" \
+              --skills-dir 'skills/*' \
+              --routing-room '${{ env.ROUTING_ROOM }}' \
+              --min-accuracy 0 \
+              --output "routing-$engine.json" \
+              || { echo "FAILED: routing ($engine)"; status=1; }
+            echo "::endgroup::"
+          done
+          # A second pass on the baseline, so the flips between engines can be
+          # read against how much one engine already disagrees with itself.
+          # Without it the comparison cannot be interpreted at all.
+          export SKILLSCOPE_SANDBOX=local
+          echo "::group::routing (legacy, noise floor)"
+          skillscope routing --engine legacy \
+            --skills-dir 'skills/*' \
+            --routing-room '${{ env.ROUTING_ROOM }}' \
+            --min-accuracy 0 \
+            --output routing-legacy-again.json || status=1
+          echo "::endgroup::"
+          exit $status
 
       # One invocation per skill: running six in one command meant the last one
       # dying discarded the reports for the five that had already passed.
       #
-      # `claude-cli` runs on the host by construction, so it takes `local`
+      # `claude-code-no-sandbox` runs on the host by construction, so it takes `local`
       # while the other two take whatever the probe found. 2700s because
       # tracelens needs 850s on Windows and 480-600s here, against a 900s
       # default that three legs have already died on.
       - name: Behavioral
+        if: needs.config.outputs.behavioral == 'true'
         continue-on-error: true
         env:
           PROBED: ${{ steps.sandbox.outputs.provider }}
@@ -211,7 +267,7 @@ jobs:
         run: |
           status=0
           for engine in $ENGINES; do
-            if [ "$engine" = "claude-cli" ]; then
+            if [ "$engine" = "claude-code-no-sandbox" ]; then
               export SKILLSCOPE_SANDBOX=local
             else
               export SKILLSCOPE_SANDBOX="$PROBED"
@@ -233,7 +289,7 @@ jobs:
         with:
           name: matrix-linux
           path: |
-            routing-all.json
+            routing-*.json
             linux-*.json
             .skillscope/logs/
           # `.skillscope/logs` starts with a dot, and v4 skips hidden files
@@ -255,7 +311,7 @@ jobs:
         Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
         user: a1_ucicd
       SKILLS: hyperloom-workload-optimizer
-      ENGINES: inspect
+      ENGINES: claude-code
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -289,7 +345,7 @@ jobs:
       - name: Install the claude CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      # Only the two containerized engines run here. `claude-cli` executes on
+      # Only the containerized engine runs here. `claude-code-no-sandbox` executes on
       # the host by construction, and this is shared GPU infrastructure rather
       # than a desktop -- its host-side path is already proven on strix_halo,
       # so repeating it here buys little against what it risks.
@@ -297,7 +353,7 @@ jobs:
         if: needs.config.outputs.instinct_diagnose == 'true'
         run: python .github/scripts/instinct_diag.py
 
-      - name: Behavioral -- inspect and claude-code
+      - name: Behavioral -- claude-code
         if: needs.config.outputs.instinct_diagnose != 'true'
         continue-on-error: true
         env:
@@ -378,7 +434,7 @@ jobs:
         # One line on purpose: PowerShell has no heredoc, and a here-string
         # needs its terminator at column zero, which YAML indentation forbids.
         run: |
-          python -c "import inspect, inspect_ai; from skillscope import cli; from skillscope.engine import cli_agent; assert 'if args.engine in INSPECT_ENGINES:' in inspect.getsource(cli.cmd_behavioral), 'older skillscope: --engine claude-cli falls through to legacy'; assert set(cli.INSPECT_ENGINES) == set(cli.ENGINES) - {'legacy'}; assert hasattr(cli_agent, 'install_skill'), 'older skillscope: the CLI runs with no skill installed'; from skillscope.engine import tools; assert 'FileNotFoundError' in inspect.getsource(tools.shell_prefix), 'older skillscope: the shell probe dies where there is no bash'; print('ok', inspect_ai.__version__)"
+          python -c "import inspect, inspect_ai; from skillscope import cli; from skillscope.engine import no_sandbox; assert 'if args.engine in INSPECT_ENGINES:' in inspect.getsource(cli.cmd_behavioral), 'older skillscope: the behavioral dispatch can fall through to legacy'; assert set(cli.INSPECT_ENGINES) == set(cli.ENGINES) - {'legacy'}; assert hasattr(no_sandbox, 'install_skill'), 'older skillscope: the CLI runs with no skill installed'; assert 'inspect' not in cli.ENGINES, 'older skillscope: the harness-independent engine is still present'; from skillscope.engine import tools; assert 'FileNotFoundError' in inspect.getsource(tools.shell_prefix), 'older skillscope: the shell probe dies where there is no bash'; print('ok', inspect_ai.__version__)"
 
       # This job is about the engine, not the skills. Most of this catalogue
       # targets Linux hardware and tooling, so failures here are expected and
@@ -402,7 +458,7 @@ jobs:
       # Repetition-major rather than skill-major: if the job is cut short, two
       # complete rounds across every skill beats three rounds of the first two
       # and none of the third.
-      - name: Behavioral -- claude-cli, three times
+      - name: Behavioral -- claude-code-no-sandbox, three times
         if: needs.config.outputs.windows_diagnose != 'true'
         continue-on-error: true
         run: |
@@ -414,9 +470,9 @@ jobs:
           $status = 0
           foreach ($run in 1..3) {
             foreach ($s in $skills) {
-              Write-Host "::group::$s (claude-cli on Windows, run $run)"
-              skillscope behavioral --engine claude-cli --skills-dir "skills/*" `
-                --timeout 2700 --skill $s --output "windows-claude-cli-$s-run$run.json"
+              Write-Host "::group::$s (claude-code-no-sandbox on Windows, run $run)"
+              skillscope behavioral --engine claude-code-no-sandbox --skills-dir "skills/*" `
+                --timeout 2700 --skill $s --output "windows-claude-code-no-sandbox-$s-run$run.json"
               if ($LASTEXITCODE -ne 0) { Write-Host "FAILED: $s (run $run)"; $status = 1 }
               Write-Host "::endgroup::"
             }
