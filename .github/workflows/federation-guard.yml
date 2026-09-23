@@ -223,11 +223,14 @@ jobs:
             await upsert("<!-- federation-guard:approval -->", [
               `## Product repo approval required`,
               ``,
-              `${repos.map(r => `\`${r}\``).join(", ")} ${repos.length === 1 ? "is" : "are"} not in ` +
-              `[\`.github/skill_owners.json\`](https://github.com/${owner}/${repo}/blob/main/.github/skill_owners.json), ` +
-              `so ${pending.map(p => `\`${p.skill}\``).join(", ")} cannot be federated yet.`,
+              `No entry in ` +
+              `[\`.github/skill_owners.json\`](https://github.com/${owner}/${repo}/blob/main/.github/skill_owners.json) ` +
+              `covers these skills, so they cannot be federated yet:`,
               ``,
-              `1. Open a [Product repo approval issue](${newIssue}) for ${repos.map(r => `\`${r}\``).join(", ")}.`,
+              ...pending.map(p => `- \`${p.skill}\` from \`${p.repo}/${p.path}\``),
+              ``,
+              `1. Open a [Product repo approval issue](${newIssue}) for ${repos.map(r => `\`${r}\``).join(", ")}. ` +
+              `If the repo is a super-repo of unrelated projects, name the project's directory instead, as \`owner/repo/sub/dir\`.`,
               `2. The engineering owner and the product release owner each comment \`/approve\` on it.`,
               `3. Merge the registry pull request that opens, then push here again.`,
               ``,

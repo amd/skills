@@ -58,6 +58,11 @@ jobs:
       - name: Test the federation guard
         run: uv run .github/scripts/test_federation_guard.py
 
+      # The guard trusts the registry this writes, so how approvals are keyed
+      # decides what each one clears -- a whole repo, or one project in it.
+      - name: Test the skill owners recorder
+        run: uv run .github/scripts/test_record_skill_owner.py
+
       - name: Validate marketplace manifest
         run: uv run .github/scripts/validate_marketplace.py
 

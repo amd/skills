@@ -77,21 +77,19 @@ def build_base(
         encoding="utf-8",
     )
     (base / ".github" / "skill_owners.json").write_text(
-        json.dumps(
-            {
-                "repos": [
-                    {
-                        "repo": repo,
-                        "engineering_owner": "octocat",
-                        "product_release_owner": "octocat",
-                    }
-                    for repo in approved
-                ]
-            }
-        ),
+        json.dumps({"repos": [approval(scope) for scope in approved]}),
         encoding="utf-8",
     )
     return base
+
+
+def approval(scope: str) -> dict:
+    """A registry entry for `owner/repo` or, scoped to a subdirectory, `owner/repo/sub/dir`."""
+    owner, name, *subdir = scope.split("/")
+    entry = {"repo": f"{owner}/{name}"}
+    if subdir:
+        entry["path"] = "/".join(subdir)
+    return {**entry, "engineering_owner": "octocat", "product_release_owner": "octocat"}
 
 
 def report(
@@ -349,6 +347,71 @@ class TestProductRepoApproval(unittest.TestCase):
                 )["new_skills_needing_approval"],
                 [],
             )
+
+    def test_a_subdirectory_approval_covers_only_that_project(self):
+        # rocm-systems is a super-repo of unrelated projects, each with its own
+        # owners. Signing off on rocprofiler-sdk must not clear its neighbours.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(
+                tmp, approved=("ROCm/rocm-systems/projects/rocprofiler-sdk",)
+            )
+            pending = report(
+                tmp,
+                base,
+                head_sources=[
+                    source(TRACELENS, {"path": "agent/orchestrator"}),
+                    source(
+                        "ROCm/rocm-systems",
+                        {
+                            "path": "projects/rocprofiler-sdk/skills/profile",
+                            "as": "rocprof-profile",
+                        },
+                        {"path": "projects/rocprofiler-sdk", "as": "rocprof-root"},
+                        {"path": "projects/rocprofiler-sdk-extra/skills/x", "as": "extra"},
+                        {"path": "projects/rocm-smi/skills/smi", "as": "smi"},
+                        {"path": ".claude/skills/whole-repo", "as": "whole-repo"},
+                    ),
+                ],
+            )["new_skills_needing_approval"]
+            # Matched by whole path segment, so a sibling sharing the prefix
+            # (`rocprofiler-sdk-extra`) is not inside the approved directory.
+            self.assertEqual(
+                sorted(p["skill"] for p in pending), ["extra", "smi", "whole-repo"]
+            )
+
+    def test_a_whole_repo_approval_still_covers_every_subdirectory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(tmp, approved=("ROCm/rocm-systems",))
+            self.assertEqual(
+                report(
+                    tmp,
+                    base,
+                    head_sources=[
+                        source(TRACELENS, {"path": "agent/orchestrator"}),
+                        source("ROCm/rocm-systems", {"path": "projects/a/skills/s"}),
+                    ],
+                )["new_skills_needing_approval"],
+                [],
+            )
+
+    def test_a_malformed_path_is_not_widened_to_the_whole_repo(self):
+        # Reading a broken `path` as "no path" would turn a scoped approval
+        # into a clearance for the entire super-repo.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(tmp)
+            (base / ".github" / "skill_owners.json").write_text(
+                json.dumps({"repos": [{**approval("ROCm/rocm-systems"), "path": None}]}),
+                encoding="utf-8",
+            )
+            pending = report(
+                tmp,
+                base,
+                head_sources=[source("ROCm/rocm-systems", {"path": "projects/a/s"})],
+            )["new_skills_needing_approval"]
+            self.assertEqual([p["repo"] for p in pending], ["ROCm/rocm-systems"])
 
     def test_skills_already_declared_are_grandfathered(self):
         # TraceLens predates the approval process and is not in the registry.

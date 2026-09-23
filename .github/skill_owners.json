@@ -7,6 +7,7 @@
     },
     {
       "repo": "ROCm/rocm-systems",
+      "path": "projects/rocprofiler-sdk",
       "engineering_owner": "sadikarmagan",
       "product_release_owner": "serap-suvari"
     }

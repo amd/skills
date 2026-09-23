@@ -35,8 +35,10 @@ Rule 1 -- vendored skills are edited upstream, not here.
 Rule 2 -- a new federated skill needs its product repo approved.
     `.github/skill_owners.json` records the repos whose engineering owner and
     product release owner have both signed off, via the `product-repo-approval`
-    workflow. A pull request that declares a skill from a repo missing from
-    that registry is asking the catalog to vendor code nobody has vouched for.
+    workflow. An entry with a `path` approves only that subdirectory, for
+    super-repos whose projects each have their own owners. A pull request that
+    declares a skill no entry covers is asking the catalog to vendor code
+    nobody has vouched for.
 
     Only skills the pull request *adds* are held to this. A skill already
     declared on the base branch predates the registry and stays as it is, so
@@ -91,12 +93,17 @@ def read_changed_files(path: Path) -> list[str]:
     return [line.strip().replace("\\", "/") for line in lines if line.strip()]
 
 
-def load_approved_repos(registry: Path) -> set[str]:
-    """Return the approved repos from `.github/skill_owners.json`, lowercased.
+def load_approvals(registry: Path) -> set[tuple[str, str]]:
+    """Return the approved scopes from `.github/skill_owners.json`.
+
+    Each scope is (repo lowercased, subdirectory). An empty subdirectory is the
+    whole repo; otherwise the approval covers only skills under that directory,
+    which is how one project in a super-repo is approved without the rest.
 
     A missing or malformed registry reads as "nothing is approved" rather than
     as an error: the strict reading is the safe one, and `record_skill_owner.py`
-    is what validates the file when it writes it.
+    is what validates the file when it writes it. For the same reason an entry
+    whose `path` is not a string is dropped, not widened to the whole repo.
     """
     if not registry.is_file():
         return set()
@@ -107,11 +114,33 @@ def load_approved_repos(registry: Path) -> set[str]:
     repos = data.get("repos") if isinstance(data, dict) else None
     if not isinstance(repos, list):
         return set()
-    return {
-        entry["repo"].strip().lower()
-        for entry in repos
-        if isinstance(entry, dict) and isinstance(entry.get("repo"), str)
-    }
+    approvals = set()
+    for entry in repos:
+        if not isinstance(entry, dict) or not isinstance(entry.get("repo"), str):
+            continue
+        path = entry.get("path", "")
+        if not isinstance(path, str):
+            continue
+        approvals.add((entry["repo"].strip().lower(), path.strip().strip("/")))
+    return approvals
+
+
+def is_approved(repo: str, skill_path: str, approvals: set[tuple[str, str]]) -> bool:
+    """Whether some approval covers the skill at `skill_path` in `repo`.
+
+    Compared segment by segment, so `projects/rocprofiler` does not cover
+    `projects/rocprofiler-sdk`.
+    """
+    parts = skill_path.strip("/").split("/")
+    for approved_repo, subdir in approvals:
+        if approved_repo != repo.lower():
+            continue
+        if not subdir:
+            return True
+        scope = subdir.split("/")
+        if parts[: len(scope)] == scope:
+            return True
+    return False
 
 
 def source_ref(skill_dir: Path, branch: str) -> str:
@@ -181,12 +210,12 @@ def declared_skills(sources: list[fed.Source]) -> dict[tuple[str, str], dict]:
 def new_skills_needing_approval(
     base: dict[tuple[str, str], dict],
     head: dict[tuple[str, str], dict],
-    approved: set[str],
+    approvals: set[tuple[str, str]],
 ) -> list[dict]:
     return [
         entry
         for key, entry in sorted(head.items())
-        if key not in base and key[0] not in approved
+        if key not in base and not is_approved(entry["repo"], entry["path"], approvals)
     ]
 
 
@@ -273,7 +302,7 @@ def build_report(args: argparse.Namespace) -> dict:
     report["new_skills_needing_approval"] = new_skills_needing_approval(
         base,
         head,
-        load_approved_repos(base_dir / ".github" / "skill_owners.json"),
+        load_approvals(base_dir / ".github" / "skill_owners.json"),
     )
     return report
 
