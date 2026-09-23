@@ -62,6 +62,10 @@ jobs:
       # Two Windows failures have each survived a fix aimed at a theory. This
       # run measures instead, and spends nothing on the model.
       windows_diagnose: "false"
+      # Deliberately unsandboxed. Only ever `true` when measuring the host is
+      # the point -- never to get past a broken container runtime, which is
+      # exactly the failure the probes now refuse to hide.
+      allow_unsandboxed: "false"
       # Behavioral has completed results for both remaining engines, under
       # their former names. The rename and the guards did not change what the
       # agent does, so re-running buys a second copy of numbers already in
@@ -134,15 +138,39 @@ jobs:
       # `docker compose version` reports the CLI's own version and never
       # contacts the daemon, so it passes on a runner whose user cannot reach
       # the socket. `info` is the question worth asking of either runtime.
+      # Falling through to `local` is what this used to do, and it cost six
+      # weeks of results: from 2026-09-15 onwards the Linux runner's podman
+      # stopped working, the probe silently chose `local`, and every
+      # `claude-code` leg since ran on the host filesystem while the reports
+      # described a sandboxed engine. Nobody saw it, because nothing said so.
+      #
+      # It says so now. `local` is still reachable, but only by asking: a run
+      # that wanted a container and did not get one stops here, where the
+      # reason is one line, rather than producing numbers whose meaning is the
+      # opposite of what they claim.
       - name: Choose a sandbox
         id: sandbox
+        env:
+          ALLOW_UNSANDBOXED: ${{ needs.config.outputs.allow_unsandboxed }}
         run: |
           if podman info >/dev/null 2>&1 && podman-compose version >/dev/null 2>&1; then
             provider=podman
           elif docker info >/dev/null 2>&1; then
             provider=docker
-          else
+          elif [ "$ALLOW_UNSANDBOXED" = "true" ]; then
             provider=local
+            echo "::warning::No container runtime here, and allow_unsandboxed is set," \
+                 "so this runs on the host filesystem. No leg in these results is" \
+                 "sandboxed, whatever it calls itself."
+          else
+            echo "::error::No usable container runtime on this runner. podman info," \
+                 "podman-compose version and docker info all failed. Refusing to fall" \
+                 "through to the host: a claude-code leg would run unsandboxed and the" \
+                 "report would not say so. Fix the runtime, or set allow_unsandboxed to" \
+                 "true in the config job to measure the host deliberately."
+            podman info 2>&1 | tail -3 || true
+            docker info 2>&1 | tail -3 || true
+            exit 1
           fi
           echo "provider=$provider" >> "$GITHUB_OUTPUT"
           echo "Behavioral cases will run in: $provider"
@@ -318,15 +346,39 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Falling through to `local` is what this used to do, and it cost six
+      # weeks of results: from 2026-09-15 onwards the Linux runner's podman
+      # stopped working, the probe silently chose `local`, and every
+      # `claude-code` leg since ran on the host filesystem while the reports
+      # described a sandboxed engine. Nobody saw it, because nothing said so.
+      #
+      # It says so now. `local` is still reachable, but only by asking: a run
+      # that wanted a container and did not get one stops here, where the
+      # reason is one line, rather than producing numbers whose meaning is the
+      # opposite of what they claim.
       - name: Choose a sandbox
         id: sandbox
+        env:
+          ALLOW_UNSANDBOXED: ${{ needs.config.outputs.allow_unsandboxed }}
         run: |
           if podman info >/dev/null 2>&1 && podman-compose version >/dev/null 2>&1; then
             provider=podman
           elif docker info >/dev/null 2>&1; then
             provider=docker
-          else
+          elif [ "$ALLOW_UNSANDBOXED" = "true" ]; then
             provider=local
+            echo "::warning::No container runtime here, and allow_unsandboxed is set," \
+                 "so this runs on the host filesystem. No leg in these results is" \
+                 "sandboxed, whatever it calls itself."
+          else
+            echo "::error::No usable container runtime on this runner. podman info," \
+                 "podman-compose version and docker info all failed. Refusing to fall" \
+                 "through to the host: a claude-code leg would run unsandboxed and the" \
+                 "report would not say so. Fix the runtime, or set allow_unsandboxed to" \
+                 "true in the config job to measure the host deliberately."
+            podman info 2>&1 | tail -3 || true
+            docker info 2>&1 | tail -3 || true
+            exit 1
           fi
           echo "provider=$provider" >> "$GITHUB_OUTPUT"
           echo "Behavioral cases will run in: $provider"
