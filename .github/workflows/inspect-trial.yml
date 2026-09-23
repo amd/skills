@@ -292,6 +292,14 @@ jobs:
         continue-on-error: true
         env:
           PROBED: ${{ steps.sandbox.outputs.provider }}
+          # Without this, inspect calls bare `podman compose`, which is a shim
+          # that delegates to whichever compose provider it finds -- on a host
+          # that also has Docker, that is Docker's, and Docker's socket is
+          # permission-denied here. The symptom is "No services started for
+          # podman sandbox" and every case erroring, which is what the first
+          # sandboxed routing run produced. The behavioral step has always set
+          # it; this one was written without it.
+          INSPECT_PODMAN_COMPOSE: podman-compose
         run: |
           status=0
           for engine in legacy claude-code claude-code-no-sandbox; do
