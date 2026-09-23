@@ -72,12 +72,12 @@ jobs:
       # hand at an hour of model spend. Turn it on when the behavioral path
       # itself changes.
       behavioral: "false"
-      # Off for the run that tests the podman repair. If the repair works the
-      # probe passes and this job would immediately spend four passes over the
-      # whole room, one of them on the sandboxed leg -- on a fix nobody has
-      # seen work yet. Verify the repair first; it costs nothing either way.
-      # Turn back on once the log says podman is usable.
-      routing: "false"
+      # On. The repair worked -- run 35886543177 resolved to podman, the first
+      # Linux run to do so since 2026-09-15 -- so there is a real container to
+      # measure in for the first time. Four passes over the whole room: the
+      # three legs, plus a second `legacy` pass for the noise floor, without
+      # which the flips between engines cannot be read.
+      routing: "true"
       # Which engines the Linux job drives. The harness-independent `inspect`
       # engine has been removed, and `claude-cli` is now
       # `claude-code-no-sandbox`. Both remaining engines drive the real CLI;
