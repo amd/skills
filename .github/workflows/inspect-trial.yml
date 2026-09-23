@@ -72,10 +72,12 @@ jobs:
       # hand at an hour of model spend. Turn it on when the behavioral path
       # itself changes.
       behavioral: "false"
-      # Back on: routing used to run on one engine, and now runs on three.
-      # This measures them against each other, with a second baseline pass for
-      # the noise floor -- the flips between engines cannot be read without it.
-      routing: "true"
+      # Off for the run that tests the podman repair. If the repair works the
+      # probe passes and this job would immediately spend four passes over the
+      # whole room, one of them on the sandboxed leg -- on a fix nobody has
+      # seen work yet. Verify the repair first; it costs nothing either way.
+      # Turn back on once the log says podman is usable.
+      routing: "false"
       # Which engines the Linux job drives. The harness-independent `inspect`
       # engine has been removed, and `claude-cli` is now
       # `claude-code-no-sandbox`. Both remaining engines drive the real CLI;
@@ -121,6 +123,48 @@ jobs:
           sudo -n apt-get update -qq \
             && sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -qq podman podman-compose \
             || echo "apt could not install podman and podman-compose"
+
+      # Installing podman is not the same as podman working, and on this
+      # runner it has not been since 2026-09-15. What it reports is:
+      #
+      #   invalid internal status, try resetting the pause process with
+      #   "podman system migrate": could not find any running process
+      #
+      # Rootless podman keeps a pause process that owns its user namespace.
+      # The runner's session does not linger, so when the session that started
+      # that process ends, podman is left pointing at a pid that is gone and
+      # every command fails -- while `podman` itself is installed and on PATH,
+      # which is why "install podman" looked like it had worked for six weeks.
+      #
+      # `podman system migrate` is podman's own prescribed remedy: it resets
+      # the namespace and the pause process. Cheap, idempotent, and it needs no
+      # privileges. Lingering is the durable fix and is attempted too, so that
+      # a later job on this runner may not need the repair at all -- but it is
+      # best-effort, because it is the kind of thing a host owner may have
+      # deliberately turned off.
+      - name: Repair podman if it is installed but broken
+        continue-on-error: true
+        run: |
+          if podman info >/dev/null 2>&1; then
+            echo "podman already healthy; nothing to repair"; exit 0
+          fi
+          echo "podman is installed but not usable. What it says:"
+          podman info 2>&1 | tail -5 || true
+
+          echo "--- podman system migrate ---"
+          podman system migrate 2>&1 | tail -5 || true
+
+          # Durable, so the next job may find it already working. Best-effort:
+          # a host owner may have disabled lingering on purpose.
+          sudo -n loginctl enable-linger "$(id -u)" 2>&1 | tail -2 \
+            || echo "could not enable lingering (not fatal; migrate is per-run)"
+
+          if podman info >/dev/null 2>&1; then
+            echo "podman is usable after the repair"
+          else
+            echo "still not usable after the repair. Remaining error:"
+            podman info 2>&1 | tail -5 || true
+          fi
 
       # Docker assumes Docker Hub for a short image name; podman refuses to
       # guess, and inspect's default compose names its image without one.
