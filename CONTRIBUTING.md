@@ -40,10 +40,17 @@ Each skill is a folder holding a valid `SKILL.md`, a `skill-card.md`, and an
 `evals/evals.json` dataset. Put the folders anywhere in your repo, commonly
 `skills/` or `.agents/skills/`.
 
-The catalog always tracks your **`main`** branch. That is deliberate: the
-catalog cannot be pointed at a side branch, so what reaches users is what your
-own review process has already merged. Land skill changes on `main` and the
-catalog follows.
+The catalog tracks one branch of your repo, **`main`** unless your
+`federation.json` entry sets `branch` (see below). It can be:
+
+- a branch name, such as `main` or `develop`, followed as it moves;
+- a release pattern, such as `release/*`, which follows your newest release
+  branch. The `*` stands for a version number, optionally with an `alpha`,
+  `beta`, or `rc` suffix. Versions compare numerically, and a release
+  candidate sorts after the previous release but before its own final
+  release:
+  `release/0.9` < `release/0.12` < `release/0.13-rc1` < `release/0.13-rc2` < `release/0.13`.
+
 
 Everything in the folder ships, so the requirements are yours to maintain
 upstream alongside the skill. See
@@ -80,12 +87,13 @@ one repo can federate as many skills as it likes from wherever they live:
 
 | Field | Meaning |
 | --- | --- |
-| `repo` | GitHub `<owner>/<repo>`, must be AMD-owned. Always tracked at `main` |
+| `repo` | GitHub `<owner>/<repo>`, must be AMD-owned |
 | `license` | SPDX id, carried into each vendored copy's marker file |
+| `branch` | Optional. The branch to track, or a release pattern such as `release/*`. Defaults to `main` |
 | `skills[].path` | Path of the skill folder inside your repo, from the repo root |
 | `skills[].as` | Optional local catalog name; use it to namespace as `<project>-<skill>` so names stay unique |
 
-There is no ref, branch, or commit field. Federation is `main`-only by design.
+There is no tag or commit field. A source always follows a branch.
 
 ## 3. Vendor and validate locally
 
@@ -152,7 +160,8 @@ URLs on a schedule to catch link rot.
 
 ## Update or remove
 
-Merge the change to `main` in your repo and the catalog picks it up on its own.
+Merge the change to your tracked branch (or push a new release branch, if you
+track `release/*`) and the catalog picks it up on its own.
 The `federate-skills` workflow runs nightly (and on demand), re-vendors any
 skill whose upstream folder contents changed, and opens a pull request titled
 `Bump <skill> to <short commit>`. A night with no upstream change produces no

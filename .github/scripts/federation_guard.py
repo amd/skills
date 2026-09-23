@@ -114,6 +114,17 @@ def load_approved_repos(registry: Path) -> set[str]:
     }
 
 
+def source_ref(skill_dir: Path, branch: str) -> str:
+    """A ref that github.com can browse for a skill tracked at `branch`.
+
+    A pattern is not a ref, so it is swapped for the release branch the last
+    import resolved it to, or for the repo's default branch before any import.
+    """
+    if not fed.branches.is_pattern(branch):
+        return branch
+    return fed.read_marker(skill_dir).get("resolved_ref") or "HEAD"
+
+
 def vendored_edits(changed: list[str], declared: dict[str, dict]) -> list[dict]:
     """Group the changed paths that edit a vendored skill, by skill.
 
@@ -135,12 +146,15 @@ def vendored_edits(changed: list[str], declared: dict[str, dict]) -> list[dict]:
         entry = declared.get(name)
         if entry is None:
             continue
+        branch = entry.get("branch", fed.branches.DEFAULT_BRANCH)
         hit = hits.setdefault(
             name,
             {
                 "skill": name,
                 "repo": entry["repo"],
                 "source_path": entry["path"],
+                "branch": branch,
+                "source_ref": entry.get("source_ref", branch),
                 "paths": [],
             },
         )
@@ -223,16 +237,25 @@ def build_report(args: argparse.Namespace) -> dict:
     # which skills are federated, so an unreadable one leaves both rules with
     # nothing to go on. Report that instead of passing every pull request.
     try:
-        base = declared_skills(
-            fed.parse_federation(base_dir / ".github" / "federation.json")
-        )
+        base_sources = fed.parse_federation(base_dir / ".github" / "federation.json")
     except (ValueError, FileNotFoundError) as exc:
         report["federation_error"] = f"base branch copy: {exc}"
         return report
+    base = declared_skills(base_sources)
+    branch_of = {source.repo: source.branch for source in base_sources}
 
     report["vendored_edits"] = vendored_edits(
         read_changed_files(args.changed_files),
-        {entry["skill"]: entry for entry in base.values()},
+        {
+            entry["skill"]: {
+                **entry,
+                "branch": branch_of[entry["repo"]],
+                "source_ref": source_ref(
+                    base_dir / SKILLS_PREFIX / entry["skill"], branch_of[entry["repo"]]
+                ),
+            }
+            for entry in base.values()
+        },
     )
 
     if args.head_federation is None:

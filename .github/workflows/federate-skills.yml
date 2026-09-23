@@ -3,7 +3,9 @@ name: federate-skills
 # Keeps the vendored copies under `skills/` in step with the source repos
 # declared in `.github/federation.json`. Runs nightly and on demand.
 #
-# `federate_skills.py` clones each declared repo at `main` and re-vendors a
+# `federate_skills.py` clones each declared repo at its tracked branch (`main`
+# unless the entry sets `branch`; a pattern such as `release/*` resolves to the
+# newest release branch) and re-vendors a
 # skill only when the contents of its upstream folder changed, so a night
 # with no upstream activity produces no diff and no pull request. When
 # something did change, the run regenerates the agent manifests and opens a
@@ -132,7 +134,7 @@ jobs:
           PR_OPERATION: ${{ steps.pr.outputs.pull-request-operation }}
         run: |
           if [ "$CHANGED" != "true" ]; then
-            message="Every federated skill already matches its source repo at main. No pull request needed."
+            message="Every federated skill already matches its source repo at its tracked branch. No pull request needed."
           elif [ -n "$PR_URL" ]; then
             message="Pull request ${PR_OPERATION:-ready}: ${TITLE:-Refresh federated skills} ($PR_URL)"
           else
