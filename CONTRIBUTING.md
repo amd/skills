@@ -34,6 +34,12 @@ request adding the repo to
 [`.github/skill_owners.json`](.github/skill_owners.json); once it merges, the
 repo can federate as many skills as it likes and never needs approving again.
 
+If your repo is a super-repo of unrelated projects (such as `ROCm/rocm-systems`),
+approve only your project: enter its directory as `owner/repo/sub/dir`, e.g.
+`ROCm/rocm-systems/projects/rocprofiler-sdk`. That approval covers only skills
+under that directory, and each other project in the repo is approved
+separately by its own owners.
+
 ## 1. Author the skill in your repo
 
 Each skill is a folder holding a valid `SKILL.md`, a `skill-card.md`, and an

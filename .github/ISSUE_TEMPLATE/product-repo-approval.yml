@@ -1,6 +1,6 @@
 name: Product repo approval
 description: Get engineering and product sign-off on a product repo before its skills enter the catalog.
-title: "[Product repo approval] <owner/repo>"
+title: "[Product repo approval] <owner/repo or owner/repo/sub/dir>"
 labels:
   - product-repo-approval
 body:
@@ -8,8 +8,11 @@ body:
     id: repo
     attributes:
       label: Product repo
-      description: The AMD-owned repo that holds the skills, as `owner/repo`. This is the repo being approved.
-      placeholder: e.g. AMD-AGI/TraceLens
+      description: >-
+        The AMD-owned repo that holds the skills, as `owner/repo`. This is the repo being approved.
+        If it is a super-repo of unrelated projects, name just your project's directory as
+        `owner/repo/sub/dir`; the approval then covers only skills under that directory.
+      placeholder: e.g. AMD-AGI/TraceLens or ROCm/rocm-systems/projects/rocprofiler-sdk
     validations:
       required: true
 

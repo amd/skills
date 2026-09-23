@@ -17,7 +17,8 @@ name: product-repo-approval
 # opens a pull request; merging it closes the issue.
 #
 # Every detail comes from the issue body, which makes a mistake cheap to fix:
-# correct the issue and re-approve. The registry is keyed on the repo, so the
+# correct the issue and re-approve. The registry is keyed on the repo and, for
+# a project inside a super-repo (`owner/repo/sub/dir`), its subdirectory, so the
 # second pass rewrites the entry instead of adding a rival one.
 
 on:
@@ -84,11 +85,15 @@ jobs:
             const handle = (value) => value.trim().replace(/^@/, "").trim();
             const engOwner = handle(field("Engineering owner"));
             const releaseOwner = handle(field("Product release owner"));
-            const productRepo = field("Product repo")
+            const productScope = field("Product repo")
               .replace(/^https?:\/\/github\.com\//i, "")
-              .replace(/\/$/, "");
+              .replace(/\/+$/, "");
+            const [scopeOwner, scopeRepo, ...scopePath] = productScope.split("/");
             const mention = (login, fallback) => login ? `@${login}` : fallback;
-            const repoRef = productRepo ? `\`${productRepo}\`` : "this repo";
+            const repoRef = productScope ? `\`${productScope}\`` : "this repo";
+            const subdirNote = scopePath.length > 0
+              ? ` This approval covers only \`${scopePath.join("/")}\`, not the rest of \`${scopeOwner}/${scopeRepo}\`.`
+              : "";
 
             try {
               await github.rest.issues.createLabel({
@@ -108,7 +113,7 @@ jobs:
             await github.rest.issues.createComment({
               owner, repo, issue_number,
               body: [
-                `This issue is asking ${mention(engOwner, "the engineering owner")} and ${mention(releaseOwner, "the product release owner")} to sign off on ${repoRef} before it can add skills to this catalog.`,
+                `This issue is asking ${mention(engOwner, "the engineering owner")} and ${mention(releaseOwner, "the product release owner")} to sign off on ${repoRef} before it can add skills to this catalog.${subdirNote}`,
                 ``,
                 `## How to approve`,
                 ``,
@@ -118,7 +123,7 @@ jobs:
                 ``,
                 `**Product release owner**${releaseOwner ? ` (@${releaseOwner})` : ""}: you are comfortable with skills from ${repoRef} being vendored into this catalog, and you confirm the product is in Tech Preview or GA (not experimental).`,
                 ``,
-                `Once both roles have approved, a pull request is opened automatically adding the repo to \`.github/skill_owners.json\`. Merging that pull request closes this issue.`,
+                `Once both roles have approved, a pull request is opened automatically adding ${repoRef} to \`.github/skill_owners.json\`. Merging that pull request closes this issue.`,
               ].join("\n"),
             });
 
@@ -257,15 +262,25 @@ jobs:
             // problem here is worth saying out loud on the issue: the approvers
             // are done and would otherwise be left waiting on a pull request
             // that never arrives.
-            const productRepo = field("Product repo").replace(/^https?:\/\/github\.com\//i, "").replace(/\/$/, "");
+            // `owner/repo` approves the whole repo; `owner/repo/sub/dir` approves
+            // only that subdirectory, for super-repos holding unrelated projects.
+            const productScope = field("Product repo").replace(/^https?:\/\/github\.com\//i, "").replace(/\/+$/, "");
+            const [scopeOwner = "", scopeRepo = "", ...pathParts] = productScope.split("/");
+            const productRepo = `${scopeOwner}/${scopeRepo}`;
+            const productPath = pathParts.join("/");
             const statusAnswer = field("Product status");
             const status = /^Tech Preview/i.test(statusAnswer)
               ? "tech-preview"
               : /^GA\b/i.test(statusAnswer) ? "ga" : "";
 
+            const segment = /^[A-Za-z0-9._-]+$/;
             const problems = [];
-            if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(productRepo)) {
-              problems.push(`**Product repo** reads \`${productRepo || "(empty)"}\`, which is not an \`owner/repo\` slug.`);
+            if (!segment.test(scopeOwner) || !segment.test(scopeRepo)) {
+              problems.push(`**Product repo** reads \`${productScope || "(empty)"}\`, which is not an \`owner/repo\` or \`owner/repo/sub/dir\` slug.`);
+            } else if (pathParts[0] === "tree" || pathParts[0] === "blob") {
+              problems.push(`**Product repo** reads \`${productScope}\`, which looks like a pasted browser URL. Drop the \`/${pathParts[0]}/<branch>\` part, e.g. \`${productRepo}/${pathParts.slice(2).join("/") || "sub/dir"}\`.`);
+            } else if (pathParts.some(p => p === "." || p === ".." || !segment.test(p))) {
+              problems.push(`**Product repo** reads \`${productScope}\`, whose subdirectory \`${productPath}\` is not a plain path inside the repo.`);
             }
             if (!status) {
               problems.push(`**Product status** reads \`${statusAnswer || "(empty)"}\`. The registry only accepts Tech Preview or GA.`);
@@ -283,6 +298,8 @@ jobs:
 
             core.setOutput("ready", "true");
             core.setOutput("product_repo", productRepo);
+            core.setOutput("product_path", productPath);
+            core.setOutput("product_scope", productPath ? `${productRepo}/${productPath}` : productRepo);
             core.setOutput("engineering_owner", engOwner);
             core.setOutput("product_release_owner", releaseOwner);
 
@@ -297,12 +314,14 @@ jobs:
         if: steps.approval.outputs.ready == 'true'
         env:
           PRODUCT_REPO: ${{ steps.approval.outputs.product_repo }}
+          PRODUCT_PATH: ${{ steps.approval.outputs.product_path }}
           ENGINEERING_OWNER: ${{ steps.approval.outputs.engineering_owner }}
           PRODUCT_RELEASE_OWNER: ${{ steps.approval.outputs.product_release_owner }}
         run: |
           uv run .github/scripts/record_skill_owner.py \
             --registry "$REGISTRY" \
             --repo "$PRODUCT_REPO" \
+            --path "$PRODUCT_PATH" \
             --engineering-owner "$ENGINEERING_OWNER" \
             --product-release-owner "$PRODUCT_RELEASE_OWNER"
 
@@ -317,8 +336,8 @@ jobs:
           base: ${{ env.BASE_BRANCH }}
           branch: bot/skill-owners/issue-${{ github.event.issue.number }}
           delete-branch: true
-          commit-message: "Add `${{ steps.approval.outputs.product_repo }}` to the skill owners registry"
-          title: "Add `${{ steps.approval.outputs.product_repo }}` to the skill owners registry"
+          commit-message: "Add `${{ steps.approval.outputs.product_scope }}` to the skill owners registry"
+          title: "Add `${{ steps.approval.outputs.product_scope }}` to the skill owners registry"
           body: |
             Approved on #${{ github.event.issue.number }} by
             @${{ steps.approval.outputs.engineering_owner }} (engineering owner) and
@@ -349,7 +368,7 @@ jobs:
       - name: Report outcome
         env:
           READY: ${{ steps.approval.outputs.ready }}
-          PRODUCT_REPO: ${{ steps.approval.outputs.product_repo }}
+          PRODUCT_REPO: ${{ steps.approval.outputs.product_scope }}
           PR_URL: ${{ steps.pr.outputs.pull-request-url }}
           PR_OPERATION: ${{ steps.pr.outputs.pull-request-operation }}
         run: |
