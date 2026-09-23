@@ -1,6 +1,11 @@
 {
   "repos": [
     {
+      "repo": "amd/Quark",
+      "engineering_owner": "amd-zhaofeng",
+      "product_release_owner": "thiagocrepaldi"
+    },
+    {
       "repo": "ROCm/rocm-systems",
       "engineering_owner": "sadikarmagan",
       "product_release_owner": "serap-suvari"
