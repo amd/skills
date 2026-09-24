@@ -1,0 +1,12 @@
+# Simple vector_add — default correctness backend (testcase exit-code)
+# Usage:
+#   cd /path/to/Magpie
+#   python -m Magpie analyze -k examples/simple_hip_test/analyze_default.yaml --no-perf
+kernel:
+  id: "vector_add"
+  type: hip
+  source_files:
+    - "./vector_add.hip"
+  compile_command: "hipcc -g -O2 -o vector_add vector_add.hip"
+  testcase_command: "./vector_add"
+  working_dir: "examples/simple_hip_test"
