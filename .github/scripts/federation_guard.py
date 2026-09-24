@@ -16,10 +16,8 @@ Rule 1 -- vendored skills are edited upstream, not here.
     A federated skill folder is a mirror of a folder in a product repo.
     `federate_skills.py` re-imports it with rmtree + copytree, so anything
     committed here is deleted by the next nightly run: an edit that looks
-    merged is really just pending its own reversal. The one exception is the
-    skill's top-level `evals/` folder, which federation never carries -- the
-    catalog owns those datasets, so editing them here is the only way to edit
-    them at all.
+    merged is really just pending its own reversal. That includes the skill's
+    `evals/` folder, which is imported like everything else.
 
     Federated means declared in `.github/federation.json`, and nothing else.
     The vendored copies carry a `.federated.json` marker too, but the marker is
@@ -155,12 +153,7 @@ def source_ref(skill_dir: Path, branch: str) -> str:
 
 
 def vendored_edits(changed: list[str], declared: dict[str, dict]) -> list[dict]:
-    """Group the changed paths that edit a vendored skill, by skill.
-
-    The `evals/` exemption mirrors `federate_skills.UNFEDERATED_DIR_NAMES` and
-    the way that module's `content_hash` applies it, so what counts as "not
-    federated" is the same on both sides rather than a second opinion.
-    """
+    """Group the changed paths that edit a vendored skill, by skill."""
     hits: dict[str, dict] = {}
     for path in changed:
         if not path.startswith(SKILLS_PREFIX):
@@ -168,9 +161,6 @@ def vendored_edits(changed: list[str], declared: dict[str, dict]) -> list[dict]:
         name, _, tail = path[len(SKILLS_PREFIX) :].partition("/")
         if not tail:
             # Something directly under `skills/`, not inside a skill.
-            continue
-        parts = tail.split("/")
-        if len(parts) > 1 and parts[0] in fed.UNFEDERATED_DIR_NAMES:
             continue
         entry = declared.get(name)
         if entry is None:

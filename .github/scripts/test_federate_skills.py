@@ -253,11 +253,9 @@ class TestVendoredCopy(unittest.TestCase):
             )
             self.assertEqual((dest / "SKILL.md").read_text(encoding="utf-8"), "new")
 
-    def test_evals_are_outside_federation_in_both_directions(self):
-        # The catalog owns and runs the datasets, so a re-import must neither
-        # delete the local `evals/` nor import upstream's over it. Both halves
-        # fail silently: a wiped dataset only shows up as an eval that stopped
-        # running, and an imported one as expectations nobody here wrote.
+    def test_evals_are_mirrored_like_everything_else(self):
+        # Upstream's `evals/` replaces the catalog's, and a local file upstream
+        # does not ship is removed.
         with tempfile.TemporaryDirectory() as tmp:
             src = write_skill(
                 Path(tmp) / "src",
@@ -265,24 +263,88 @@ class TestVendoredCopy(unittest.TestCase):
             )
             dest = write_skill(
                 Path(tmp) / "dest",
-                {"SKILL.md": "old", "evals/evals.json": '{"local": true}'},
+                {
+                    "SKILL.md": "old",
+                    "evals/evals.json": '{"local": true}',
+                    "evals/hooks.py": "local",
+                },
             )
             fed.copy_skill(src, dest)
             self.assertEqual(
                 (dest / "evals" / "evals.json").read_text(encoding="utf-8"),
-                '{"local": true}',
+                '{"upstream": true}',
             )
+            self.assertFalse((dest / "evals" / "hooks.py").exists())
 
-    def test_a_nested_evals_folder_is_ordinary_content(self):
-        # Only the skill's own top-level `evals/` is the catalog's; a folder
-        # of the same name deeper in the tree is upstream's to ship.
+    def test_local_machine_yml_is_kept_when_upstream_has_none(self):
+        # The catalog's runners are not the product repo's, so the catalog's
+        # runner choice survives an upstream that does not make one.
         with tempfile.TemporaryDirectory() as tmp:
             src = write_skill(
-                Path(tmp) / "src", {"SKILL.md": "new", "agents/evals/notes.md": "x"}
+                Path(tmp) / "src", {"SKILL.md": "new", "evals/evals.json": "{}"}
             )
-            dest = write_skill(Path(tmp) / "dest", {"SKILL.md": "old"})
+            dest = write_skill(
+                Path(tmp) / "dest",
+                {"SKILL.md": "old", "evals/machine.yml": "labels: [gpu]"},
+            )
             fed.copy_skill(src, dest)
-            self.assertTrue((dest / "agents" / "evals" / "notes.md").is_file())
+            self.assertEqual(
+                (dest / "evals" / "machine.yml").read_text(encoding="utf-8"),
+                "labels: [gpu]",
+            )
+            self.assertEqual((dest / "SKILL.md").read_text(encoding="utf-8"), "new")
+
+    def test_upstream_machine_yml_replaces_the_local_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write_skill(
+                Path(tmp) / "src", {"SKILL.md": "new", "evals/machine.yml": "os: [Linux]"}
+            )
+            dest = write_skill(
+                Path(tmp) / "dest",
+                {"SKILL.md": "old", "evals/machine.yml": "labels: [gpu]"},
+            )
+            fed.copy_skill(src, dest)
+            self.assertEqual(
+                (dest / "evals" / "machine.yml").read_text(encoding="utf-8"),
+                "os: [Linux]",
+            )
+
+    def test_large_files_are_left_upstream(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write_skill(
+                Path(tmp) / "src",
+                {
+                    "SKILL.md": "new",
+                    "evals/traces.tar.gz": "x" * (fed.MAX_FILE_BYTES + 1),
+                    "evals/small.csv": "x" * fed.MAX_FILE_BYTES,
+                },
+            )
+            dest = Path(tmp) / "dest"
+            omitted = fed.copy_skill(src, dest)
+            self.assertEqual(omitted, ["evals/traces.tar.gz"])
+            self.assertFalse((dest / "evals" / "traces.tar.gz").exists())
+            self.assertTrue((dest / "evals" / "small.csv").is_file())
+
+    def test_links_to_large_files_point_upstream(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = write_skill(
+                Path(tmp) / "dest",
+                {"SKILL.md": "[a](evals/traces.tar.gz) [b](evals/small.csv)"},
+            )
+            fed.rewrite_external_references(
+                dest,
+                "skills/x",
+                {"skills/x/evals/traces.tar.gz", "skills/x/evals/small.csv"},
+                "AMD-Org/MyProject",
+                "abc",
+                [],
+                omitted=["evals/traces.tar.gz"],
+            )
+            self.assertEqual(
+                (dest / "SKILL.md").read_text(encoding="utf-8"),
+                "[a](https://github.com/AMD-Org/MyProject/blob/abc/skills/x/evals/traces.tar.gz) "
+                "[b](evals/small.csv)",
+            )
 
 
 class TestChangeDetection(unittest.TestCase):
@@ -318,18 +380,22 @@ class TestChangeDetection(unittest.TestCase):
                 fed.content_hash(root, exclude=[fed.MARKER_FILENAME]), digest
             )
 
-    def test_hash_ignores_the_skills_own_evals_folder(self):
-        # Federation does not move `evals/` any more, so an upstream edit
-        # there must not re-vendor the skill, and the local dataset must not
-        # make the vendored copy look stale on every run.
+    def test_hash_covers_the_evals_folder(self):
+        # An upstream edit to the dataset alone must re-vendor the skill.
         with tempfile.TemporaryDirectory() as tmp:
             root = write_skill(Path(tmp) / "skill", {"SKILL.md": "body"})
             digest = fed.content_hash(root)
             write_skill(root, {"evals/evals.json": '{"evaluations": []}'})
-            self.assertEqual(fed.content_hash(root), digest)
-            # Same name, but nested: that is upstream's content and counts.
-            write_skill(root, {"agents/evals/notes.md": "x"})
             self.assertNotEqual(fed.content_hash(root), digest)
+
+    def test_hash_ignores_files_too_large_to_vendor(self):
+        # They are never copied, so counting them would make every vendored
+        # copy look stale against its upstream.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = write_skill(Path(tmp) / "skill", {"SKILL.md": "body"})
+            digest = fed.content_hash(root)
+            write_skill(root, {"evals/t.tar.gz": "x" * (fed.MAX_FILE_BYTES + 1)})
+            self.assertEqual(fed.content_hash(root), digest)
 
     def test_hash_covers_contents_and_layout(self):
         with tempfile.TemporaryDirectory() as tmp:

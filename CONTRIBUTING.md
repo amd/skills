@@ -59,7 +59,10 @@ The catalog tracks one branch of your repo, **`main`** unless your
 
 
 Everything in the folder ships, so the requirements are yours to maintain
-upstream alongside the skill. See
+upstream alongside the skill. Two exceptions: files over 100 KB are not
+vendored, so a skill or eval that needs a large trace or archive should
+download it from your repo; and if you ship no `evals/machine.yml`, the
+catalog keeps its own, since its runners may differ from yours. See
 [docs/skill-requirements.md](docs/skill-requirements.md) for what a valid skill
 must contain and [docs/best-practices.md](docs/best-practices.md) for how to
 make it good.

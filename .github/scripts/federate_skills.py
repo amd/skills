@@ -27,10 +27,11 @@ For each declared skill, the script:
    marker is restored, because a diff consisting only of a commit and a
    hash is noise. Deleting a marker forces that skill to be re-vendored.
 3. Copies changed skill folders into `skills/<name>/` as a mirror of
-   upstream, except for the skill's top-level `evals/` folder, which is
-   outside federation entirely: upstream's copy is never imported and the
-   catalog's copy is never touched. Anything else the source repo does not
-   ship is removed.
+   upstream, `evals/` included. Anything the source repo does not ship is
+   removed. Files larger than `MAX_FILE_BYTES` (test archives, traces) are
+   not vendored: they are left out of the copy and of the content hash, and
+   named in the run log and the pull request body. The one file kept when
+   upstream lacks it is `evals/machine.yml` (`LOCAL_FALLBACK_FILES`).
 3b. Optionally vendors the skill under a different local catalog name (the
    `as:` field on a skill entry). Federated skills follow a
    `<projectrepo>-<skill>` naming convention in this catalog (e.g. the
@@ -109,12 +110,13 @@ MARKER_FILENAME = ".federated.json"
 # hashing them would make change detection depend on whether someone happened
 # to run the tests before the importer.
 IGNORED_DIR_NAMES = {"__pycache__", ".pytest_cache"}
-# Top-level skill folders federation does not carry. `evals/` is the catalog's
-# to own: the datasets are maintained and run here, so importing upstream's
-# copy would overwrite them and hashing either copy would tie change detection
-# to a folder federation no longer moves. Matched at the skill root only, so a
-# nested `agents/evals/` is still ordinary content.
-UNFEDERATED_DIR_NAMES = {"evals"}
+# Larger upstream files stay upstream. 100KB limit.
+MAX_FILE_BYTES = 100 * 1024
+# Kept from the catalog's copy when upstream does not ship them. `machine.yml`
+# names the runners a skill's evals need, and the catalog's runner pool is not
+# the product repo's, so the catalog may have to say it where upstream does
+# not. When upstream does ship one, upstream's wins like any other file.
+LOCAL_FALLBACK_FILES = ("evals/machine.yml",)
 # The bundle references each published skill as `./skills/<name>` in the
 # marketplace plugin entry's `skills` array.
 SKILLS_PATH_PREFIX = "./skills/"
@@ -194,6 +196,8 @@ class ImportResult:
     branch: str = branches.DEFAULT_BRANCH
     skill_description: str = ""
     marketplace_description: str = ""
+    # Upstream files over `MAX_FILE_BYTES`, relative to the skill folder.
+    omitted: list[str] = field(default_factory=list)
 
     @property
     def short_commit(self) -> str:
@@ -400,9 +404,7 @@ def content_hash(root: Path, exclude: Iterable[str] = ()) -> str:
     on a maintainer's machine and before it on a Linux runner, which would
     hash identical files to different digests.
 
-    Files under an unfederated top-level folder are left out on both sides
-    of the comparison, since federation neither reads nor writes them.
-
+    Files over `MAX_FILE_BYTES` are left out, since they are never vendored.
     `exclude` names relative paths to leave out of the digest.
     """
     skipped = set(exclude)
@@ -410,18 +412,13 @@ def content_hash(root: Path, exclude: Iterable[str] = ()) -> str:
         (
             (path.relative_to(root).as_posix(), path)
             for path in root.rglob("*")
-            if path.is_file()
+            if path.is_file() and path.stat().st_size <= MAX_FILE_BYTES
         ),
         key=lambda entry: entry[0],
     )
     digest = hashlib.sha256()
     for rel, path in entries:
-        parts = rel.split("/")
-        if (
-            rel in skipped
-            or IGNORED_DIR_NAMES.intersection(parts[:-1])
-            or (len(parts) > 1 and parts[0] in UNFEDERATED_DIR_NAMES)
-        ):
+        if rel in skipped or IGNORED_DIR_NAMES.intersection(rel.split("/")[:-1]):
             continue
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")
@@ -463,6 +460,7 @@ def rewrite_external_references(
     repo: str,
     commit: str,
     log: list[str],
+    omitted: Iterable[str] = (),
 ) -> None:
     """Rewrite relative links that escape the skill folder into GitHub URLs.
 
@@ -474,8 +472,11 @@ def rewrite_external_references(
 
     Links that resolve to a file actually present inside the skill folder
     (e.g. `reference.md`) are left untouched so they keep working locally.
+    `omitted` names files inside the skill (relative to it) that were not
+    copied, so links to them are rewritten too.
     """
     repo_skill_path = repo_skill_path.strip("/")
+    not_copied = {f"{repo_skill_path}/{rel}" for rel in omitted}
 
     def replace_in(text: str) -> tuple[str, list[tuple[str, str]]]:
         rewrites: list[tuple[str, str]] = []
@@ -498,7 +499,7 @@ def rewrite_external_references(
             within_skill = skill_rel == repo_skill_path or skill_rel.startswith(
                 repo_skill_path + "/"
             )
-            if within_skill and skill_rel in repo_files:
+            if within_skill and skill_rel in repo_files and skill_rel not in not_copied:
                 # Genuine intra-skill link; it was copied, leave it local.
                 return match.group(0)
 
@@ -604,36 +605,40 @@ def is_up_to_date(
     )
 
 
-def copy_skill(src: Path, dest: Path) -> None:
+def copy_skill(src: Path, dest: Path) -> list[str]:
     """Mirror the upstream skill folder into `dest`.
 
     Anything upstream does not ship is removed, so a re-import is also how
-    an upstream deletion propagates. The exception is the top-level folders
-    in `UNFEDERATED_DIR_NAMES`: the copy already in the catalog is kept as
-    it is, and upstream's is not imported over it.
+    an upstream deletion propagates, except for `LOCAL_FALLBACK_FILES`, which
+    are kept when upstream does not ship them. Files over `MAX_FILE_BYTES`
+    are not copied; their paths, relative to the skill, are returned.
     """
+    kept = {
+        rel: (dest / rel).read_bytes()
+        for rel in LOCAL_FALLBACK_FILES
+        if (dest / rel).is_file() and not (src / rel).is_file()
+    }
     if dest.is_dir():
-        for entry in dest.iterdir():
-            if entry.is_dir() and entry.name in UNFEDERATED_DIR_NAMES:
-                continue
-            if entry.is_dir():
-                shutil.rmtree(entry)
-            else:
-                entry.unlink()
+        shutil.rmtree(dest)
     elif dest.exists():
         dest.unlink()
 
-    src_root = Path(src)
+    omitted: list[str] = []
 
     def ignore(directory: str, names: list[str]) -> set[str]:
-        # `copytree` calls this for every directory it walks; only the skill's
-        # own top level is exempt, so compare against the root it started at.
-        if Path(directory) != src_root:
-            return set()
-        return {name for name in names if name in UNFEDERATED_DIR_NAMES}
+        large = set()
+        for name in names:
+            path = Path(directory) / name
+            if path.is_file() and path.stat().st_size > MAX_FILE_BYTES:
+                large.add(name)
+                omitted.append(path.relative_to(src).as_posix())
+        return large
 
-    dest.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(src, dest, ignore=ignore, dirs_exist_ok=True)
+    shutil.copytree(src, dest, ignore=ignore)
+    for rel, data in kept.items():
+        (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+        (dest / rel).write_bytes(data)
+    return sorted(omitted)
 
 
 def write_marker(
@@ -844,7 +849,12 @@ def import_source(
                 else None
             )
 
-            copy_skill(src_skill, dest_skill)
+            omitted = copy_skill(src_skill, dest_skill)
+            for rel in omitted:
+                log.append(
+                    f"[{source.name}] skipped {spec.path}/{rel} "
+                    f"(over {MAX_FILE_BYTES // 1024} KB)"
+                )
             write_marker(dest_skill, source, branch, commit, spec.path, upstream_hash)
             write_card(dest_skill, source, marketplace_description)
             rewrite_skill_name(dest_skill, dest_name, log)
@@ -855,6 +865,7 @@ def import_source(
                 source.repo,
                 commit,
                 log,
+                omitted,
             )
 
             # The marker is bookkeeping, not content. If re-vendoring produced
@@ -896,6 +907,7 @@ def import_source(
                     branch=branch,
                     skill_description=description.strip(),
                     marketplace_description=marketplace_description,
+                    omitted=omitted,
                 )
             )
     return results
@@ -968,6 +980,18 @@ def pr_body(
                     else ""
                 )
             )
+    omitted = [
+        (result, rel) for result in sorted(updated, key=lambda r: r.folder)
+        for rel in result.omitted
+    ]
+    if omitted:
+        lines += [
+            "",
+            f"**Not vendored** (over {MAX_FILE_BYTES // 1024} KB, left upstream)",
+            "",
+        ]
+        for result, rel in omitted:
+            lines.append(f"- `{result.path}/{rel}`")
     if unchanged:
         lines += ["", "**Unchanged**", ""]
         for result in sorted(unchanged, key=lambda r: r.folder):

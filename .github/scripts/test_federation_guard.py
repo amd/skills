@@ -140,34 +140,27 @@ class TestVendoredEdits(unittest.TestCase):
                 ],
             )
 
-    def test_the_skills_own_evals_folder_is_the_catalogs_to_edit(self):
-        # Federation neither imports nor overwrites a skill's top-level
-        # `evals/`, so editing it here is the only way to edit it. Closing
-        # those pull requests would leave the datasets unmaintainable.
+    def test_editing_the_evals_folder_is_a_vendored_edit(self):
+        # Federation imports `evals/` too, so an edit there is overwritten by
+        # the next nightly run like any other.
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             base = build_base(tmp, vendored={"tracelens-orchestrator": TRACELENS})
-            self.assertEqual(
-                report(
-                    tmp,
-                    base,
-                    changed=(
-                        "skills/tracelens-orchestrator/evals/evals.json",
-                        "skills/tracelens-orchestrator/evals/machine.yml",
-                    ),
-                )["vendored_edits"],
-                [],
-            )
-            # A folder of the same name deeper in the tree is upstream's.
-            self.assertEqual(
-                len(
-                    report(
-                        tmp,
-                        base,
-                        changed=("skills/tracelens-orchestrator/agents/evals/notes.md",),
-                    )["vendored_edits"]
+            edits = report(
+                tmp,
+                base,
+                changed=(
+                    "skills/tracelens-orchestrator/evals/evals.json",
+                    "skills/tracelens-orchestrator/evals/machine.yml",
                 ),
-                1,
+            )["vendored_edits"]
+            self.assertEqual(len(edits), 1)
+            self.assertEqual(
+                edits[0]["paths"],
+                [
+                    "skills/tracelens-orchestrator/evals/evals.json",
+                    "skills/tracelens-orchestrator/evals/machine.yml",
+                ],
             )
 
     def test_a_declaration_alone_makes_a_skill_federated(self):
