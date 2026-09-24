@@ -110,7 +110,7 @@ MARKER_FILENAME = ".federated.json"
 # hashing them would make change detection depend on whether someone happened
 # to run the tests before the importer.
 IGNORED_DIR_NAMES = {"__pycache__", ".pytest_cache"}
-# Larger upstream files stay upstream. 1
+# Larger upstream files stay upstream. 100KB limit.
 MAX_FILE_BYTES = 100 * 1024
 # Kept from the catalog's copy when upstream does not ship them. `machine.yml`
 # names the runners a skill's evals need, and the catalog's runner pool is not
