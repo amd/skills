@@ -268,6 +268,20 @@ jobs:
           assert hasattr(engine_routing, "routing_decision"), (
               "older skillscope: routing cannot stop at the decision"
           )
+          # What this run exists to measure. Without the guard a stale install
+          # would produce a clean-looking report of the behaviour being fixed:
+          # the host leg answering on its first tool call and then doing the
+          # whole job, which is most of that leg's cost and none of its result.
+          assert hasattr(engine_routing, "host_stop_when_factory"), (
+              "older skillscope: the host leg still works on after it decides"
+          )
+          # The budget was refitted after the last run. Three came from a mean
+          # that summed deciding and rummaging cases together; two is the
+          # measured decision peak doubled. A report generated under the old
+          # number is not comparable to this one.
+          assert engine_routing.SANDBOX_BUDGET_FACTOR == 2, (
+              "older skillscope: the routing budget predates its recalibration"
+          )
           print("harness is current")
           CHECK
 
