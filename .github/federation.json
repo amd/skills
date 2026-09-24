@@ -19,6 +19,16 @@
           "as": "tracelens-analysis-orchestrator"
         }
       ]
+    },
+    {
+      "repo": "amd/ZenDNN-pytorch-plugin",
+      "license": "Apache-2.0",
+      "skills": [
+        {
+          "path": "skills/serving-llms-on-epyc",
+          "as": "serving-llms-on-epyc"
+        }
+      ]
     }
   ]
 }
