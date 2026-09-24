@@ -9,7 +9,7 @@ name: federation-guard
 #    each one with rmtree + copytree, so an edit landed here is deleted by the
 #    next run. Closing is kinder than merging something that will silently
 #    revert -- the change belongs in the product repo the skill comes from.
-#    A skill's own `evals/` folder is the catalog's, and edits there are fine.
+#    That includes the skill's `evals/` folder, which is imported too.
 #
 # 2. A pull request that federates a *new* skill from a product repo missing
 #    from `.github/skill_owners.json` fails this check and gets a comment
@@ -188,8 +188,6 @@ jobs:
                   ``,
                   `Once it is on that branch there, this catalog picks it up on its own (nightly, or by dispatching`,
                   `\`federate-skills\`). See [CONTRIBUTING.md](https://github.com/${owner}/${repo}/blob/main/CONTRIBUTING.md#update-or-remove).`,
-                  ``,
-                  `A skill's own \`evals/\` folder is the exception — the catalog owns those datasets, so edit them here.`,
                   ``,
                   `Maintainers: if the change has to land here (retiring a federated skill, forcing a re-import), ` +
                   `add the \`${overrideLabel}\` label and reopen.`,
