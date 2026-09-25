@@ -468,6 +468,63 @@ class TestProductRepoApproval(unittest.TestCase):
             )["new_skills_needing_approval"]
             self.assertEqual([p["repo"] for p in pending], ["AMD-Org/Fork"])
 
+    def test_declaring_a_skill_already_in_the_catalog_is_not_a_new_skill(self):
+        # `magpie-kernel-evaluator` on main: shipped in the catalog, but its
+        # upstream was not declared. Declaring it keeps the same skill in sync;
+        # it adds nothing to the catalog, so there is nothing new to approve.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(
+                tmp,
+                vendored={"magpie-evaluator": "AMD-AGI/Magpie"},
+                sources=[source(TRACELENS, {"path": "agent/orchestrator"})],
+            )
+            self.assertEqual(
+                report(
+                    tmp,
+                    base,
+                    head_sources=[
+                        source(TRACELENS, {"path": "agent/orchestrator"}),
+                        source(
+                            "AMD-AGI/Magpie",
+                            {"path": "skills/magpie", "as": "magpie-evaluator"},
+                        ),
+                    ],
+                )["new_skills_needing_approval"],
+                [],
+            )
+
+    def test_federating_a_skill_authored_here_is_not_a_new_skill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(tmp, local=("local-ai-use",))
+            self.assertEqual(
+                report(
+                    tmp,
+                    base,
+                    head_sources=[
+                        source(TRACELENS, {"path": "agent/orchestrator"}),
+                        source("AMD-Org/Lemonade", {"path": "skills/l", "as": "local-ai-use"}),
+                    ],
+                )["new_skills_needing_approval"],
+                [],
+            )
+
+    def test_repointing_a_declared_skill_on_disk_still_needs_approval(self):
+        # The catalog exemption must not reopen the repo-swap case: the folder
+        # exists, but it is already declared from a different repo.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(tmp, vendored={"tl-orch": TRACELENS})
+            pending = report(
+                tmp,
+                base,
+                head_sources=[
+                    source("AMD-Org/Fork", {"path": "skills/tl-orch", "as": "tl-orch"})
+                ],
+            )["new_skills_needing_approval"]
+            self.assertEqual([p["repo"] for p in pending], ["AMD-Org/Fork"])
+
     def test_a_second_skill_from_an_unapproved_repo_still_needs_approval(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
