@@ -482,7 +482,7 @@ def rewrite_external_references(
     repo_skill_path = repo_skill_path.strip("/")
     not_copied = {f"{repo_skill_path}/{rel}" for rel in omitted}
 
-    def replace_in(text: str) -> tuple[str, list[tuple[str, str]]]:
+    def replace_in(text: str, repo_dir: str) -> tuple[str, list[tuple[str, str]]]:
         rewrites: list[tuple[str, str]] = []
 
         def _sub(match: re.Match[str]) -> str:
@@ -494,20 +494,23 @@ def rewrite_external_references(
             if not path_part:
                 return match.group(0)
 
-            # Resolve the link both as the markdown spec would (relative to
-            # the file's folder in the repo) and relative to the repo root,
-            # since skill docs often write repo-root-relative paths.
+            # Resolve the link as the markdown spec would (relative to the
+            # file's folder in the repo), then relative to the skill root and
+            # the repo root, since skill docs often write paths that way.
+            file_rel = posixpath.normpath(posixpath.join(repo_dir, path_part))
             skill_rel = posixpath.normpath(posixpath.join(repo_skill_path, path_part))
             root_rel = posixpath.normpath(path_part)
 
-            within_skill = skill_rel == repo_skill_path or skill_rel.startswith(
+            within_skill = file_rel == repo_skill_path or file_rel.startswith(
                 repo_skill_path + "/"
             )
-            if within_skill and skill_rel in repo_files and skill_rel not in not_copied:
+            if within_skill and file_rel in repo_files and file_rel not in not_copied:
                 # Genuine intra-skill link; it was copied, leave it local.
                 return match.group(0)
 
-            if skill_rel in repo_files:
+            if file_rel in repo_files:
+                chosen = file_rel
+            elif skill_rel in repo_files:
                 chosen = skill_rel
             else:
                 chosen = root_rel
@@ -524,7 +527,10 @@ def rewrite_external_references(
 
     for md_path in sorted(skill_dir.rglob("*.md")):
         original = md_path.read_text(encoding="utf-8")
-        updated, rewrites = replace_in(original)
+        md_dir = md_path.parent.relative_to(skill_dir).as_posix()
+        updated, rewrites = replace_in(
+            original, posixpath.normpath(posixpath.join(repo_skill_path, md_dir))
+        )
         if updated != original:
             md_path.write_text(updated, encoding="utf-8")
             rel = md_path.relative_to(skill_dir.parent).as_posix()

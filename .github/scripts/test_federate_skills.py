@@ -349,6 +349,30 @@ class TestVendoredCopy(unittest.TestCase):
                 "[b](evals/small.csv)",
             )
 
+    def test_links_in_nested_docs_resolve_from_their_own_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = write_skill(
+                Path(tmp) / "dest",
+                {
+                    "SKILL.md": "body",
+                    "evals/README.md": "[r](RUBRICS.md) [d](../../docs/guide.md)",
+                    "evals/RUBRICS.md": "rubrics",
+                },
+            )
+            fed.rewrite_external_references(
+                dest,
+                "skills/x",
+                {"skills/x/SKILL.md", "skills/x/evals/RUBRICS.md", "docs/guide.md"},
+                "AMD-Org/MyProject",
+                "abc",
+                [],
+            )
+            self.assertEqual(
+                (dest / "evals" / "README.md").read_text(encoding="utf-8"),
+                "[r](RUBRICS.md) "
+                "[d](https://github.com/AMD-Org/MyProject/blob/abc/docs/guide.md)",
+            )
+
 
 class TestChangeDetection(unittest.TestCase):
     def test_hash_order_does_not_depend_on_the_platform(self):
