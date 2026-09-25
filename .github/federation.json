@@ -11,6 +11,16 @@
       ]
     },
     {
+      "repo": "AMD-AGI/Magpie",
+      "license": "MIT",
+      "skills": [
+        {
+          "path": "skills/magpie",
+          "as": "magpie-kernel-evaluator"
+        }
+      ]
+    },
+    {
       "repo": "AMD-AGI/TraceLens",
       "license": "MIT",
       "skills": [
