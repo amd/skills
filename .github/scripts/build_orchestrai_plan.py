@@ -212,8 +212,9 @@ def build_plan(args: argparse.Namespace) -> dict:
         ):
             variables = {
                 "SKILLS_REPO": str(skills_source.get("repository") or ""),
-                # The upstream repository is public, so the acquired machine
-                # can test the exact branch/commit that triggered this run.
+                # The workflow resolves the current public branch tip just
+                # before building this plan. The adapter uses that resolution
+                # only to keep the remote checkout stable while the run starts.
                 "SKILLS_REF": args.ref,
                 "SKILLS_SHA": args.sha.lower(),
                 "SKILLSCOPE_SHA": skillscope_sha,

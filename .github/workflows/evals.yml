@@ -345,11 +345,27 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
+      - name: Resolve amd/skills branch tip
+        id: skills-source
+        env:
+          TARGET_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          read -r branch_tip_sha resolved_ref < <(
+            git ls-remote --exit-code --heads \
+              https://github.com/amd/skills.git "refs/heads/$TARGET_REF"
+          )
+          if [[ ! "$branch_tip_sha" =~ ^[0-9a-fA-F]{40}$ ]] || \
+             [[ "$resolved_ref" != "refs/heads/$TARGET_REF" ]]; then
+            echo "Could not resolve the selected amd/skills branch tip." >&2
+            exit 1
+          fi
+          echo "sha=${branch_tip_sha,,}" >> "$GITHUB_OUTPUT"
       - name: Build OrchestrAI plan
         env:
           MATRIX_JSON: ${{ matrix.matrix_json }}
           TARGET_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
-          TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          TARGET_SHA: ${{ steps.skills-source.outputs.sha }}
           EXTENDED_FLAG: ${{ needs.discover.outputs.extended }}
           # Fleet selectors are private infrastructure metadata.  Store this
           # JSON as a secret so Actions masks the value in the step's automatic
