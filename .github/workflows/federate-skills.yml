@@ -12,6 +12,10 @@ name: federate-skills
 # pull request titled "Bump `<skill>` to `<commit>`". Validating the result is
 # the `validate` workflow's job on that pull request, not this workflow's.
 #
+# Every skill gets its own job, branch, and pull request, so two upstream
+# changes on the same night are reviewed, merged, or reverted independently,
+# and one source failing to clone does not hold back the others' bumps.
+#
 # The pull request always targets `main`, whatever branch the run was
 # dispatched from, and the run always uses the dispatched branch's copy of the
 # scripts. So a test dispatch from a side branch exercises that branch's
@@ -42,12 +46,18 @@ concurrency:
 
 env:
   BASE_BRANCH: main
-  PR_BRANCH: bot/federate-skills
+  # Each skill's pull request lives on `<prefix><skill>`. The prefix must not
+  # be an existing branch name, since git cannot hold both `a` and `a/b`.
+  PR_BRANCH_PREFIX: bot/federate/
 
 jobs:
-  federate:
-    name: Federate skills
+  # Reads the federation file only; nothing is cloned here. An unknown `only`
+  # name or an invalid federation file fails the run at this step.
+  plan:
+    name: List federated skills
     runs-on: ubuntu-latest
+    outputs:
+      skills: ${{ steps.list.outputs.skills }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -55,17 +65,43 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Vendor skills declared in .github/federation.json
+      - name: List skills declared in .github/federation.json
+        id: list
+        env:
+          ONLY: ${{ inputs.only }}
+        run: |
+          args=(--list-skills)
+          if [ -n "$ONLY" ]; then args+=(--only "$ONLY"); fi
+          skills="$(uv run .github/scripts/federate_skills.py "${args[@]}")"
+          echo "Skills to check: $skills"
+          echo "skills=$skills" >> "$GITHUB_OUTPUT"
+
+  federate:
+    name: Federate ${{ matrix.skill }}
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        skill: ${{ fromJSON(needs.plan.outputs.skills) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      # `--only` leaves every other skill, and every other skill's entry in
+      # the marketplace, untouched, so this job's diff is this skill's alone.
+      - name: Vendor ${{ matrix.skill }}
         id: federate
         env:
           # Written outside the work tree so the summary never shows up as a
           # repository change.
           SUMMARY: ${{ runner.temp }}/federation-summary.json
-          ONLY: ${{ inputs.only }}
+          SKILL: ${{ matrix.skill }}
         run: |
-          args=(--summary-json "$SUMMARY")
-          if [ -n "$ONLY" ]; then args+=(--only "$ONLY"); fi
-          uv run .github/scripts/federate_skills.py "${args[@]}"
+          uv run .github/scripts/federate_skills.py --only "$SKILL" --summary-json "$SUMMARY"
 
           {
             echo "title=$(jq -r '.title' "$SUMMARY")"
@@ -91,9 +127,10 @@ jobs:
             git status --short
           fi
 
-      # Push to a dedicated branch and open a PR rather than committing to
-      # main, so vendored changes stay reviewable and the standard `validate`
-      # workflow gates them. Re-running updates the same PR in place.
+      # Push to a dedicated per-skill branch and open a PR rather than
+      # committing to main, so vendored changes stay reviewable and the
+      # standard `validate` workflow gates them. Re-running updates that
+      # skill's PR in place.
       #
       # `base` is pinned rather than left to default, because the default is the
       # branch the run was dispatched from: a manual dispatch off a side branch
@@ -105,10 +142,10 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
           base: ${{ env.BASE_BRANCH }}
-          branch: ${{ env.PR_BRANCH }}
+          branch: ${{ env.PR_BRANCH_PREFIX }}${{ matrix.skill }}
           delete-branch: true
-          commit-message: ${{ steps.federate.outputs.title || 'Refresh federated skills' }}
-          title: ${{ steps.federate.outputs.title || 'Refresh federated skills' }}
+          commit-message: ${{ steps.federate.outputs.title || format('Refresh federated skill `{0}`', matrix.skill) }}
+          title: ${{ steps.federate.outputs.title || format('Refresh federated skill `{0}`', matrix.skill) }}
           body: |
             ${{ steps.federate.outputs.body }}
 
@@ -128,17 +165,18 @@ jobs:
       # to read as a success rather than as a job that quietly did nothing.
       - name: Report outcome
         env:
+          SKILL: ${{ matrix.skill }}
           CHANGED: ${{ steps.changes.outputs.changed }}
           TITLE: ${{ steps.federate.outputs.title }}
           PR_URL: ${{ steps.pr.outputs.pull-request-url }}
           PR_OPERATION: ${{ steps.pr.outputs.pull-request-operation }}
         run: |
           if [ "$CHANGED" != "true" ]; then
-            message="Every federated skill already matches its source repo at its tracked branch. No pull request needed."
+            message="\`$SKILL\` already matches its source repo at its tracked branch. No pull request needed."
           elif [ -n "$PR_URL" ]; then
-            message="Pull request ${PR_OPERATION:-ready}: ${TITLE:-Refresh federated skills} ($PR_URL)"
+            message="Pull request ${PR_OPERATION:-ready}: ${TITLE:-Refresh federated skill \`$SKILL\`} ($PR_URL)"
           else
-            message="Changes were detected but no pull request was opened, because none of them fall under the paths this workflow commits."
+            message="Changes were detected for \`$SKILL\` but no pull request was opened, because none of them fall under the paths this workflow commits."
           fi
           echo "$message"
           echo "$message" >> "$GITHUB_STEP_SUMMARY"

@@ -172,6 +172,6 @@ URLs on a schedule to catch link rot.
 Merge the change to your tracked branch (or push a new release branch, if you
 track `release/*`) and the catalog picks it up on its own.
 The `federate-skills` workflow runs nightly (and on demand), re-vendors any
-skill whose upstream folder contents changed, and opens a pull request titled
-`Bump <skill> to <short commit>`. A night with no upstream change produces no
+skill whose upstream folder contents changed, and opens one pull request per
+changed skill, titled `Bump <skill> to <short commit>`. A night with no upstream change produces no
 pull request, so the only ones you see are real bumps.

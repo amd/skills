@@ -147,9 +147,9 @@ from it.
 The `federate-skills` workflow runs nightly and on demand. It clones each
 declared repo, compares a content hash of the upstream skill folder against the
 hash recorded in the vendored copy's `.federated.json`, and re-vendors only the
-skills that actually changed. When something did change it regenerates the agent
-manifests and opens a pull request titled `Bump <skill> to <short commit>`,
-where the usual `validate` checks apply as they would to any other pull
+skills that actually changed. For each skill that did change it regenerates the
+agent manifests and opens a separate pull request titled
+`Bump <skill> to <short commit>`, where the usual `validate` checks apply as they would to any other pull
 request. A quiet night produces no diff and therefore no pull request, so every
 bump that lands is a reviewed commit.
 
