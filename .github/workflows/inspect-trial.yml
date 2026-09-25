@@ -372,6 +372,30 @@ jobs:
             --min-accuracy 0 \
             --output routing-legacy-again.json || status=1
           echo "::endgroup::"
+
+          # `continue-on-error` above keeps one bad leg from discarding the
+          # other two, but it also means GitHub marks this step green whatever
+          # happened, and a leg that produced no report at all is then visible
+          # only to whoever reads the log. That is how a run went green having
+          # never measured the sandboxed leg: it died on a TypeError, printed
+          # FAILED, and nothing downstream noticed the missing file.
+          #
+          # So say it where the run page shows it. Still not fatal -- this is a
+          # trial, and a routing regression is the finding rather than a build
+          # break -- but no longer silent.
+          missing=""
+          for engine in legacy claude-code claude-code-no-sandbox; do
+            [ -s "routing-$engine.json" ] || missing="$missing $engine"
+          done
+          if [ -n "$missing" ] || [ "$status" -ne 0 ]; then
+            {
+              echo "### :warning: routing did not measure every leg"
+              echo
+              [ -n "$missing" ] && echo "No report produced for:\`$missing\`"
+              echo
+              echo "Any leg-to-leg comparison from this run is incomplete."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           exit $status
 
       # One invocation per skill: running six in one command meant the last one
