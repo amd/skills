@@ -1,0 +1,119 @@
+name: AMD Skills Checks
+
+# Runs skillscope (https://github.com/amd/skillscope) with the same graders and
+# bars as its reusable workflow, but installs the harness as a Python package
+# instead of calling a reusable workflow or a third-party action. The only
+# actions used are GitHub's own.
+#
+# Copy to .github/workflows/amd-skills-evals.yml, then fill in the skill paths
+# and the skill names in both matrices.
+
+on:
+  pull_request:
+    paths:
+      - "path/to/your/skills/**"
+      - ".github/workflows/amd-skills-evals.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The harness version. Bump this one line to upgrade.
+  SKILLSCOPE: git+https://github.com/amd/skillscope@v0.1.3
+  SKILLS_DIR: path/to/your/skills/*
+
+jobs:
+  structural:
+    name: Structural Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "$SKILLSCOPE"
+      - run: skillscope structural --skills-dir "$SKILLS_DIR"
+
+  routing:
+    name: Routing Tests (${{ matrix.skill }})
+    needs: structural
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        skill: [your-skill-name]
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: pip install "$SKILLSCOPE"
+      - run: >-
+          skillscope routing
+          --skills-dir "$SKILLS_DIR"
+          --routing-room "${{ matrix.skill }}"
+          --min-accuracy 1
+          --output routing-report.json
+          --keep-logs routing-logs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: routing-${{ matrix.skill }}
+          path: |
+            routing-report.json
+            routing-logs/
+          if-no-files-found: warn
+
+  behavioral:
+    name: Behavioral Tests (${{ matrix.skill }})
+    needs: structural
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        skill: [your-skill-name]
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: pip install "$SKILLSCOPE"
+      - run: >-
+          skillscope behavioral
+          --skills-dir "$SKILLS_DIR"
+          --skill "${{ matrix.skill }}"
+          --output behavioral-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: behavioral-${{ matrix.skill }}
+          path: behavioral-report.json
+          if-no-files-found: warn
+
+  # The one check to mark required in branch protection.
+  results:
+    name: Results
+    needs: [structural, routing, behavioral]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: |
+          echo "::error::structural=${{ needs.structural.result }} routing=${{ needs.routing.result }} behavioral=${{ needs.behavioral.result }}"
+          exit 1
+      - run: echo "Every step passed."
