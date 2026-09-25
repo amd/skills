@@ -38,11 +38,13 @@ Rule 2 -- a new federated skill needs its product repo approved.
     declares a skill no entry covers is asking the catalog to vendor code
     nobody has vouched for.
 
-    Only skills the pull request *adds* are held to this. A skill already
-    declared on the base branch predates the registry and stays as it is, so
-    the rule cannot retroactively break the catalog. "Already declared" is
-    keyed on the (repo, local skill name) pair: moving a skill's upstream path
-    is maintenance, but pointing an existing name at a different repo is a new
+    Only skills the pull request *adds to the catalog* are held to this. A
+    skill whose folder already exists under `skills/` on the base branch is
+    part of the catalog already, whether or not it is declared, so starting to
+    federate it from upstream does not need a new approval and the rule cannot
+    retroactively break the catalog. The one exception is keyed on the (repo,
+    local skill name) pair of a skill that is already declared: moving its
+    upstream path is maintenance, but pointing it at a different repo is a new
     approval question.
 
     The registry is read from the base branch too. Reading the pull request's
@@ -197,15 +199,33 @@ def declared_skills(sources: list[fed.Source]) -> dict[tuple[str, str], dict]:
     return declared
 
 
+def catalog_skills(base_dir: Path) -> set[str]:
+    """The skill folders the base branch ships under `skills/`."""
+    skills_dir = base_dir / SKILLS_PREFIX
+    if not skills_dir.is_dir():
+        return set()
+    return {p.name for p in skills_dir.iterdir() if (p / "SKILL.md").is_file()}
+
+
 def new_skills_needing_approval(
     base: dict[tuple[str, str], dict],
     head: dict[tuple[str, str], dict],
     approvals: set[tuple[str, str]],
+    catalog: set[str],
 ) -> list[dict]:
+    declared_names = {name for _, name in base}
+
+    def already_in_catalog(key: tuple[str, str]) -> bool:
+        if key in base:
+            return True
+        name = key[1]
+        return name in catalog and name not in declared_names
+
     return [
         entry
         for key, entry in sorted(head.items())
-        if key not in base and not is_approved(entry["repo"], entry["path"], approvals)
+        if not already_in_catalog(key)
+        and not is_approved(entry["repo"], entry["path"], approvals)
     ]
 
 
@@ -293,6 +313,7 @@ def build_report(args: argparse.Namespace) -> dict:
         base,
         head,
         load_approvals(base_dir / ".github" / "skill_owners.json"),
+        catalog_skills(base_dir),
     )
     return report
 

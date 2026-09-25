@@ -2,8 +2,9 @@
   "source": "amd-agi-magpie",
   "repo": "AMD-AGI/Magpie",
   "ref": "main",
-  "commit": "12896a49a731ad72c791b7a23abcef7a0d6c4487",
+  "commit": "cc85f5d6605220b6cbff17b8e6645f763c646c29",
   "path": "skills/magpie",
   "license": "MIT",
-  "imported_at": "2026-08-11T21:37:43Z"
+  "content_hash": "046278e697403c0d0092be0e27514c8b397597217bce55cd8934429c4b0ebd70",
+  "imported_at": "2026-09-25T15:50:10Z"
 }
