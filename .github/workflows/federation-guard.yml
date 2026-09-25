@@ -13,12 +13,12 @@ name: federation-guard
 #
 # 2. A pull request that federates a *new* skill from a product repo missing
 #    from `.github/skill_owners.json` fails this check and gets a comment
-#    pointing at the approval issue. Skills already declared on the base
-#    branch are left alone, so the gate applies to what is being added rather
-#    than to what is already shipping.
+#    pointing at the approval issue. Skills already in the catalog on the base
+#    branch, declared or not, are left alone, so the gate applies to what is
+#    being added rather than to what is already shipping.
 #
 # Both rules read the base branch: whether a skill is vendored, which skills
-# are already declared, and which repos are approved all come from `main`, not
+# are already in the catalog, and which repos are approved all come from `main`, not
 # from the pull request. Otherwise a pull request could approve itself.
 #
 # `pull_request_target` rather than `pull_request`, because a fork's
