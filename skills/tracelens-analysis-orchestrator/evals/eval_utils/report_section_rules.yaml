@@ -1,0 +1,71 @@
+###############################################################################
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+###############################################################################
+
+base_section_rules:
+  - section: "Kernel Fusion"
+    eval_index_regex: "^workflow_eval_(13|16)$"
+  - section: "Kernel Fusion"
+    issue_summary_regex: "(?i)kernel\\s*fusion|fusion\\s+metrics|fusion\\s+insights"
+  - section: "Reasoning"
+    eval_index_regex: "^quality_eval_(2|3)$"
+  - section: "Reasoning"
+    issue_summary_regex: "(?i)content\\s+alignment|title\\s+alignment|reasoning"
+
+standalone_section_rules:
+  - section: "Executive Summary"
+    eval_index_regex: "^workflow_eval_10$"
+  - section: "Executive Summary"
+    issue_summary_regex: "(?i)executive\\s+summary"
+  - section: "Compute Kernel Optimizations"
+    eval_index_regex: "^quality_eval_(2|3)$"
+  - section: "Compute Kernel Optimizations"
+    eval_index_regex: "^workflow_eval_11$"
+  - section: "Compute Kernel Optimizations"
+    issue_summary_regex: "(?i)compute\\s+issue|compute\\s+kernel|issue\\s+template"
+  - section: "Kernel Fusion Opportunities"
+    eval_index_regex: "^workflow_eval_(13|16)$"
+  - section: "Kernel Fusion Opportunities"
+    issue_summary_regex: "(?i)kernel\\s*fusion|fusion\\s+metrics|fusion\\s+insights"
+  - section: "System-Level Optimizations"
+    eval_index_regex: "^workflow_eval_6$"
+  - section: "System-Level Optimizations"
+    issue_summary_regex: "(?i)cpu_idle|system[-\\s]level|categorical\\s+findings"
+  - section: "Detailed Analysis"
+    eval_index_regex: "^workflow_eval_(9|12)$"
+  - section: "Detailed Analysis"
+    issue_summary_regex: "(?i)impact_estimates|impact\\s+estimate"
+  - section: "Detailed Analysis"
+    issue_summary_regex: "(?i)detailed\\s+analysis|five-label|anchors?"
+  - section: "Appendix"
+    eval_index_regex: "^workflow_eval_13$"
+  - section: "Appendix"
+    issue_summary_regex: "(?i)hardware\\s+reference|model\\s+identification|model\\s+info"
+
+failure_mode_rules:
+  - match_regex: "(?i)not\\s+quantifiable|impact\\s+estimate"
+    likely_cause: "Impact estimate data exists but is not consistently rendered into final cards."
+    suggested_fix: "Verify the sub-agent emitted impact markers with correct low/high values from category_findings[]."
+  - match_regex: "(?i)efficiency|alignment"
+    likely_cause: "Generated reasoning drifts from metrics JSON or reference wording."
+    suggested_fix: "Add a final consistency pass that checks efficiency, shapes, and gains against metrics artifacts."
+  - match_regex: "(?i)kernel\\s*fusion"
+    likely_cause: "Fusion findings/metrics are not always propagated to report tables."
+    suggested_fix: "Render Kernel Fusion Insights from deterministic metrics outputs and validate required tables before publish."
+  - match_regex: "(?i)model\\s+info|model\\s+identification|appendix"
+    likely_cause: "Metadata fallback is missing or late in the pipeline."
+    suggested_fix: "Always write a fallback model metadata skeleton during prepare and enforce appendix fill checks."
+  - match_regex: "(?i)csv\\s+alignment|SDPA_fwd|SDPA_bwd|unified_perf_summary"
+    likely_cause: "Trace-dependent CSV presence and schema differ from fixed expectations."
+    suggested_fix: "Make CSV checks trace-aware and guarantee stable summary column emission."
+  - match_regex: "(?i)cpu_idle|findings\\.md|subagent"
+    likely_cause: "Parallel subagent execution is occasionally flaky under load."
+    suggested_fix: "Add retry-on-missing-findings and/or prioritize system subagents before compute fan-out."
+
+defaults:
+  base_section: "Others"
+  standalone_section: "Detailed Analysis"
+  likely_cause: "Pipeline or LLM variability caused this failure mode."
+  suggested_fix: "Add deterministic post-generation validation and targeted retries for missing artifacts."
