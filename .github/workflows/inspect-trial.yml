@@ -282,6 +282,36 @@ jobs:
           assert engine_routing.SANDBOX_BUDGET_FACTOR == 2, (
               "older skillscope: the routing budget predates its recalibration"
           )
+          # The confound this run exists to remove. The sandboxed legs reach
+          # the agent through inspect_swe, whose effort argument defaults to
+          # the model's own rather than to the one every other leg is given --
+          # so the last comparison had one leg thinking as hard as it was told
+          # and another thinking as hard as it liked.
+          import inspect as _pyi
+          from skillscope.engine import verify as engine_verify
+          assert "effort" in _pyi.signature(engine_verify.build_task).parameters, (
+              "older skillscope: the sandboxed behavioral leg drops --effort"
+          )
+          assert "effort=" in _pyi.getsource(engine_routing._solver), (
+              "older skillscope: the sandboxed routing leg drops --effort"
+          )
+          # Counting, not grading: a bridged turn arrives on the sample and in
+          # the transcript as two objects with different message ids, and
+          # keying on those counted every call twice. Checked by behaviour --
+          # there is no version to read, and the column is the whole point of
+          # the run.
+          class _C:
+              def __init__(s, i): s.id, s.function, s.arguments = i, "Bash", {}
+          class _M:
+              def __init__(s, i, c): s.id, s.role, s.tool_calls = i, "assistant", c
+          class _E:
+              def __init__(s, m): s.output = type("O", (), {"message": m})()
+          class _S:
+              def __init__(s, m, e): s.messages, s.events = m, e
+          _dup = _S([_M("adopted", [_C("toolu_1")])], [_E(_M("transcript", [_C("toolu_1")]))])
+          assert len(list(engine_routing._tool_calls(_dup))) == 1, (
+              "older skillscope: one bridged turn is still counted twice"
+          )
           print("harness is current")
           CHECK
 
