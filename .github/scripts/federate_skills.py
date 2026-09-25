@@ -75,8 +75,12 @@ catalog are left untouched.
 (including a ready-made pull request title and body) for the calling
 workflow to consume.
 
+`--list-skills` prints the declared local skill names (after `--only`) as a
+JSON array without cloning anything.
+
 The companion GitHub Actions workflow `federate-skills` runs this script
-nightly and on demand, and opens a pull request with the result.
+nightly and on demand: it lists the skills with `--list-skills`, then runs
+once per skill with `--only`, so each bumped skill gets its own pull request.
 """
 
 from __future__ import annotations
@@ -1054,6 +1058,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--list-skills",
+        action="store_true",
+        help=(
+            "Print the local names of the declared skills (after --only) as a "
+            "JSON array on stdout, without cloning anything. The workflow uses "
+            "it to fan out one job, and one pull request, per skill."
+        ),
+    )
+    parser.add_argument(
         "--summary-json",
         type=Path,
         metavar="PATH",
@@ -1093,6 +1106,28 @@ def main(argv: list[str] | None = None) -> int:
         for source in sources:
             source.skills = [s for s in source.skills if s.dest_name in only]
         sources = [source for source in sources if source.skills]
+
+    if args.list_skills:
+        names: list[str] = []
+        for source in sources:
+            for spec in source.skills:
+                if spec.dest_name in names:
+                    raise ValueError(
+                        f"Skill name collision: {spec.dest_name!r} is declared "
+                        f"more than once in {args.catalog}."
+                    )
+                names.append(spec.dest_name)
+        # Each per-skill run passes --only, which skips the undeclared report,
+        # so this is the one place it still gets made. It goes to stderr to
+        # keep stdout a single JSON document.
+        if not only:
+            undeclared: list[str] = []
+            report_undeclared(set(names), find_federated_skills(), undeclared)
+            for line in undeclared:
+                print(line, file=sys.stderr)
+        print(json.dumps(names))
+        return 0
+
     log: list[str] = []
     declared: set[str] = set()
     all_results: list[ImportResult] = []

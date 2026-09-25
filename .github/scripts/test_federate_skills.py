@@ -24,11 +24,14 @@ so they are guarded here:
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
@@ -511,6 +514,64 @@ class TestPullRequestSummary(unittest.TestCase):
     def test_several_bumps_share_one_title(self):
         two = [self.result("a", "1111111"), self.result("b", "2222222")]
         self.assertEqual(fed.build_summary(two)["title"], "Bump 2 federated skills")
+
+
+class TestSkillFanOut(unittest.TestCase):
+    """`--list-skills` is what the workflow fans out over, one pull request per
+    skill, so its stdout has to be exactly the JSON array of local names."""
+
+    def list_skills(self, payload: dict, *extra: str, vendored: dict[str, dict] | None = None):
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = Path(tmp) / "federation.json"
+            catalog.write_text(json.dumps(payload), encoding="utf-8")
+            skills_dir = Path(tmp) / "skills"
+            for name, marker in (vendored or {}).items():
+                write_skill(skills_dir / name, {fed.MARKER_FILENAME: json.dumps(marker)})
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.object(fed, "SKILLS_DIR", skills_dir), \
+                    redirect_stdout(out), redirect_stderr(err):
+                code = fed.main(["--catalog", str(catalog), "--list-skills", *extra])
+        self.assertEqual(code, 0)
+        return json.loads(out.getvalue()), err.getvalue()
+
+    TWO_SOURCES = {
+        "sources": [
+            {"repo": "AMD-Org/One", "skills": [{"path": "skills/a", "as": "one-a"}]},
+            {
+                "repo": "AMD-Org/Two",
+                "skills": [{"path": "skills/b"}, {"path": "x/c", "as": "two-c"}],
+            },
+        ]
+    }
+
+    def test_lists_every_skill_by_its_local_name_in_declaration_order(self):
+        names, _ = self.list_skills(self.TWO_SOURCES)
+        self.assertEqual(names, ["one-a", "b", "two-c"])
+
+    def test_only_narrows_the_list(self):
+        names, _ = self.list_skills(self.TWO_SOURCES, "--only", "two-c")
+        self.assertEqual(names, ["two-c"])
+
+    def test_only_rejects_unknown_names(self):
+        with self.assertRaises(ValueError):
+            self.list_skills(self.TWO_SOURCES, "--only", "nope")
+
+    def test_rejects_a_name_declared_twice(self):
+        payload = {
+            "sources": [
+                {"repo": "AMD-Org/One", "skills": [{"path": "skills/a", "as": "dup"}]},
+                {"repo": "AMD-Org/Two", "skills": [{"path": "skills/b", "as": "dup"}]},
+            ]
+        }
+        with self.assertRaises(ValueError):
+            self.list_skills(payload)
+
+    def test_reports_undeclared_vendored_skills_on_stderr_only(self):
+        names, err = self.list_skills(
+            self.TWO_SOURCES, vendored={"gone": {"repo": "AMD-Org/Old"}}
+        )
+        self.assertEqual(names, ["one-a", "b", "two-c"])
+        self.assertIn("skills/gone", err)
 
 
 if __name__ == "__main__":
