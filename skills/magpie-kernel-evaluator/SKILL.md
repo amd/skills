@@ -28,8 +28,19 @@ Use a YAML config for reproducible or multi-step work. Use inline CLI arguments 
 
 ## Preflight
 
-1. Locate the Magpie repository or installed package.
-2. Check the local interface before constructing commands:
+Installing this skill does not install the Magpie application (`magpie-eval`). For a preparation-only request, read the supplied fixtures and [reference.md](reference.md), write the requested plan or configuration, and identify commands that remain unverified. Do not install packages or execute a workload when the user forbids it; a missing Magpie installation does not prevent preparing a plan.
+
+Before executing a Magpie workload:
+
+1. Check `magpie --help` in the intended Python environment (Python 3.10+). If the command is missing, try `python -m Magpie --help` in that same environment; a working module entry point can be used instead of the CLI. `No module named Magpie` means the application is not installed in that environment. For errors inside an installed Magpie package, diagnose the reported import or dependency failure instead.
+2. If Magpie is not installed, install it in the intended environment before continuing:
+
+   ```bash
+   python -m pip install git+https://github.com/AMD-AGI/Magpie.git
+   ```
+
+   For an existing Magpie source checkout, use `python -m pip install -e /path/to/Magpie` instead. The installed skill folder and a testcase workspace are not Magpie source checkouts. Re-run `magpie --help` or `python -m Magpie --help` to verify the installation; if it fails, report the error before attempting a workload.
+3. Inspect the installed interface for the selected workflow (substitute `python -m Magpie` if using the module entry point):
 
    ```bash
    magpie --help
@@ -39,11 +50,9 @@ Use a YAML config for reproducible or multi-step work. Use inline CLI arguments 
    magpie --gpu-info
    ```
 
-3. Check required tools, model access, GPU visibility, writable output space, and container or Ray access as applicable.
-4. Read the repository compatibility matrix before making version claims. Treat ROCm or hardware not listed there as unverified until tested.
-5. Record the exact config, model revision, image, environment variables, GPU allocation, and Magpie commit for benchmark comparisons.
-
-Run from the Magpie repository root, install with `pip install -e .`, or use `python -m Magpie` when the `magpie` entry point is unavailable.
+4. Check required tools, model access, GPU visibility, writable output space, and container or Ray access as applicable. Installing the Python package does not install ROCm/CUDA, profilers, or model weights.
+5. Read the repository compatibility matrix before making version claims. Treat ROCm or hardware not listed there as unverified until tested.
+6. Record the exact config, model revision, image, environment variables, GPU allocation, and Magpie commit for benchmark comparisons.
 
 ## Analyze a kernel
 
