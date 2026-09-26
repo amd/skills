@@ -3,17 +3,18 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
 import signal
+import ssl
 import time
 import urllib.error
 import urllib.request
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 TERMINAL_PIPELINE_STATES = {
     "passed",
@@ -82,79 +83,12 @@ SAFE_PIPELINE_STATES = TERMINAL_PIPELINE_STATES | {
     "unknown",
 }
 
-UUID_RE = re.compile(
-    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-"
-    r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
-)
-
-
 def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
 
 def log(message: str) -> None:
     print(f"[orchestrai] {message}", flush=True)
-
-
-def _safe_private_summary_url(raw: str) -> str:
-    """Validate a private HTTPS link before writing it to a job summary."""
-    raw = raw.strip()
-    if (
-        env("PUBLISH_REPORT_LINK").lower() not in {"1", "true", "yes"}
-        or not raw
-        or len(raw) > 2048
-        or any(character.isspace() or character in '<>"' for character in raw)
-    ):
-        return ""
-    try:
-        parsed = urlsplit(raw)
-    except ValueError:
-        return ""
-    if (
-        parsed.scheme != "https"
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-    ):
-        return ""
-    return raw
-
-
-def reportportal_url_for_summary(live: dict) -> str:
-    """Return a safe ReportPortal link only for a private repository summary."""
-    raw = str(live.get("rp_url") or "").strip()
-    return _safe_private_summary_url(raw)
-
-
-def portal_run_url_for_summary(base_url: str, run_id: str) -> str:
-    """Build the authenticated Portal run route for a private job summary."""
-    base_url = _safe_private_summary_url(base_url)
-    if not base_url or not UUID_RE.fullmatch(run_id):
-        return ""
-    try:
-        parsed = urlsplit(base_url)
-    except ValueError:
-        return ""
-    # Only publish an origin. A path in the API secret could itself be private,
-    # and it would not be a valid base for the Portal's browser route anyway.
-    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
-        return ""
-    return f"{base_url.rstrip('/')}/#/runs/{run_id}"
-
-
-def secret_mask_resistant_markdown_target(url: str) -> str:
-    """Encode the scheme delimiter without changing the rendered link target.
-
-    GitHub masks an Actions secret wherever its exact value occurs, including
-    inside GITHUB_STEP_SUMMARY. The Portal API origin is configured as a secret,
-    so an ordinary Markdown URL is rewritten to ``***`` and becomes a broken
-    relative link. CommonMark decodes the numeric entity in the generated href,
-    while the raw summary never contains the exact secret value.
-
-    Callers must pass only a URL already accepted by
-    :func:`portal_run_url_for_summary`.
-    """
-    return url.replace(":", "&#58;", 1)
 
 
 def require_linux_provisioning(plan: dict) -> None:
@@ -381,6 +315,8 @@ def classify_controller_exception(value: BaseException) -> str:
         r"inspect the Portal logs for details$",
         r"^OrchestrAI Portal was unreachable$",
         r"^OrchestrAI Portal request timed out$",
+        r"^OrchestrAI Portal response could not be read$",
+        r"^The OrchestrAI Portal returned an invalid response\.$",
         r"^could not resolve exact stock OS images: OrchestrAI Portal .+$",
         r"^could not resolve stock OS images: no images were returned$",
         r"^could not resolve generic '(?:ubuntu|windows)' to a compatible image$",
@@ -482,7 +418,14 @@ class PortalClient:
         self.token = ""
         self.space_id = ""
 
-    def request(self, method: str, path: str, payload: dict | None = None) -> Any:
+    def request(
+        self,
+        method: str,
+        path: str,
+        payload: dict | None = None,
+        *,
+        timeout_seconds: int = 30,
+    ) -> Any:
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         headers = {"Accept": "application/json"}
         if data is not None:
@@ -495,12 +438,16 @@ class PortalClient:
             f"{self.base_url}{path}", data=data, headers=headers, method=method
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
                 body = response.read().decode("utf-8")
+            return json.loads(body) if body else {}
         except urllib.error.HTTPError as exc:
             # Consume the response so the connection can be reused, but never
             # copy a server-owned body into public GitHub logs or artifacts.
-            exc.read(2000)
+            try:
+                exc.read(2000)
+            except (OSError, http.client.HTTPException):
+                pass
             raise RuntimeError(
                 f"OrchestrAI Portal request failed with HTTP {exc.code}; "
                 "inspect the Portal logs for details"
@@ -509,11 +456,20 @@ class PortalClient:
             raise RuntimeError("OrchestrAI Portal was unreachable") from exc
         except TimeoutError as exc:
             raise RuntimeError("OrchestrAI Portal request timed out") from exc
-        return json.loads(body) if body else {}
+        except (OSError, http.client.HTTPException, ssl.SSLError) as exc:
+            raise RuntimeError("OrchestrAI Portal response could not be read") from exc
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                "The OrchestrAI Portal returned an invalid response."
+            ) from exc
 
     def cancel(self, run_id: str) -> None:
         try:
-            self.request("POST", f"/api/runs/{run_id}/cancel", {})
+            # GitHub gives a cancelled step only a short grace period before
+            # killing the process tree. Keep cleanup inside that window.
+            self.request(
+                "POST", f"/api/runs/{run_id}/cancel", {}, timeout_seconds=5
+            )
             log("cancellation requested for the active run")
         except Exception:  # best effort while the process is being interrupted
             log("warning: could not cancel the active run")
@@ -1029,8 +985,6 @@ def summary(
     pipeline_status: str = "",
     tests_status: str = "",
     results: dict | None = None,
-    portal_url: str = "",
-    report_url: str = "",
 ) -> None:
     path = env("GITHUB_STEP_SUMMARY")
     if not path:
@@ -1041,15 +995,6 @@ def summary(
         if pipeline_status:
             handle.write(f"- Pipeline: `{pipeline_status or 'unknown'}`\n")
             handle.write(f"- Tests: `{tests_status or 'unknown'}`\n")
-        if portal_url:
-            portal_target = secret_mask_resistant_markdown_target(portal_url)
-            handle.write(
-                f"- Pipeline logs: [View in OrchestrAI Portal](<{portal_target}>)\n"
-            )
-        if report_url:
-            handle.write(
-                f"- Test results: [View in ReportPortal](<{report_url}>)\n"
-            )
         failure_summary = ((results or {}).get("run") or {}).get(
             "failure_summary"
         ) or []
@@ -1122,6 +1067,8 @@ def main() -> int:
 
     def stop(_signum: int, _frame: object) -> None:
         nonlocal interrupted
+        if interrupted:
+            raise KeyboardInterrupt
         interrupted = True
         if run_id:
             client.cancel(run_id)
@@ -1244,8 +1191,6 @@ def main() -> int:
             pipeline_status=pipeline_status,
             tests_status=tests_status,
             results=results,
-            portal_url=portal_run_url_for_summary(client.base_url, run_id),
-            report_url=reportportal_url_for_summary(latest_live),
         )
         write_output("pipeline_status", pipeline_status)
         write_output("tests_status", tests_status)
@@ -1295,8 +1240,6 @@ def main() -> int:
                 pipeline_status="error",
                 tests_status="unknown",
                 results=results,
-                portal_url=portal_run_url_for_summary(client.base_url, run_id),
-                report_url=reportportal_url_for_summary(latest_live or state),
             )
         return 1
 

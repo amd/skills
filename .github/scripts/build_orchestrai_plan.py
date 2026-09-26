@@ -181,11 +181,11 @@ def build_plan(args: argparse.Namespace) -> dict:
             "run_settings.acquire_timeout"
         )
     machine_tags = config["device_to_tags"]["strix_halo"]
-    skillscope_sha = str(config.get("skillscope_sha") or "")
+    skillscope_sha = os.environ.get("SKILLSCOPE_SHA", "").strip()
     if str(skills_source.get("repository") or "") != EXPECTED_SKILLS_SOURCE:
         raise SystemExit(f"skills_source.repository must be {EXPECTED_SKILLS_SOURCE}")
     if not SHA_RE.fullmatch(skillscope_sha):
-        raise SystemExit("skillscope_sha must be a full 40-character commit SHA")
+        raise SystemExit("SKILLSCOPE_SHA must be a full 40-character commit SHA")
     try:
         matrix = json.loads(args.matrix_json)
     except json.JSONDecodeError as exc:
@@ -212,9 +212,8 @@ def build_plan(args: argparse.Namespace) -> dict:
         ):
             variables = {
                 "SKILLS_REPO": str(skills_source.get("repository") or ""),
-                # The workflow resolves the current public branch tip just
-                # before building this plan. The adapter uses that resolution
-                # only to keep the remote checkout stable while the run starts.
+                # PRs use the immutable head SHA associated with the check run;
+                # non-PR events use the triggering commit of the selected ref.
                 "SKILLS_REF": args.ref,
                 "SKILLS_SHA": args.sha.lower(),
                 "SKILLSCOPE_SHA": skillscope_sha,
