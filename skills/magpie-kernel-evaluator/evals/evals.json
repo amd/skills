@@ -6,7 +6,8 @@
       "prompt": "Use Magpie to prepare an analyze run for the existing examples/simple_hip_test/analyze_default.yaml fixture. Inspect the fixture and write analyze_plan.md with the exact command and an explanation of what the testcase validates. Do not compile or execute the kernel, install dependencies, or change the fixture, and do not claim that correctness or performance was measured.",
       "workspace": "evals/files/analyze-simple-hip",
       "expected_behavior": [
-        "Use Magpie analyze with examples/simple_hip_test/analyze_default.yaml and explain that the testcase exit code is what validates vector-add correctness"
+        "Write analyze_plan.md containing the proposed, unexecuted command magpie analyze --kernel-config examples/simple_hip_test/analyze_default.yaml (optionally with --no-perf). Documenting the command satisfies this preparation-only expectation even when Magpie is not installed.",
+        "Explain that the configured ./vector_add testcase checks vector-add output and returns exit code 0 on success or a nonzero exit code on a mismatch; this describes future validation, not an observed correctness result."
       ],
       "unexpected_behavior": [
         "Compile or execute the HIP kernel, install dependencies, or claim measured correctness or performance results"
