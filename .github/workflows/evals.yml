@@ -51,8 +51,10 @@ on:
         default: both
 
 concurrency:
-  group: evals-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Unrelated label events are no-ops and use a unique group, so they cannot
+  # cancel or replace an in-flight graded run for the same pull request.
+  group: evals-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'labeled' && github.event.label.name != 'enable_orchestrai_ci' && github.run_id || 'graded' }}
+  cancel-in-progress: ${{ github.event.action != 'labeled' || github.event.label.name == 'enable_orchestrai_ci' }}
 
 permissions:
   contents: read
@@ -65,7 +67,8 @@ env:
 
 jobs:
   discover:
-    name: Check dataset structure and select runs
+    name: ${{ github.event.action == 'labeled' && github.event.label.name != 'enable_orchestrai_ci' && 'Ignore unrelated label (discover)' || 'Check dataset structure and select runs' }}
+    if: github.event.action != 'labeled' || github.event.label.name == 'enable_orchestrai_ci'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -138,7 +141,7 @@ jobs:
 
           args += [
               "--routing-room", os.environ["ROUTING_ROOM_VALUE"],
-              "--infra-paths", ".github/workflows/evals.yml,.github/orchestrai-config.json,.github/scripts/build_orchestrai_plan.py,.github/scripts/orchestrai_report.py,.github/scripts/orchestrai_run.py,.github/scripts/orchestrai_verdict.py,.github/scripts/test_orchestrai_evals.py",
+              "--infra-paths", ".github/workflows/evals.yml,.github/orchestrai-config.json,.github/scripts/build_orchestrai_plan.py,.github/scripts/orchestrai_run.py,.github/scripts/orchestrai_verdict.py",
               "--behavior-runner", '["orchestrai"]',
               "--behavior-os", "Linux,Windows",
               "--scoped-runner", '["self-hosted","Linux","X64"]',
@@ -239,7 +242,8 @@ jobs:
               output.write("\n".join(lines) + "\n")
 
   external-references:
-    name: External references
+    name: ${{ github.event.action == 'labeled' && github.event.label.name != 'enable_orchestrai_ci' && 'Ignore unrelated label (references)' || 'External references' }}
+    if: github.event.action != 'labeled' || github.event.label.name == 'enable_orchestrai_ci'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -333,7 +337,9 @@ jobs:
     needs: discover
     if: >-
       needs.discover.outputs.default_any == 'true' &&
-      (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci'))
+      (github.event_name != 'pull_request' ||
+       (contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci') &&
+        github.event.pull_request.head.repo.full_name == github.repository))
     runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
@@ -345,27 +351,13 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
-      - name: Resolve amd/skills branch tip
-        id: skills-source
-        env:
-          TARGET_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
-        run: |
-          set -euo pipefail
-          read -r branch_tip_sha resolved_ref < <(
-            git ls-remote --exit-code --heads \
-              https://github.com/amd/skills.git "refs/heads/$TARGET_REF"
-          )
-          if [[ ! "$branch_tip_sha" =~ ^[0-9a-fA-F]{40}$ ]] || \
-             [[ "$resolved_ref" != "refs/heads/$TARGET_REF" ]]; then
-            echo "Could not resolve the selected amd/skills branch tip." >&2
-            exit 1
-          fi
-          echo "sha=${branch_tip_sha,,}" >> "$GITHUB_OUTPUT"
       - name: Build OrchestrAI plan
         env:
           MATRIX_JSON: ${{ matrix.matrix_json }}
           TARGET_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
-          TARGET_SHA: ${{ steps.skills-source.outputs.sha }}
+          # A PR must test the immutable commit GitHub associated with this
+          # check run. Non-PR events use the selected ref's triggering commit.
+          TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           EXTENDED_FLAG: ${{ needs.discover.outputs.extended }}
           # Fleet selectors are private infrastructure metadata.  Store this
           # JSON as a secret so Actions masks the value in the step's automatic
@@ -400,12 +392,7 @@ jobs:
           ORCHESTRAI_USER: ${{ secrets.ORCHESTRAI_USER }}
           ORCHESTRAI_PASSWORD: ${{ secrets.ORCHESTRAI_PASSWORD }}
           ORCHESTRAI_SPACE: ${{ secrets.ORCHESTRAI_SPACE }}
-          # Match Playbooks by linking the authenticated Portal run and
-          # ReportPortal launch from the job summary. The controller encodes
-          # the Portal Markdown target so GitHub cannot replace the secret API
-          # origin with ***. Public forks suppress both private URLs.
-          PUBLISH_REPORT_LINK: ${{ github.event.repository.private }}
-        run: python3 .github/scripts/orchestrai_run.py
+        run: exec python3 .github/scripts/orchestrai_run.py
       - name: Upload OrchestrAI result manifest
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -422,10 +409,12 @@ jobs:
     name: Behavioral (${{ matrix.skill }} on ${{ matrix.os }})
     needs: [discover, orchestrai-behavioral]
     if: >-
-      always() &&
+      !cancelled() &&
       needs.discover.result == 'success' &&
       needs.discover.outputs.default_any == 'true' &&
-      (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci'))
+      (github.event_name != 'pull_request' ||
+       (contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci') &&
+        github.event.pull_request.head.repo.full_name == github.repository))
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -515,9 +504,11 @@ jobs:
           "$EXTENDED_FLAG"
 
   results:
-    name: results
+    name: ${{ github.event.action == 'labeled' && github.event.label.name != 'enable_orchestrai_ci' && 'Ignore unrelated label (results)' || 'evals / results' }}
     needs: [discover, routing, orchestrai-behavioral, orchestrai-verdict, behavior-scoped]
-    if: always()
+    if: >-
+      always() &&
+      (github.event.action != 'labeled' || github.event.label.name == 'enable_orchestrai_ci')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -529,7 +520,9 @@ jobs:
       - name: Download per-skill OrchestrAI results
         if: >-
           needs.discover.outputs.default_any == 'true' &&
-          (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci'))
+          (github.event_name != 'pull_request' ||
+           (contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci') &&
+            github.event.pull_request.head.repo.full_name == github.repository))
         continue-on-error: true
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -538,7 +531,9 @@ jobs:
       - name: Publish aggregate OrchestrAI report
         if: >-
           needs.discover.outputs.default_any == 'true' &&
-          (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci'))
+          (github.event_name != 'pull_request' ||
+           (contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci') &&
+            github.event.pull_request.head.repo.full_name == github.repository))
         env:
           EXPECTED_JSON: ${{ needs.discover.outputs.default }}
           ORCHESTRAI_CONTROLLER_RESULT: ${{ needs.orchestrai-behavioral.result }}
@@ -551,7 +546,9 @@ jobs:
       - name: Upload aggregate OrchestrAI report
         if: >-
           needs.discover.outputs.default_any == 'true' &&
-          (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci'))
+          (github.event_name != 'pull_request' ||
+           (contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci') &&
+            github.event.pull_request.head.repo.full_name == github.repository))
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: orchestrai-report
@@ -562,6 +559,8 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
           DISCOVER: ${{ needs.discover.result }}
           ROUTING: ${{ needs.routing.result }}
           ORCHESTRAI: ${{ needs.orchestrai-behavioral.result }}
@@ -577,7 +576,11 @@ jobs:
 
           value = lambda name: os.environ.get(name, "")
           labels = {label for label in value("LABELS").split(",") if label}
-          orchestrai_authorized = value("EVENT") != "pull_request" or "enable_orchestrai_ci" in labels
+          is_pull_request = value("EVENT") == "pull_request"
+          trusted_head = not is_pull_request or value("HEAD_REPOSITORY") == value("REPOSITORY")
+          orchestrai_authorized = not is_pull_request or (
+              "enable_orchestrai_ci" in labels and trusted_head
+          )
 
           print(f"discover:             {value('DISCOVER')}")
           print(f"routing:              {value('ROUTING')} (requested: {value('ROUTING_WANTED')})")
@@ -592,9 +595,6 @@ jobs:
           skipped = value("SKIPPED").strip()
           if skipped and skipped != "[]":
               print(f"::warning::Scoped behavioral cases were held back by a missing gate: {skipped}")
-          if value("BEHAVIOR_WANTED") == "true" and not orchestrai_authorized:
-              print("::warning::Strix behavioral cases were held back; add enable_orchestrai_ci to authorize OrchestrAI.")
-
           failures = []
           if value("ROUTING_WANTED") == "true" and value("ROUTING") != "success":
               failures.append(f"Routing did not pass ({value('ROUTING')}).")
@@ -602,6 +602,11 @@ jobs:
               failures.append(f"OrchestrAI infrastructure did not complete ({value('ORCHESTRAI')}).")
           if value("BEHAVIOR_WANTED") == "true" and orchestrai_authorized and value("ORCHESTRAI_VERDICTS") != "success":
               failures.append(f"One or more OrchestrAI skill verdicts did not pass ({value('ORCHESTRAI_VERDICTS')}).")
+          if value("BEHAVIOR_WANTED") == "true" and not orchestrai_authorized:
+              if is_pull_request and not trusted_head:
+                  failures.append("Strix behavioral cases require a maintainer branch in amd/skills before hardware can be authorized.")
+              else:
+                  failures.append("Strix behavioral cases require the enable_orchestrai_ci label.")
           if value("SCOPED_WANTED") == "true" and value("SCOPED") != "success":
               failures.append(f"Scoped behavioral cases did not pass ({value('SCOPED')}).")
           if failures:

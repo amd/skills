@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import os
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -68,6 +70,15 @@ def reporting_plan() -> dict:
 
 
 class PlanTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.skillscope_env = mock.patch.dict(
+            os.environ, {"SKILLSCOPE_SHA": "f" * 40}
+        )
+        self.skillscope_env.start()
+
+    def tearDown(self) -> None:
+        self.skillscope_env.stop()
+
     def test_groups_and_deduplicates_by_os(self) -> None:
         args = build_orchestrai_plan._parser().parse_args(
             [
@@ -640,6 +651,50 @@ class TriggerTests(unittest.TestCase):
         self.assertNotIn("private-portal", rendered)
         self.assertNotIn("private-run-id", rendered)
 
+    def test_portal_invalid_json_is_wrapped_for_retry(self) -> None:
+        client = orchestrai_run.PortalClient("https://private-portal.example")
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = b"not-json private-payload"
+        with mock.patch("urllib.request.urlopen", return_value=response):
+            with self.assertRaises(RuntimeError) as raised:
+                client.request("GET", "/api/runs/private-run-id")
+        rendered = str(raised.exception)
+        self.assertEqual(
+            rendered, "The OrchestrAI Portal returned an invalid response."
+        )
+        self.assertNotIn("private-payload", rendered)
+
+    def test_portal_read_errors_are_wrapped_for_retry(self) -> None:
+        client = orchestrai_run.PortalClient("https://private-portal.example")
+        for error in (
+            http.client.IncompleteRead(b"private-partial", 100),
+            ConnectionResetError("private-reset"),
+            ssl.SSLError("private-tls"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                response = mock.MagicMock()
+                response.__enter__.return_value = response
+                response.read.side_effect = error
+                with mock.patch("urllib.request.urlopen", return_value=response):
+                    with self.assertRaises(RuntimeError) as raised:
+                        client.request("GET", "/api/runs/private-run-id")
+                rendered = str(raised.exception)
+                self.assertEqual(
+                    rendered, "OrchestrAI Portal response could not be read"
+                )
+                self.assertNotIn("private", rendered)
+
+    def test_cancellation_uses_a_short_request_timeout(self) -> None:
+        client = orchestrai_run.PortalClient("https://portal.example")
+        with mock.patch.object(client, "request") as request, mock.patch.object(
+            orchestrai_run, "log"
+        ):
+            client.cancel("run-id")
+        request.assert_called_once_with(
+            "POST", "/api/runs/run-id/cancel", {}, timeout_seconds=5
+        )
+
     def test_controller_exception_classifier_drops_unknown_payloads(self) -> None:
         rendered = orchestrai_run.classify_controller_exception(
             RuntimeError("server said password=hunter2 at https://internal-host")
@@ -829,123 +884,6 @@ class TriggerTests(unittest.TestCase):
         encoded = json.dumps([manifest, sanitized])
         self.assertNotIn("reports.example", encoded)
         self.assertNotIn("reportportal", encoded.lower())
-
-    def test_reportportal_link_is_limited_to_private_repo_summary(self) -> None:
-        live = {"rp_url": "https://reports.example/ui/#project/launches/42"}
-        previous = os.environ.get("PUBLISH_REPORT_LINK")
-        try:
-            os.environ["PUBLISH_REPORT_LINK"] = "false"
-            self.assertEqual(orchestrai_run.reportportal_url_for_summary(live), "")
-
-            os.environ["PUBLISH_REPORT_LINK"] = "true"
-            self.assertEqual(
-                orchestrai_run.reportportal_url_for_summary(live), live["rp_url"]
-            )
-            for unsafe in (
-                "http://reports.example/launch/42",
-                "https://user:password@reports.example/launch/42",
-                "https://reports.example/launch/42\nmalicious",
-            ):
-                self.assertEqual(
-                    orchestrai_run.reportportal_url_for_summary({"rp_url": unsafe}),
-                    "",
-                )
-        finally:
-            if previous is None:
-                os.environ.pop("PUBLISH_REPORT_LINK", None)
-            else:
-                os.environ["PUBLISH_REPORT_LINK"] = previous
-
-    def test_portal_run_link_is_limited_to_private_repo_summary(self) -> None:
-        run_id = "caa0c086-43dc-490f-b588-ede44d5eab07"
-        previous = os.environ.get("PUBLISH_REPORT_LINK")
-        try:
-            os.environ["PUBLISH_REPORT_LINK"] = "false"
-            self.assertEqual(
-                orchestrai_run.portal_run_url_for_summary(
-                    "https://portal.example", run_id
-                ),
-                "",
-            )
-
-            os.environ["PUBLISH_REPORT_LINK"] = "true"
-            self.assertEqual(
-                orchestrai_run.portal_run_url_for_summary(
-                    "https://portal.example/", run_id
-                ),
-                f"https://portal.example/#/runs/{run_id}",
-            )
-            for unsafe_base in (
-                "http://portal.example",
-                "https://user:password@portal.example",
-                "https://portal.example/private-api-base",
-                "https://portal.example?redirect=elsewhere",
-                "https://portal.example/#/other",
-                "https://portal.example\nmalicious",
-            ):
-                self.assertEqual(
-                    orchestrai_run.portal_run_url_for_summary(
-                        unsafe_base, run_id
-                    ),
-                    "",
-                )
-            self.assertEqual(
-                orchestrai_run.portal_run_url_for_summary(
-                    "https://portal.example", "not-a-run-id"
-                ),
-                "",
-            )
-        finally:
-            if previous is None:
-                os.environ.pop("PUBLISH_REPORT_LINK", None)
-            else:
-                os.environ["PUBLISH_REPORT_LINK"] = previous
-
-    def test_summary_links_to_authenticated_run_and_results(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            summary_path = Path(temp) / "summary.md"
-            previous = os.environ.get("GITHUB_STEP_SUMMARY")
-            os.environ["GITHUB_STEP_SUMMARY"] = str(summary_path)
-            try:
-                orchestrai_run.summary(
-                    mode="live",
-                    plan_name="skills-evals-1-1-linux",
-                    results={"run": {}, "items": []},
-                    portal_url="https://portal.example/#/runs/42",
-                    report_url="https://reports.example/ui/#project/launches/42",
-                )
-            finally:
-                if previous is None:
-                    os.environ.pop("GITHUB_STEP_SUMMARY", None)
-                else:
-                    os.environ["GITHUB_STEP_SUMMARY"] = previous
-            rendered = summary_path.read_text(encoding="utf-8")
-            self.assertIn("View in OrchestrAI Portal", rendered)
-            self.assertIn("https&#58;//portal.example/#/runs/42", rendered)
-            self.assertNotIn("https://portal.example", rendered)
-            self.assertIn("View in ReportPortal", rendered)
-            self.assertIn("https://reports.example/ui/#project/launches/42", rendered)
-
-    def test_summary_keeps_portal_link_when_no_test_launch_exists(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            summary_path = Path(temp) / "summary.md"
-            previous = os.environ.get("GITHUB_STEP_SUMMARY")
-            os.environ["GITHUB_STEP_SUMMARY"] = str(summary_path)
-            try:
-                orchestrai_run.summary(
-                    mode="live",
-                    plan_name="skills-evals-1-1-windows",
-                    results={"run": {}, "items": []},
-                    portal_url="https://portal.example/#/runs/42",
-                )
-            finally:
-                if previous is None:
-                    os.environ.pop("GITHUB_STEP_SUMMARY", None)
-                else:
-                    os.environ["GITHUB_STEP_SUMMARY"] = previous
-            rendered = summary_path.read_text(encoding="utf-8")
-            self.assertIn("View in OrchestrAI Portal", rendered)
-            self.assertNotIn("View in ReportPortal", rendered)
 
     def test_summary_prints_infrastructure_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -1276,13 +1214,60 @@ class ReportTests(unittest.TestCase):
             workflow,
         )
 
-    def test_workflow_only_publishes_report_links_for_private_repositories(self) -> None:
+    def test_workflow_preserves_cancellation_and_required_check_contracts(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("run: exec python3 .github/scripts/orchestrai_run.py", workflow)
+        self.assertIn("'evals / results'", workflow)
+        self.assertIn("!cancelled()", workflow)
+        self.assertIn("github.event.label.name == 'enable_orchestrai_ci'", workflow)
+
+    def test_workflow_tests_the_pr_head_and_fails_closed_without_hardware(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(
             encoding="utf-8"
         )
         self.assertIn(
-            "PUBLISH_REPORT_LINK: ${{ github.event.repository.private }}", workflow
+            "TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}",
+            workflow,
         )
+        self.assertNotIn("git ls-remote", workflow)
+        self.assertIn(
+            "Strix behavioral cases require the enable_orchestrai_ci label.",
+            workflow,
+        )
+
+    def test_reporting_edits_do_not_select_every_hardware_case(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(
+            encoding="utf-8"
+        )
+        infra_line = next(
+            line for line in workflow.splitlines() if '"--infra-paths"' in line
+        )
+        self.assertNotIn("orchestrai_report.py", infra_line)
+        self.assertNotIn("test_orchestrai_evals.py", infra_line)
+
+    def test_public_workflow_does_not_publish_private_report_links(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("PUBLISH_REPORT_LINK", workflow)
+        self.assertNotIn("View in OrchestrAI Portal", workflow)
+        self.assertNotIn("View in ReportPortal", workflow)
+
+    def test_skillscope_pin_has_one_source_of_truth(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(
+            encoding="utf-8"
+        )
+        config = json.loads(
+            (ROOT / ".github" / "orchestrai-config.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            workflow.count("0f734b2dd344cd72b5e016ad6c3b1ac2ce36f6f3"), 1
+        )
+        self.assertNotIn("skillscope_sha", config)
 
 
 if __name__ == "__main__":
