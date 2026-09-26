@@ -1,0 +1,32 @@
+{
+  "skills_source": {
+    "repository": "https://github.com/amd/skills.git"
+  },
+  "test_paths": {
+    "Linux": "L4-sys/skills/linux/sys_func-skills_behavioral",
+    "Windows": "L4-sys/skills/windows/sys_func-skills_behavioral"
+  },
+  "os_images": {
+    "Linux": "ubuntu",
+    "Windows": "windows"
+  },
+  "provisioning": {
+    "linux_install_scripts": [
+      {
+        "script": "InstallationScripts/common/install-kernel-headers.sh",
+        "reboot_after": false
+      },
+      {
+        "script": "InstallationScripts/gfx/linux.sh",
+        "reboot_after": true
+      }
+    ]
+  },
+  "device_to_tags": {},
+  "run_settings": {
+    "max_duration": 180,
+    "max_test_case_duration": 150,
+    "acquire_timeout": 60,
+    "machines_per_hw_group": 1
+  }
+}

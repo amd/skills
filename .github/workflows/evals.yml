@@ -1,49 +1,24 @@
 name: evals
 
-# Structural, routing, and behavioral testing for every skill in this catalog,
-# plus the references our markdown makes, run by skillscope
-# (https://github.com/amd/skillscope). The harness used to live here, under
-# eval/ and .github/scripts/select_evals.py, with the reference half in
-# external-reference-check.yml and .github/lychee.toml; it moved out so other
-# repos could run the same graders against their own skills, and what is left
-# is the half that was always specific to amd/skills -- which skills are
-# published, which runners we own, and whose key pays for a run.
-#
-# The `with:` block below is the whole configuration. Everything skillscope
-# needs to know about this repo is an input here, so there is no second file to
-# keep in step:
-#
-#   * routing_room  -- the published bundle, installed side by side.
-#   * behavior_*    -- the everyday Strix Halo pool, on both platforms.
-#   * scoped_*      -- the Instinct pool: its own labels, its own gate label,
-#                      its own credentials. A skill asks for that hardware in
-#                      its evals/machine.yml; this file says what it costs.
-#   * api_*         -- AMD's internal LLM gateway, named by secret rather than
-#                      value so the called workflow never learns either.
-#
-# Selection is still by change: routing runs only when a change can move a
-# routing decision, and a behavioral leg runs only for the skills a change
-# touches. `skillscope select` makes that call, so it can be re-run by hand.
+# Skillscope owns structure, selection, routing, and grading. OrchestrAI owns
+# acquisition and execution of the default Linux/Windows Strix Halo sessions.
+# The OrchestrAI controller receives only the selected skill/OS matrix and
+# publishes normalized, allow-listed verdicts back to GitHub Actions.
 
 on:
   pull_request:
-    # `labeled` is here so adding a gate label (e.g. enable_mi_ci) to an open PR
-    # starts that leg. Re-running an existing run would not work: the replayed
-    # event payload is the one from before the label was applied.
     types: [opened, synchronize, reopened, labeled]
     paths:
       - "skills/**"
-      # This file holds the routing room, the runner topology, and the harness
-      # pin, so a change to it can move any result. It is passed as an infra
-      # path below for the same reason.
       - ".github/workflows/evals.yml"
-      # The structural checks resolve every reference our prose makes, so the
-      # prose is an input too. Free to check, and cheap to be wrong about.
+      - ".github/orchestrai-config.json"
+      - ".github/scripts/build_orchestrai_plan.py"
+      - ".github/scripts/orchestrai_report.py"
+      - ".github/scripts/orchestrai_run.py"
+      - ".github/scripts/orchestrai_verdict.py"
+      - ".github/scripts/test_orchestrai_evals.py"
       - "**/*.md"
-  # Catches external link rot in markdown nobody is editing. Runs the free
-  # checks only -- see `mode` below -- so a quiet week costs one ubuntu runner.
   schedule:
-    # Mondays at 12:00 UTC.
     - cron: "0 12 * * 1"
   workflow_dispatch:
     inputs:
@@ -64,118 +39,576 @@ on:
         description: "Fail the routing run below this accuracy (0-1). 0 reports without gating."
         required: false
         default: "0"
+      orchestrai_mode:
+        description: "Use mock to validate the plan without allocating hardware."
+        type: choice
+        options: [live, mock]
+        default: live
+      orchestrai_os:
+        description: "Which Strix operating systems to run."
+        type: choice
+        options: [both, Linux, Windows]
+        default: both
 
 concurrency:
-  group: evals-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Unrelated label events are no-ops and use a unique group, so they cannot
+  # cancel or replace an in-flight graded run for the same pull request.
+  group: evals-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'labeled' && github.event.label.name != 'enable_orchestrai_ci' && github.run_id || 'graded' }}
+  cancel-in-progress: ${{ github.event.action != 'labeled' || github.event.label.name == 'enable_orchestrai_ci' }}
 
 permissions:
   contents: read
-  # Lets a job ask GitHub for an OIDC token, which is traded for a
-  # short-lived Anthropic one instead of reading a key.
   id-token: write
 
+env:
+  SKILLSCOPE_REPOSITORY: amd/skillscope
+  SKILLSCOPE_SHA: 0f734b2dd344cd72b5e016ad6c3b1ac2ce36f6f3
+  ROUTING_ROOM: local-ai-use,local-ai-app-integration,serving-llms-on-instinct,tracelens-analysis-orchestrator,hyperloom-workload-optimizer
+
 jobs:
-  # Mark the `results` check this produces as required in branch protection.
-  evals:
-    # This pin is the harness. Each job in the called workflow checks skillscope
-    # out at the commit this ref names and runs it from there, so bumping the
-    # line below is the whole of upgrading -- there is no second version to keep
-    # in step with it.
-    uses: amd/skillscope/.github/workflows/skill-evals.yml@v0.1.3
-    # By name, not by value: the Instinct legs read a secret scoped to the
-    # `behavioral-instinct` environment, and an environment's secrets are
-    # readable only inside the job that declares it.
-    secrets: inherit
-    with:
-      # --- what this repo looks like ---------------------------------------
-      skill_globs: skills/*
+  discover:
+    name: ${{ github.event.action == 'labeled' && github.event.label.name != 'enable_orchestrai_ci' && 'Ignore unrelated label (discover)' || 'Check dataset structure and select runs' }}
+    if: github.event.action != 'labeled' || github.event.label.name == 'enable_orchestrai_ci'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      routing: ${{ steps.plan.outputs.routing }}
+      extended: ${{ steps.plan.outputs.extended }}
+      default: ${{ steps.plan.outputs.default }}
+      default_any: ${{ steps.plan.outputs.default_any }}
+      orchestrai: ${{ steps.plan.outputs.orchestrai }}
+      scoped: ${{ steps.plan.outputs.scoped }}
+      scoped_any: ${{ steps.plan.outputs.scoped_any }}
+      skipped: ${{ steps.plan.outputs.skipped }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
 
-      # The published bundle, in the order .claude-plugin/marketplace.json
-      # lists it. Listed rather than read from the manifest, because who a
-      # skill competes against is what its score means: adding a name here
-      # moves every other skill's number, and that deserves a visible diff.
-      # Publishing a skill means adding it in both places.
-      routing_room: "local-ai-use,local-ai-app-integration,serving-llms-on-instinct,tracelens-analysis-orchestrator,hyperloom-workload-optimizer"
+      - name: Check out Skillscope
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          repository: ${{ env.SKILLSCOPE_REPOSITORY }}
+          ref: ${{ env.SKILLSCOPE_SHA }}
+          path: .skillscope-action
 
-      # A change to this file is a change to the harness as far as this repo is
-      # concerned, so it re-runs every skill rather than whatever the diff
-      # happened to touch.
-      infra_paths: .github/workflows/evals.yml
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
 
-      # Prose outside the skills whose references are checked too. The skills'
-      # own markdown is always checked; this adds the catalog's documentation,
-      # its walkthroughs, and the skills still in staging.
-      doc_globs: "*.md,docs/**/*.md,walkthroughs/*.md,staging/**/*.md"
+      # Install the pinned checkout directly. The enterprise Actions policy
+      # does not allow the third-party setup-uv action used by the upstream
+      # Skillscope composite action.
+      - name: Install Skillscope
+        run: python -m pip install --disable-pip-version-check ./.skillscope-action
 
-      # What this catalog asks of a skill on top of the format: a governance
-      # card, with those three sections filled in. See docs/skill-requirements.md.
-      skill_files: skill-card.md
-      skill_sections: Description,Owner,License
+      - name: Check every skill's structure
+        run: >-
+          python -m skillscope --repo . structural
+          --skills-dir 'skills/*'
+          --docs '*.md,docs/**/*.md,walkthroughs/*.md,staging/**/*.md'
+          --skill-files 'skill-card.md'
+          --skill-sections 'Description,Owner,License'
 
-      # --- where the graded runs happen ------------------------------------
-      #
-      # A routing decision is made from skill descriptions alone, so it needs
-      # no GPU and no second platform. It stays on a self-hosted Linux runner
-      # only because that is what can reach the internal LLM gateway.
-      routing_runner: '["self-hosted", "strix_halo", "Linux"]'
-      behavior_runner: '["self-hosted", "strix_halo"]'
-      behavior_os: Linux,Windows
+      - name: Test OrchestrAI plan and trigger helpers
+        run: python3 .github/scripts/test_orchestrai_evals.py
 
-      # The Instinct pool. A skill lands here by asking for these labels in its
-      # evals/machine.yml; nothing in this file names a skill, because a
-      # hardcoded skill-to-runner table drifts from reality the first time a
-      # skill is added. The pool is scarce, so touching such a skill is
-      # necessary but not sufficient: a maintainer opts the PR in with the gate
-      # label. It also sits outside the AMD network and cannot reach the
-      # internal gateway, so it calls api.anthropic.com with its own budgeted
-      # key from its own environment.
-      scoped_runner: '["self-hosted", "Linux", "X64"]'
-      scoped_gate: enable_mi_ci
-      scoped_environment: behavioral-instinct
+      - name: Work out how to select
+        id: how
+        shell: python
+        env:
+          EVENT: ${{ github.event_name }}
+          SKILLS: ${{ inputs.skills }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          ROUTING_ROOM_VALUE: ${{ env.ROUTING_ROOM }}
+        run: |
+          import os
+          import shlex
 
-      # --- this run --------------------------------------------------------
-      #
-      # `references` runs the structural and external checks and skips the
-      # graded ones, which is all the weekly schedule is here for: a cron that
-      # quietly re-ran every skill against a real agent would be a standing
-      # bill nobody asked for.
-      mode: ${{ github.event_name == 'schedule' && 'references' || inputs.mode || 'both' }}
-      skills: ${{ inputs.skills }}
-      only: ${{ inputs.only }}
+          if os.environ["EVENT"] == "pull_request" and os.environ.get("BASE"):
+              args = [
+                  "--since", os.environ["BASE"], os.environ.get("HEAD", ""),
+                  "--labels", os.environ.get("LABELS", ""), "--no-extended",
+              ]
+          else:
+              skills = os.environ.get("SKILLS", "").strip()
+              args = ["--names", skills] if skills else ["--all"]
+              args += ["--ignore-gates", "--no-extended"]
 
-      # Reports the routing score without gating on it, which is what this
-      # catalog has always done. Raise it once the prompts have a number worth
-      # holding a bar against.
-      min_accuracy: ${{ inputs.min_accuracy || '0' }}
+          args += [
+              "--routing-room", os.environ["ROUTING_ROOM_VALUE"],
+              "--infra-paths", ".github/workflows/evals.yml,.github/orchestrai-config.json,.github/scripts/build_orchestrai_plan.py,.github/scripts/orchestrai_run.py,.github/scripts/orchestrai_verdict.py",
+              "--behavior-runner", '["orchestrai"]',
+              "--behavior-os", "Linux,Windows",
+              "--scoped-runner", '["self-hosted","Linux","X64"]',
+              "--scoped-gate", "enable_mi_ci",
+              "--scoped-environment", "behavioral-instinct",
+          ]
+          line = "args=" + " ".join(shlex.quote(arg) for arg in args)
+          print(line)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(line + "\n")
 
-      # A skill's optional evals/extended_evals.json is that skill's product
-      # repo's bill to pay; this catalog grades the required dataset only.
-      # Extended datasets are still checked structurally.
-      extended: false
+      - name: Select what to run
+        id: select
+        shell: python
+        env:
+          SELECT_ARGS: ${{ steps.how.outputs.args }}
+        run: |
+          import os
+          import shlex
+          import subprocess
+          import sys
 
-      # Fetch every external URL our markdown links to, in a job of its own
-      # that the aggregate `results` check ignores. Leave it out of branch
-      # protection: a rate limit or a runner IP some host blocks is not a
-      # reason to hold a merge. The weekly schedule above is what catches rot
-      # in markdown nobody is editing.
-      external_references: true
-      excluded_urls: '^https://openai\.com/codex/?$,^https://www\.amd\.com/en/resources/product-security\.html$'
+          command = [
+              sys.executable, "-m", "skillscope", "--repo", ".", "select",
+              "--skills-dir", "skills/*", *shlex.split(os.environ["SELECT_ARGS"]),
+          ]
+          completed = subprocess.run(command, text=True, capture_output=True)
+          sys.stderr.write(completed.stderr)
+          print(completed.stdout, end="")
+          if completed.returncode:
+              raise SystemExit(completed.returncode)
+          lines = [line for line in completed.stdout.splitlines() if line.strip()]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("stdout=" + (lines[-1] if lines else "") + "\n")
 
-      # AMD's internal gateway. The key is named rather than passed, and
-      # `$API_KEY` in the headers is replaced with it, so a gateway that wants
-      # the key in a header needs no second secret.
-      api_key_secret: ORCHESTR_API_KEY
-      api_base_url: https://llm-api.amd.com/Anthropic
-      api_custom_headers: |
-        Ocp-Apim-Subscription-Key: $API_KEY
-        user: a1_ucicd
+      - name: Apply requested mode and emit plan
+        id: plan
+        shell: python
+        env:
+          PLAN: ${{ steps.select.outputs.stdout }}
+          MODE: ${{ github.event_name == 'schedule' && 'references' || inputs.mode || 'both' }}
+          EVENT: ${{ github.event_name }}
+          ORCHESTRAI_OS: ${{ inputs.orchestrai_os || 'both' }}
+        run: |
+          import json
+          import os
 
-      # Some runners talk straight to api.anthropic.com, so they can use GitHub OIDC tokens to get temporary Anthropic access instead of storing a key. 
-      # (The gateway runners above can't, since those tokens only work with api.anthropic.com.)
-      # The four fields below are just IDs—no secrets—and only work if GitHub sends a signed token from this repo.
-      scoped_api_key_secret: ""
-      scoped_federation_rule_id: fdrl_014u39zsJmsex5SkL1gWg7qo
-      scoped_federation_organization_id: 9bdff596-1595-4140-8301-817e43ef8412
-      scoped_federation_service_account_id: svac_016zcTqZ4XkFdjAJCag9jQC9
-      scoped_federation_workspace_id: wrkspc_01EUPtU7mqFtoQowMAREPvoq
+          plan = json.loads(os.environ["PLAN"])
+          mode = os.environ.get("MODE", "both")
+          if mode in ("behavioral", "behavior", "references"):
+              plan["routing"] = False
+          if mode in ("routing", "references"):
+              plan["default"] = []
+              plan["scoped"] = []
+
+          requested_os = os.environ.get("ORCHESTRAI_OS", "both")
+          if os.environ.get("EVENT") == "workflow_dispatch" and requested_os != "both":
+              plan["default"] = [
+                  entry for entry in plan["default"]
+                  if entry.get("os") == requested_os
+              ]
+
+          # Keep the GitHub verdict matrix aligned with the plan builder's
+          # one-session-per-skill/OS identity, even if selection ever emits a
+          # duplicate entry.
+          seen = set()
+          unique_default = []
+          for entry in plan["default"]:
+              identity = (entry.get("skill"), entry.get("os"))
+              if identity not in seen:
+                  seen.add(identity)
+                  unique_default.append(entry)
+          plan["default"] = unique_default
+
+          orchestrai = []
+          for os_name in ("Linux", "Windows"):
+              entries = [
+                  entry for entry in unique_default if entry.get("os") == os_name
+              ]
+              if entries:
+                  orchestrai.append({
+                      "os": os_name,
+                      "slug": os_name.lower(),
+                      "matrix_json": json.dumps(entries, separators=(",", ":")),
+                  })
+
+          lines = [
+              "routing=" + str(plan["routing"]).lower(),
+              "extended=" + ("--extended" if plan["extended"] else "--no-extended"),
+              "orchestrai=" + json.dumps(orchestrai, separators=(",", ":")),
+          ]
+          for key in ("default", "scoped", "skipped"):
+              lines.append(key + "=" + json.dumps(plan[key], separators=(",", ":")))
+          for key in ("default", "scoped"):
+              lines.append(key + "_any=" + str(bool(plan[key])).lower())
+          print("\n".join(lines))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("\n".join(lines) + "\n")
+
+  external-references:
+    name: ${{ github.event.action == 'labeled' && github.event.label.name != 'enable_orchestrai_ci' && 'Ignore unrelated label (references)' || 'External references' }}
+    if: github.event.action != 'labeled' || github.event.label.name == 'enable_orchestrai_ci'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Check out Skillscope
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          repository: ${{ env.SKILLSCOPE_REPOSITORY }}
+          ref: ${{ env.SKILLSCOPE_SHA }}
+          path: .skillscope-action
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - name: Install Skillscope
+        run: python -m pip install --disable-pip-version-check ./.skillscope-action
+      - name: Fetch every external reference
+        run: >-
+          python -m skillscope --repo . structural
+          --skills-dir 'skills/*'
+          --external
+          --docs '*.md,docs/**/*.md,walkthroughs/*.md,staging/**/*.md'
+          --exclude-url '^https://openai\.com/codex/?$,^https://www\.amd\.com/en/resources/product-security\.html$'
+
+  routing:
+    name: Routing
+    needs: discover
+    if: needs.discover.outputs.routing == 'true'
+    runs-on: [self-hosted, strix_halo, Linux]
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Check out Skillscope
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          repository: ${{ env.SKILLSCOPE_REPOSITORY }}
+          ref: ${{ env.SKILLSCOPE_SHA }}
+          path: .skillscope-action
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - name: Install Skillscope
+        run: python -m pip install --disable-pip-version-check ./.skillscope-action
+      - name: Resolve model credentials
+        shell: python
+        env:
+          API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
+          API_BASE_URL: https://llm-api.amd.com/Anthropic
+          API_CUSTOM_HEADERS: |
+            Ocp-Apim-Subscription-Key: $API_KEY
+            user: a1_ucicd
+          SECRET_NAME: ORCHESTR_API_KEY
+        run: |
+          import subprocess
+          import sys
+          raise SystemExit(subprocess.run([sys.executable, ".skillscope-action/skillscope/credentials.py"]).returncode)
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "20"
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Run routing evals
+        env:
+          MIN_ACCURACY: ${{ inputs.min_accuracy || '0' }}
+          ONLY: ${{ inputs.only }}
+          EXTENDED_FLAG: ${{ needs.discover.outputs.extended }}
+        run: |
+          args=(
+            python -m skillscope --repo . routing
+            --skills-dir 'skills/*'
+            --routing-room "$ROUTING_ROOM"
+            --min-accuracy "$MIN_ACCURACY"
+            "$EXTENDED_FLAG"
+            --output routing-report.json
+            --keep-logs routing-logs
+          )
+          if [[ -n "$ONLY" ]]; then args+=(--only "$ONLY"); fi
+          "${args[@]}"
+      - name: Upload routing report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: routing-report
+          path: |
+            routing-report.json
+            routing-logs/
+          if-no-files-found: warn
+
+  orchestrai-behavioral:
+    name: Behavioral (OrchestrAI Strix Halo — ${{ matrix.os }})
+    needs: discover
+    if: >-
+      needs.discover.outputs.default_any == 'true' &&
+      (github.event_name != 'pull_request' ||
+       (contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci') &&
+        github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.orchestrai) }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - name: Build OrchestrAI plan
+        env:
+          MATRIX_JSON: ${{ matrix.matrix_json }}
+          TARGET_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          # A PR must test the immutable commit GitHub associated with this
+          # check run. Non-PR events use the selected ref's triggering commit.
+          TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXTENDED_FLAG: ${{ needs.discover.outputs.extended }}
+          # Fleet selectors are private infrastructure metadata.  Store this
+          # JSON as a secret so Actions masks the value in the step's automatic
+          # environment preamble before our code starts.
+          DEVICE_TAGS_JSON: ${{ secrets.ORCHESTRAI_DEVICE_TAGS }}
+          # Same per-Ubuntu-release mapping used by Playbooks.  Keep it as a
+          # secret here so its URLs are masked in this public repository's logs.
+          ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON: ${{ secrets.ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON }}
+          SOURCE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          python3 .github/scripts/build_orchestrai_plan.py
+          --matrix-json "$MATRIX_JSON"
+          --device-tags-json "$DEVICE_TAGS_JSON"
+          --repository "${{ github.repository }}"
+          --ref "$TARGET_REF"
+          --sha "$TARGET_SHA"
+          --extended-flag="$EXTENDED_FLAG"
+          --run-id "${{ github.run_id }}"
+          --run-attempt "${{ github.run_attempt }}"
+          --source-run-url "$SOURCE_RUN_URL"
+          --output orchestrai-plan.json
+      - name: Acquire Strix machines and run behavioral evals
+        id: orchestrai
+        env:
+          PLAN_FILE: orchestrai-plan.json
+          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.orchestrai_mode || 'live' }}
+          POLL_TIMEOUT_SEC: "13800"
+          # Match Playbooks' five-minute continuous-unreachable allowance.
+          # A successful poll resets this budget.
+          POLL_ERROR_TIMEOUT_SEC: "300"
+          ORCHESTRAI_PORTAL_URL: ${{ secrets.ORCHESTRAI_PORTAL_URL }}
+          ORCHESTRAI_USER: ${{ secrets.ORCHESTRAI_USER }}
+          ORCHESTRAI_PASSWORD: ${{ secrets.ORCHESTRAI_PASSWORD }}
+          ORCHESTRAI_SPACE: ${{ secrets.ORCHESTRAI_SPACE }}
+        run: exec python3 .github/scripts/orchestrai_run.py
+      - name: Upload OrchestrAI result manifest
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: orchestrai-run-results-${{ matrix.slug }}
+          # The live controller snapshot can contain private pipeline topology
+          # (for example, stage names).  Verdict jobs need only the normalized,
+          # allow-listed manifest, so keep the snapshot inside this ephemeral
+          # job workspace and out of public workflow artifacts.
+          path: orchestrai-results.json
+          if-no-files-found: warn
+
+  orchestrai-verdict:
+    name: Behavioral (${{ matrix.skill }} on ${{ matrix.os }})
+    needs: [discover, orchestrai-behavioral]
+    if: >-
+      !cancelled() &&
+      needs.discover.result == 'success' &&
+      needs.discover.outputs.default_any == 'true' &&
+      (github.event_name != 'pull_request' ||
+       (contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci') &&
+        github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.default) }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Download OrchestrAI results
+        continue-on-error: true
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: orchestrai-run-results-${{ matrix.os == 'Linux' && 'linux' || 'windows' }}
+          path: .orchestrai-report
+      - name: Resolve skill verdict
+        id: verdict
+        run: >-
+          python3 .github/scripts/orchestrai_verdict.py
+          --results .orchestrai-report/orchestrai-results.json
+          --skill "${{ matrix.skill }}"
+          --os "${{ matrix.os }}"
+          --output-dir test-results
+      - name: Upload skill result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-${{ matrix.skill }}-${{ matrix.os }}
+          path: test-results/
+          if-no-files-found: warn
+
+  behavior-scoped:
+    name: Behavioral (${{ matrix.skill }} on ${{ matrix.os }}, ${{ matrix.environment }})
+    needs: discover
+    if: needs.discover.outputs.scoped_any == 'true'
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: ${{ matrix.environment }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.scoped) }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Check out Skillscope
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          repository: ${{ env.SKILLSCOPE_REPOSITORY }}
+          ref: ${{ env.SKILLSCOPE_SHA }}
+          path: .skillscope-action
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - name: Install Skillscope
+        run: python -m pip install --disable-pip-version-check ./.skillscope-action
+      - name: Resolve model credentials
+        shell: python
+        env:
+          API_KEY: ""
+          API_BASE_URL: ""
+          API_CUSTOM_HEADERS: ""
+          SECRET_NAME: ""
+          ENVIRONMENT: ${{ matrix.environment }}
+          FEDERATION_RULE_ID: fdrl_014u39zsJmsex5SkL1gWg7qo
+          FEDERATION_ORGANIZATION_ID: 9bdff596-1595-4140-8301-817e43ef8412
+          FEDERATION_SERVICE_ACCOUNT_ID: svac_016zcTqZ4XkFdjAJCag9jQC9
+          FEDERATION_WORKSPACE_ID: wrkspc_01EUPtU7mqFtoQowMAREPvoq
+        run: |
+          import subprocess
+          import sys
+          raise SystemExit(subprocess.run([sys.executable, ".skillscope-action/skillscope/credentials.py"]).returncode)
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "20"
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Run behavioral cases
+        env:
+          SKILL: ${{ matrix.skill }}
+          EXTENDED_FLAG: ${{ needs.discover.outputs.extended }}
+        run: >-
+          python -m skillscope --repo . behavioral
+          --skills-dir 'skills/*'
+          --skill "$SKILL"
+          "$EXTENDED_FLAG"
+
+  results:
+    name: ${{ github.event.action == 'labeled' && github.event.label.name != 'enable_orchestrai_ci' && 'Ignore unrelated label (results)' || 'evals / results' }}
+    needs: [discover, routing, orchestrai-behavioral, orchestrai-verdict, behavior-scoped]
+    if: >-
+      always() &&
+      (github.event.action != 'labeled' || github.event.label.name == 'enable_orchestrai_ci')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - name: Download per-skill OrchestrAI results
+        if: >-
+          needs.discover.outputs.default_any == 'true' &&
+          (github.event_name != 'pull_request' ||
+           (contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci') &&
+            github.event.pull_request.head.repo.full_name == github.repository))
+        continue-on-error: true
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: test-results-*
+          path: .orchestrai-results
+      - name: Publish aggregate OrchestrAI report
+        if: >-
+          needs.discover.outputs.default_any == 'true' &&
+          (github.event_name != 'pull_request' ||
+           (contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci') &&
+            github.event.pull_request.head.repo.full_name == github.repository))
+        env:
+          EXPECTED_JSON: ${{ needs.discover.outputs.default }}
+          ORCHESTRAI_CONTROLLER_RESULT: ${{ needs.orchestrai-behavioral.result }}
+          ORCHESTRAI_VERDICT_RESULT: ${{ needs.orchestrai-verdict.result }}
+        run: >-
+          python3 .github/scripts/orchestrai_report.py
+          --artifacts .orchestrai-results
+          --expected-json "$EXPECTED_JSON"
+          --output orchestrai-report.md
+      - name: Upload aggregate OrchestrAI report
+        if: >-
+          needs.discover.outputs.default_any == 'true' &&
+          (github.event_name != 'pull_request' ||
+           (contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci') &&
+            github.event.pull_request.head.repo.full_name == github.repository))
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: orchestrai-report
+          path: orchestrai-report.md
+          if-no-files-found: warn
+      - name: Verify eval results
+        shell: python
+        env:
+          EVENT: ${{ github.event_name }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          DISCOVER: ${{ needs.discover.result }}
+          ROUTING: ${{ needs.routing.result }}
+          ORCHESTRAI: ${{ needs.orchestrai-behavioral.result }}
+          ORCHESTRAI_VERDICTS: ${{ needs.orchestrai-verdict.result }}
+          SCOPED: ${{ needs.behavior-scoped.result }}
+          ROUTING_WANTED: ${{ needs.discover.outputs.routing }}
+          BEHAVIOR_WANTED: ${{ needs.discover.outputs.default_any }}
+          SCOPED_WANTED: ${{ needs.discover.outputs.scoped_any }}
+          SKIPPED: ${{ needs.discover.outputs.skipped }}
+        run: |
+          import os
+          import sys
+
+          value = lambda name: os.environ.get(name, "")
+          labels = {label for label in value("LABELS").split(",") if label}
+          is_pull_request = value("EVENT") == "pull_request"
+          trusted_head = not is_pull_request or value("HEAD_REPOSITORY") == value("REPOSITORY")
+          orchestrai_authorized = not is_pull_request or (
+              "enable_orchestrai_ci" in labels and trusted_head
+          )
+
+          print(f"discover:             {value('DISCOVER')}")
+          print(f"routing:              {value('ROUTING')} (requested: {value('ROUTING_WANTED')})")
+          print(f"orchestrai-behavioral:{value('ORCHESTRAI')} (requested: {value('BEHAVIOR_WANTED')}, authorized: {orchestrai_authorized})")
+          print(f"orchestrai-verdicts:  {value('ORCHESTRAI_VERDICTS')}")
+          print(f"behavioral-scoped:    {value('SCOPED')} (requested: {value('SCOPED_WANTED')})")
+          print(f"held back:            {value('SKIPPED')}")
+
+          if value("DISCOVER") != "success":
+              sys.exit(f"The discover job did not succeed ({value('DISCOVER')}).")
+
+          skipped = value("SKIPPED").strip()
+          if skipped and skipped != "[]":
+              print(f"::warning::Scoped behavioral cases were held back by a missing gate: {skipped}")
+          failures = []
+          if value("ROUTING_WANTED") == "true" and value("ROUTING") != "success":
+              failures.append(f"Routing did not pass ({value('ROUTING')}).")
+          if value("BEHAVIOR_WANTED") == "true" and orchestrai_authorized and value("ORCHESTRAI") != "success":
+              failures.append(f"OrchestrAI infrastructure did not complete ({value('ORCHESTRAI')}).")
+          if value("BEHAVIOR_WANTED") == "true" and orchestrai_authorized and value("ORCHESTRAI_VERDICTS") != "success":
+              failures.append(f"One or more OrchestrAI skill verdicts did not pass ({value('ORCHESTRAI_VERDICTS')}).")
+          if value("BEHAVIOR_WANTED") == "true" and not orchestrai_authorized:
+              if is_pull_request and not trusted_head:
+                  failures.append("Strix behavioral cases require a maintainer branch in amd/skills before hardware can be authorized.")
+              else:
+                  failures.append("Strix behavioral cases require the enable_orchestrai_ci label.")
+          if value("SCOPED_WANTED") == "true" and value("SCOPED") != "success":
+              failures.append(f"Scoped behavioral cases did not pass ({value('SCOPED')}).")
+          if failures:
+              sys.exit("\n".join(failures))
+          print("All requested and authorized evals passed.")
