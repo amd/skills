@@ -123,9 +123,6 @@ skill that is already federated on `main`, and make sure your `as:` name does
 not match a skill already under `skills/`, since the import replaces that
 folder.
 
-The importer also adds your skill to the published bundle, so there is no
-manifest to edit by hand.
-
 ## 4. Open a pull request
 
 Commit `.github/federation.json`, `skills/**`, and the regenerated manifests. A

@@ -8,9 +8,11 @@ name: federate-skills
 # newest release branch) and re-vendors a
 # skill only when the contents of its upstream folder changed, so a night
 # with no upstream activity produces no diff and no pull request. When
-# something did change, the run regenerates the agent manifests and opens a
-# pull request titled "Bump `<skill>` to `<commit>`". Validating the result is
-# the `validate` workflow's job on that pull request, not this workflow's.
+# something did change, the run opens a pull request titled
+# "Bump `<skill>` to `<commit>`" that touches `skills/` only. The marketplace
+# and plugin manifests are edited by hand, never by this workflow. Validating
+# the result is the `validate` workflow's job on that pull request, not this
+# workflow's.
 #
 # Every skill gets its own job, branch, and pull request, so two upstream
 # changes on the same night are reviewed, merged, or reverted independently,
@@ -91,8 +93,8 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
-      # `--only` leaves every other skill, and every other skill's entry in
-      # the marketplace, untouched, so this job's diff is this skill's alone.
+      # `--only` leaves every other skill untouched, so this job's diff is this
+      # skill's alone.
       - name: Vendor ${{ matrix.skill }}
         id: federate
         env:
@@ -109,9 +111,6 @@ jobs:
             jq -r '.body' "$SUMMARY"
             echo "FEDERATION_BODY_EOF"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Regenerate derived plugin manifests (Cursor + Codex)
-        run: ./.github/scripts/publish.sh
 
       # Unchanged skills are left byte-for-byte alone (a marker-only
       # difference is reverted by the importer), so an empty work tree here is
@@ -155,10 +154,6 @@ jobs:
             automated
           add-paths: |
             skills/**
-            .claude-plugin/**
-            .cursor-plugin/**
-            .codex-plugin/**
-            .agents/plugins/**
 
       # Say plainly what happened, in the log and on the run's summary page.
       # "Nothing changed upstream" is the expected result most nights and has
