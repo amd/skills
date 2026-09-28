@@ -22,8 +22,7 @@
     "./skills/local-ai-app-integration",
     "./skills/serving-llms-on-instinct",
     "./skills/tracelens-analysis-orchestrator",
-    "./skills/hyperloom-workload-optimizer",
-    "./skills/magpie-kernel-evaluator"
+    "./skills/hyperloom-workload-optimizer"
   ],
   "interface": {
     "displayName": "AMD",

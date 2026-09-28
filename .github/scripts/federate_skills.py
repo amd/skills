@@ -56,7 +56,7 @@ For each declared skill, the script:
    docs/skill-requirements.md).
 7. Adds each declared skill to the bundle's `skills` array in
    `.claude-plugin/marketplace.json` (as a `./skills/<name>` path) so it
-   ships in the single AMD plugin.
+   ships in the single AMD plugin, unless `--skip-publish-list` is passed.
 
 Nothing is ever deleted here. A vendored skill that is no longer declared
 in `.github/federation.json` is reported and left alone; removing it is a
@@ -1078,6 +1078,15 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PATH",
         help="Write a JSON summary of the run (including a PR title and body).",
     )
+    parser.add_argument(
+        "--skip-publish-list",
+        action="store_true",
+        help=(
+            "Leave .claude-plugin/marketplace.json untouched. The nightly "
+            "workflow passes this: a bump refreshes skills/ only, and whether "
+            "a skill ships in the bundle is a maintainer's decision."
+        ),
+    )
     args = parser.parse_args(argv)
 
     sources = parse_federation(args.catalog)
@@ -1156,7 +1165,9 @@ def main(argv: list[str] | None = None) -> int:
     if not only:
         report_undeclared(declared, existing_federated, log)
 
-    publish_changed = update_publish_list(declared)
+    publish_changed = (
+        False if args.skip_publish_list else update_publish_list(declared)
+    )
 
     for line in log:
         print(line)
