@@ -353,6 +353,24 @@ class TriggerTests(unittest.TestCase):
             ["ubuntu/noble", "windows11-25h2-26200.7840-disabled-telemetry"],
         )
 
+    @mock.patch.object(orchestrai_run.time, "sleep")
+    def test_retries_an_empty_image_catalog(self, sleep: mock.Mock) -> None:
+        class Client:
+            calls = 0
+
+            @classmethod
+            def request(cls, _method: str, _path: str) -> list[dict[str, str]]:
+                cls.calls += 1
+                if cls.calls == 1:
+                    return []
+                return [{"os": "ubuntu/noble", "type": "ratio"}]
+
+        plan = {"sessions": [{"os_image": "ubuntu"}]}
+        orchestrai_run.resolve_stock_os_images(plan, Client())
+        self.assertEqual(plan["sessions"][0]["os_image"], "ubuntu/noble")
+        self.assertEqual(Client.calls, 2)
+        sleep.assert_called_once_with(5)
+
     def test_does_not_select_a_specialized_windows_image(self) -> None:
         class Client:
             @staticmethod
@@ -374,10 +392,16 @@ class TriggerTests(unittest.TestCase):
         ):
             orchestrai_run.resolve_stock_os_images(plan, Client())
 
-    def test_fails_before_submission_when_image_discovery_fails(self) -> None:
+    @mock.patch.object(orchestrai_run.time, "sleep")
+    def test_fails_before_submission_when_image_discovery_fails(
+        self, sleep: mock.Mock
+    ) -> None:
         class Client:
+            calls = 0
+
             @staticmethod
             def request(_method: str, _path: str) -> list[dict[str, str]]:
+                Client.calls += 1
                 raise RuntimeError("portal unavailable")
 
         plan = {"sessions": [{"os_image": "ubuntu"}]}
@@ -385,6 +409,10 @@ class TriggerTests(unittest.TestCase):
             RuntimeError, "could not resolve exact stock OS images"
         ):
             orchestrai_run.resolve_stock_os_images(plan, Client())
+        self.assertEqual(Client.calls, 5)
+        self.assertEqual(
+            [call.args[0] for call in sleep.call_args_list], [5, 10, 15, 20]
+        )
 
     def test_skips_discovery_for_an_exact_image(self) -> None:
         class Client:

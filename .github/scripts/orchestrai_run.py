@@ -527,11 +527,33 @@ def resolve_stock_os_images(plan: dict, client: PortalClient) -> None:
     if not generic_sessions:
         return
 
-    try:
-        resources = client.request("GET", "/api/playground/boot-resources")
-    except RuntimeError as exc:
-        raise RuntimeError(f"could not resolve exact stock OS images: {exc}") from exc
-    if not isinstance(resources, list) or not resources:
+    # Boot-resource discovery is an idempotent read. The Portal can briefly
+    # return an empty catalog while its broker inventory is refreshing, so do
+    # not turn one transient response into a failure for every selected skill.
+    resources: object = []
+    last_error: RuntimeError | None = None
+    attempts = 5
+    for attempt in range(1, attempts + 1):
+        try:
+            resources = client.request("GET", "/api/playground/boot-resources")
+            last_error = None
+        except RuntimeError as exc:
+            last_error = exc
+            resources = []
+
+        if isinstance(resources, list) and resources:
+            break
+        if attempt < attempts:
+            log(
+                "warning: stock OS image catalog was unavailable; "
+                f"retrying discovery ({attempt}/{attempts})"
+            )
+            time.sleep(5 * attempt)
+    else:
+        if last_error is not None:
+            raise RuntimeError(
+                f"could not resolve exact stock OS images: {last_error}"
+            ) from last_error
         raise RuntimeError("could not resolve stock OS images: no images were returned")
 
     available_images = [
