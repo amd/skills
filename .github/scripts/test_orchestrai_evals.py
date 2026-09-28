@@ -1327,6 +1327,25 @@ class ReportTests(unittest.TestCase):
         self.assertIn("runs-on: ubuntu-latest", routing)
         self.assertNotIn("strix_halo", routing)
 
+    def test_workflow_uses_playbooks_orchestrai_runner_variables(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(
+            encoding="utf-8"
+        )
+        controller = workflow.split("\n  orchestrai-behavioral:\n", 1)[1].split(
+            "\n  orchestrai-verdict:\n", 1
+        )[0]
+        verdict = workflow.split("\n  orchestrai-verdict:\n", 1)[1].split(
+            "\n  behavior-scoped:\n", 1
+        )[0]
+        self.assertIn(
+            "runs-on: ${{ vars.ORCHESTRAI_CONTROL_RUNNER || 'ubuntu-latest' }}",
+            controller,
+        )
+        self.assertIn(
+            "runs-on: ${{ vars.ORCHESTRAI_WAIT_RUNNER || 'ubuntu-latest' }}",
+            verdict,
+        )
+
     def test_skillscope_pin_has_one_source_of_truth(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(
             encoding="utf-8"

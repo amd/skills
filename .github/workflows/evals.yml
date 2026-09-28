@@ -342,7 +342,7 @@ jobs:
       (github.event_name != 'pull_request' ||
        (contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci') &&
         github.event.pull_request.head.repo.full_name == github.repository))
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.ORCHESTRAI_CONTROL_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 240
     strategy:
       fail-fast: false
@@ -417,7 +417,7 @@ jobs:
       (github.event_name != 'pull_request' ||
        (contains(github.event.pull_request.labels.*.name, 'enable_orchestrai_ci') &&
         github.event.pull_request.head.repo.full_name == github.repository))
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.ORCHESTRAI_WAIT_RUNNER || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
