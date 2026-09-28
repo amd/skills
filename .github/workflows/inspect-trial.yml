@@ -312,6 +312,14 @@ jobs:
           assert len(list(engine_routing._tool_calls(_dup))) == 1, (
               "older skillscope: one bridged turn is still counted twice"
           )
+          # The room the sandboxed leg is graded on. inspect's installer
+          # carries SKILL.md plus scripts/references/assets and drops the
+          # rest, and this catalogue keeps reference.md and friends at the
+          # top level -- so the container held a third of each skill while
+          # the host legs held all of it, and the reports compared them.
+          assert hasattr(engine_verify, "files_to_restore"), (
+              "older skillscope: the sandboxed room is missing most of each skill"
+          )
           print("harness is current")
           CHECK
 
