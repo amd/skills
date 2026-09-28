@@ -101,7 +101,12 @@ jobs:
       # Everything that does not declare mi300x. `magpie-kernel-evaluator` is
       # GPU work that declares no machine.yml at all, so it runs here by
       # default rather than by intent -- keep an eye on what it reports.
-      SKILLS: local-ai-use
+      #
+      # All six, not one. The behavioral table quotes six skills and the trial
+      # had been grading `local-ai-use` alone, so five of those rows were
+      # months old and predated both the --effort and the missing-files fixes.
+      # 13 behavioral cases; the point is to refresh the table in one pass.
+      SKILLS: lemonade-router-builder,local-ai-app-integration,local-ai-use,magpie-kernel-evaluator,serving-llms-on-epyc,tracelens-analysis-orchestrator
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
