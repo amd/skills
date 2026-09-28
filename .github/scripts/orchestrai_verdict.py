@@ -10,6 +10,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 SAFE_STATUSES = {
     "passed",
@@ -143,6 +144,28 @@ def _safe_error(value: object) -> str:
     return "The behavioral result could not be verified."
 
 
+def _safe_report_url(value: object) -> str:
+    raw = str(value or "").strip()
+    if (
+        not raw
+        or len(raw) > 2048
+        or any(character.isspace() or character in '<>"' for character in raw)
+    ):
+        return ""
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return ""
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return ""
+    return raw
+
+
 def _write_step_summary(item: dict, run: dict, *, ok: bool, mock: bool) -> None:
     path = os.environ.get("GITHUB_STEP_SUMMARY", "").strip()
     if not path:
@@ -157,6 +180,10 @@ def _write_step_summary(item: dict, run: dict, *, ok: bool, mock: bool) -> None:
         handle.write(f"| Result | `{html.escape(status)}` |\n")
         if duration := _safe_duration(item.get("duration")):
             handle.write(f"| Duration | `{html.escape(duration)}` |\n")
+        if report_url := _safe_report_url(item.get("report_url")):
+            handle.write(
+                f"| ReportPortal | [View Results](<{html.escape(report_url)}>) |\n"
+            )
         if error := _safe_error(item.get("error")):
             error = html.escape(error)
             handle.write(f"\n> {error}\n")
@@ -193,13 +220,14 @@ def _summary_document(
     mock = status == "mock"
     duration = _safe_duration(item.get("duration"))
     error = _safe_error(item.get("error"))
+    report_url = _safe_report_url(item.get("report_url"))
     compact_item = {
         "skill": skill,
         "os": os_name,
         "status": status,
         "terminal": bool(item.get("terminal")),
     }
-    return {
+    document = {
         "skill": skill,
         "os": os_name,
         "status": status,
@@ -211,6 +239,9 @@ def _summary_document(
         "error": error,
         "results": [compact_item],
     }
+    if report_url:
+        document["report_url"] = report_url
+    return document
 
 
 def main() -> int:

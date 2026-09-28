@@ -447,9 +447,12 @@ class TriggerTests(unittest.TestCase):
         self.assertEqual(
             manifest["items"][1]["error"], "The behavioral test did not pass."
         )
+        self.assertEqual(
+            [item["report_url"] for item in manifest["items"]],
+            ["https://reports.example/launch/42"] * 2,
+        )
         self.assertNotIn("run-42", json.dumps(manifest))
         self.assertNotIn("reportportal_url", manifest["run"])
-        self.assertNotIn("reports.example", json.dumps(manifest))
 
     def test_classifies_private_test_output_with_fixed_safe_messages(self) -> None:
         cases = (
@@ -871,7 +874,7 @@ class TriggerTests(unittest.TestCase):
             self.assertNotIn("private-launcher", encoded)
             self.assertNotIn("secret", encoded)
 
-    def test_public_outputs_omit_private_report_links(self) -> None:
+    def test_public_outputs_include_only_safe_reportportal_links(self) -> None:
         live = {
             "rp_url": "https://reports.example/launch/42",
             "launcher_url": "https://launcher.example",
@@ -881,9 +884,26 @@ class TriggerTests(unittest.TestCase):
             reporting_plan(), live, mode="live"
         )
         sanitized = orchestrai_run.sanitized_live_snapshot(live)
-        encoded = json.dumps([manifest, sanitized])
-        self.assertNotIn("reports.example", encoded)
-        self.assertNotIn("reportportal", encoded.lower())
+        self.assertEqual(
+            manifest["items"][0]["report_url"],
+            "https://reports.example/launch/42",
+        )
+        self.assertNotIn("reports.example", json.dumps(sanitized))
+        self.assertNotIn("launcher.example", json.dumps([manifest, sanitized]))
+
+        for unsafe in (
+            "http://reports.example/launch/42",
+            "https://user:secret@reports.example/launch/42",
+            "javascript:alert(1)",
+            "https://reports.example/<script>",
+        ):
+            with self.subTest(unsafe=unsafe):
+                rejected = orchestrai_run.build_results_manifest(
+                    reporting_plan(),
+                    {**live, "rp_url": unsafe},
+                    mode="live",
+                )
+                self.assertNotIn("report_url", rejected["items"][0])
 
     def test_summary_prints_infrastructure_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -1026,6 +1046,7 @@ class VerdictTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             manifest_path = Path(temp) / "results.json"
             output_dir = Path(temp) / "test-results"
+            step_summary = Path(temp) / "step-summary.md"
             manifest_path.write_text(
                 json.dumps(
                     {
@@ -1039,6 +1060,7 @@ class VerdictTests(unittest.TestCase):
                                 "job_id": "private-job-id",
                                 "path": "https://internal-controller/path",
                                 "error": "",
+                                "report_url": "https://reports.example/launch/42",
                                 "stdout": "hello from the actor\n",
                                 "stderr": "",
                             }
@@ -1062,7 +1084,7 @@ class VerdictTests(unittest.TestCase):
                 ],
                 text=True,
                 capture_output=True,
-                env=isolated_subprocess_env(),
+                env=isolated_subprocess_env(GITHUB_STEP_SUMMARY=str(step_summary)),
                 check=False,
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
@@ -1071,6 +1093,13 @@ class VerdictTests(unittest.TestCase):
                 (output_dir / "summary.json").read_text(encoding="utf-8")
             )
             self.assertEqual(summary["passed"], 1)
+            self.assertEqual(
+                summary["report_url"], "https://reports.example/launch/42"
+            )
+            self.assertIn(
+                "[View Results](<https://reports.example/launch/42>)",
+                step_summary.read_text(encoding="utf-8"),
+            )
             self.assertNotIn("stdout", summary["results"][0])
             encoded = json.dumps(summary)
             self.assertNotIn("private-session-id", encoded)
@@ -1095,6 +1124,7 @@ class VerdictTests(unittest.TestCase):
                                 "status": "server-private-status",
                                 "duration": "host=internal-machine",
                                 "job_id": "private-job-id",
+                                "report_url": "https://user:secret@reports.example/launch/42",
                                 "error": "password=hunter2 on internal-machine",
                             }
                         ],
@@ -1170,6 +1200,7 @@ class ReportTests(unittest.TestCase):
                 "skill": "local-ai-use",
                 "os": "Linux",
                 "status": "passed",
+                "report_url": "https://reports.example/launch/42",
             }
         }
         rendered = orchestrai_report.render(
@@ -1181,6 +1212,9 @@ class ReportTests(unittest.TestCase):
         )
         self.assertIn("1 failed, 1 passed", rendered)
         self.assertIn("no per-skill result artifact was published", rendered)
+        self.assertIn(
+            "[View Results](<https://reports.example/launch/42>)", rendered
+        )
 
     def test_workflow_never_uploads_the_live_controller_snapshot(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(
@@ -1247,13 +1281,23 @@ class ReportTests(unittest.TestCase):
         self.assertNotIn("orchestrai_report.py", infra_line)
         self.assertNotIn("test_orchestrai_evals.py", infra_line)
 
-    def test_public_workflow_does_not_publish_private_report_links(self) -> None:
+    def test_public_workflow_does_not_publish_control_plane_links(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(
             encoding="utf-8"
         )
         self.assertNotIn("PUBLISH_REPORT_LINK", workflow)
         self.assertNotIn("View in OrchestrAI Portal", workflow)
-        self.assertNotIn("View in ReportPortal", workflow)
+        self.assertNotIn("View in Jenkins", workflow)
+
+    def test_routing_does_not_consume_a_strix_runner(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(
+            encoding="utf-8"
+        )
+        routing = workflow.split("\n  routing:\n", 1)[1].split(
+            "\n  orchestrai-behavioral:\n", 1
+        )[0]
+        self.assertIn("runs-on: ubuntu-latest", routing)
+        self.assertNotIn("strix_halo", routing)
 
     def test_skillscope_pin_has_one_source_of_truth(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(

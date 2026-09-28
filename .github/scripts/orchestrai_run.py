@@ -15,6 +15,7 @@ import urllib.request
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 TERMINAL_PIPELINE_STATES = {
     "passed",
@@ -89,6 +90,29 @@ def env(name: str, default: str = "") -> str:
 
 def log(message: str) -> None:
     print(f"[orchestrai] {message}", flush=True)
+
+
+def safe_report_url(value: object) -> str:
+    """Return a safe HTTPS ReportPortal launch URL for public summaries."""
+    raw = str(value or "").strip()
+    if (
+        not raw
+        or len(raw) > 2048
+        or any(character.isspace() or character in '<>"' for character in raw)
+    ):
+        return ""
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return ""
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return ""
+    return raw
 
 
 def require_linux_provisioning(plan: dict) -> None:
@@ -657,6 +681,11 @@ def build_results_manifest(
         live_sessions = []
     failure_summary = jenkins_failure_summary(live)
     launcher_reachable = launcher.get("reachable")
+    report_url = safe_report_url(
+        live.get("rp_url") or live.get("rp_launch_url")
+        if isinstance(live, dict)
+        else ""
+    )
     if (
         not failure_summary
         and pipeline_status in {"failed", "unstable", "error", "cancelled", "aborted"}
@@ -680,6 +709,8 @@ def build_results_manifest(
             "error": "",
             "terminal": False,
         }
+        if report_url:
+            item["report_url"] = report_url
         matches = [
             session
             for session in live_sessions
@@ -1005,16 +1036,18 @@ def summary(
             handle.write("```\n")
         items = (results or {}).get("items") or []
         if items:
-            handle.write("\n| Skill | OS | Result |\n")
-            handle.write("|---|---|---|\n")
+            handle.write("\n| Skill | OS | Result | ReportPortal |\n")
+            handle.write("|---|---|---|---|\n")
             for item in items:
                 status = str(item.get("status") or "unknown")
                 icon = (
                     "✅" if status == "passed" else ("🧪" if status == "mock" else "❌")
                 )
+                report_url = safe_report_url(item.get("report_url"))
+                report = f"[View Results](<{report_url}>)" if report_url else "—"
                 handle.write(
                     f"| `{item.get('skill', '')}` | {item.get('os', '')} | "
-                    f"{icon} `{status}` |\n"
+                    f"{icon} `{status}` | {report} |\n"
                 )
 
 

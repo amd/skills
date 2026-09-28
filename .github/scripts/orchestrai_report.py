@@ -9,6 +9,7 @@ import html
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -17,6 +18,28 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-json", default="[]")
     parser.add_argument("--output", type=Path, default=Path("orchestrai-report.md"))
     return parser
+
+
+def _safe_report_url(value: object) -> str:
+    raw = str(value or "").strip()
+    if (
+        not raw
+        or len(raw) > 2048
+        or any(character.isspace() or character in '<>"' for character in raw)
+    ):
+        return ""
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return ""
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return ""
+    return raw
 
 
 def _expected(raw: str) -> list[tuple[str, str]]:
@@ -108,15 +131,24 @@ def render(
             ]
         )
     if rendered_rows:
-        lines.extend(["| Skill | OS | Result | Detail |", "|---|---|---|---|"])
+        lines.extend(
+            [
+                "| Skill | OS | Result | ReportPortal | Detail |",
+                "|---|---|---|---|---|",
+            ]
+        )
         for row in rendered_rows:
             status = str(row.get("status") or "unknown").lower()
             icon = "✅" if status == "passed" else ("🧪" if status == "mock" else "❌")
             detail = html.escape(str(row.get("error") or "")[:240]) or "—"
+            report_url = _safe_report_url(row.get("report_url"))
+            report = (
+                f"[View Results](<{html.escape(report_url)}>)" if report_url else "—"
+            )
             lines.append(
                 f"| `{html.escape(str(row.get('skill') or ''))}` | "
                 f"{html.escape(str(row.get('os') or ''))} | {icon} `{html.escape(status)}` | "
-                f"{detail} |"
+                f"{report} | {detail} |"
             )
     return "\n".join(lines) + "\n"
 
