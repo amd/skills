@@ -598,32 +598,5 @@ class TestSkillFanOut(unittest.TestCase):
         self.assertIn("skills/gone", err)
 
 
-class TestPublishList(unittest.TestCase):
-    """The nightly bump passes `--skip-publish-list`, so a federated skill a
-    maintainer left out of the bundle stays out of it."""
-
-    MARKETPLACE = {"plugins": [{"name": "amd-skills", "skills": ["./skills/kept"]}]}
-
-    def run_main(self, *extra: str) -> dict:
-        with tempfile.TemporaryDirectory() as tmp:
-            catalog = Path(tmp) / "federation.json"
-            catalog.write_text(json.dumps(one_source()), encoding="utf-8")
-            marketplace = Path(tmp) / "marketplace.json"
-            marketplace.write_text(json.dumps(self.MARKETPLACE), encoding="utf-8")
-            with mock.patch.object(fed, "SKILLS_DIR", Path(tmp) / "skills"), \
-                    mock.patch.object(fed, "CLAUDE_MARKETPLACE", marketplace), \
-                    mock.patch.object(fed, "import_source", return_value=[]), \
-                    redirect_stdout(io.StringIO()):
-                self.assertEqual(fed.main(["--catalog", str(catalog), *extra]), 0)
-            return json.loads(marketplace.read_text(encoding="utf-8"))
-
-    def test_skip_leaves_the_marketplace_untouched(self):
-        self.assertEqual(self.run_main("--skip-publish-list"), self.MARKETPLACE)
-
-    def test_by_default_declared_skills_are_added(self):
-        skills = self.run_main()["plugins"][0]["skills"]
-        self.assertEqual(skills, ["./skills/kept", "./skills/myproject-my-skill"])
-
-
 if __name__ == "__main__":
     unittest.main(verbosity=2)

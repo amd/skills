@@ -123,8 +123,10 @@ skill that is already federated on `main`, and make sure your `as:` name does
 not match a skill already under `skills/`, since the import replaces that
 folder.
 
-The importer also adds your skill to the published bundle, so there is no
-manifest to edit by hand.
+The importer never touches the marketplace. To ship your skill in the bundle,
+add its `./skills/<name>` entry to the `skills` array in
+`.claude-plugin/marketplace.json` by hand; `publish.sh` then propagates it to
+the Cursor and Codex manifests.
 
 ## 4. Open a pull request
 

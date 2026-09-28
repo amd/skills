@@ -54,9 +54,9 @@ For each declared skill, the script:
    from the source metadata when the upstream copy doesn't already ship
    one, so the imported skill satisfies the card validation gate (see
    docs/skill-requirements.md).
-7. Adds each declared skill to the bundle's `skills` array in
-   `.claude-plugin/marketplace.json` (as a `./skills/<name>` path) so it
-   ships in the single AMD plugin, unless `--skip-publish-list` is passed.
+
+The marketplace manifests are never edited here. Whether a skill ships in
+the bundle is decided by hand in `.claude-plugin/marketplace.json`.
 
 Nothing is ever deleted here. A vendored skill that is no longer declared
 in `.github/federation.json` is reported and left alone; removing it is a
@@ -108,7 +108,6 @@ import federation_branches as branches  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CATALOG_FILE = REPO_ROOT / ".github" / "federation.json"
 SKILLS_DIR = REPO_ROOT / "skills"
-CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 MARKER_FILENAME = ".federated.json"
 # Never part of a skill's content: these appear only in a working copy, and
 # hashing them would make change detection depend on whether someone happened
@@ -121,9 +120,6 @@ MAX_FILE_BYTES = 100 * 1024
 # the product repo's, so the catalog may have to say it where upstream does
 # not. When upstream does ship one, upstream's wins like any other file.
 LOCAL_FALLBACK_FILES = ("evals/machine.yml",)
-# The bundle references each published skill as `./skills/<name>` in the
-# marketplace plugin entry's `skills` array.
-SKILLS_PATH_PREFIX = "./skills/"
 CARD_FILENAME = "skill-card.md"
 
 FRONTMATTER_RE = re.compile(
@@ -733,49 +729,6 @@ def rewrite_skill_name(skill_dir: Path, new_name: str, log: list[str]) -> None:
     log.append(f"    [SKILL.md] name -> {new_name}")
 
 
-def update_publish_list(declared: Iterable[str]) -> bool:
-    """Sync the bundle's `skills` array in `.claude-plugin/marketplace.json`.
-
-    AMD ships a single curated plugin whose `skills` array lists the published
-    skills as `./skills/<name>` paths. Newly vendored federated skills are
-    added so they ship in the bundle. The existing curation order is
-    preserved; freshly added skills are appended in sorted order for a
-    deterministic diff.
-
-    Returns True when the file was modified.
-    """
-    data = json.loads(CLAUDE_MARKETPLACE.read_text(encoding="utf-8"))
-    plugins = data.get("plugins")
-    if not isinstance(plugins, list) or not plugins or not isinstance(plugins[0], dict):
-        raise ValueError(
-            f"{CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)} must define a bundle "
-            "plugin entry to sync federated skills into."
-        )
-    entry = plugins[0]
-    skills = entry.get("skills")
-    if not isinstance(skills, list):
-        skills = []
-
-    present = {
-        s[len(SKILLS_PATH_PREFIX) :].strip("/")
-        for s in skills
-        if isinstance(s, str) and s.startswith(SKILLS_PATH_PREFIX)
-    }
-    additions = sorted(
-        f"{SKILLS_PATH_PREFIX}{name}" for name in declared if name not in present
-    )
-    new_skills = skills + additions
-
-    changed = new_skills != skills
-    if changed:
-        entry["skills"] = new_skills
-        CLAUDE_MARKETPLACE.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-    return changed
-
-
 def import_source(
     source: Source,
     log: list[str],
@@ -1078,15 +1031,6 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PATH",
         help="Write a JSON summary of the run (including a PR title and body).",
     )
-    parser.add_argument(
-        "--skip-publish-list",
-        action="store_true",
-        help=(
-            "Leave .claude-plugin/marketplace.json untouched. The nightly "
-            "workflow passes this: a bump refreshes skills/ only, and whether "
-            "a skill ships in the bundle is a maintainer's decision."
-        ),
-    )
     args = parser.parse_args(argv)
 
     sources = parse_federation(args.catalog)
@@ -1165,10 +1109,6 @@ def main(argv: list[str] | None = None) -> int:
     if not only:
         report_undeclared(declared, existing_federated, log)
 
-    publish_changed = (
-        False if args.skip_publish_list else update_publish_list(declared)
-    )
-
     for line in log:
         print(line)
 
@@ -1182,7 +1122,6 @@ def main(argv: list[str] | None = None) -> int:
     print("")
     print(f"Bumped: {len(summary['updated'])} skill(s)")
     print(f"Already up to date: {len(summary['unchanged'])} skill(s)")
-    print(f"Publish list: {'changed' if publish_changed else 'unchanged'}")
     if summary["title"]:
         print(f"Pull request title: {summary['title']}")
     return 0

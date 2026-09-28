@@ -108,12 +108,14 @@ See [evals.md](evals.md) for what to put in the file and how it is graded.
 
 All published skills ship together in one `amd-skills` plugin, listed as
 `./skills/<name>` entries in
-[`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json). The
-importer adds your entry for you, and `./.github/scripts/publish.sh`
-regenerates the derived Cursor, Codex, and repo-marketplace manifests from it.
+[`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json). That
+file is the reference manifest and the only one edited by hand: add your
+`./skills/<name>` entry to its `skills` array, then run
+`./.github/scripts/publish.sh` to regenerate the derived Cursor, Codex, and
+repo-marketplace manifests from it.
 
-Nothing here is hand-edited. The validator only checks that the manifests are
-in sync, so if it complains, rerun `publish.sh` and commit the result.
+Never hand-edit the derived manifests. The validator checks that they are in
+sync, so if it complains, rerun `publish.sh` and commit the result.
 
 ## Before you open the PR
 
