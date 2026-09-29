@@ -33,6 +33,7 @@
     {
       "repo": "amd/Quark",
       "license": "MIT",
+      "branch": "release/*",
       "skills": [
         {
           "path": "skills/quark-torch-ptq",
