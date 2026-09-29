@@ -35,7 +35,11 @@ permissions:
   contents: read
 
 env:
-  ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
+  # NOT set workflow-wide. The Instinct pool sits outside the network this
+  # host is on and cannot reach it; inheriting it there is what made four
+  # runs hang until their 300-minute timeout. Each job that can reach the
+  # gateway sets it for itself.
+  #
   # Every skill with a dataset. The room is the whole catalogue on purpose:
   # routing pools each skill's prompts as its neighbours' negatives, so a skill
   # left out of the room is a set of negatives nobody is asserting. Earlier
@@ -52,13 +56,13 @@ jobs:
     name: Which pools to run
     runs-on: ubuntu-latest
     outputs:
-      linux: "true"
-      instinct: "false"
+      linux: "false"
+      instinct: "true"
       windows: "false"
       # Four Instinct runs have timed out and none produced a report, so
       # nothing says whether the container starts, sees the card, or reaches
       # the network. Ask before spending another two hours.
-      instinct_diagnose: "false"
+      instinct_diagnose: "true"
       # Two Windows failures have each survived a fix aimed at a theory. This
       # run measures instead, and spends nothing on the model.
       windows_diagnose: "false"
@@ -71,7 +75,7 @@ jobs:
       # agent does, so re-running buys a second copy of numbers already in
       # hand at an hour of model spend. Turn it on when the behavioral path
       # itself changes.
-      behavioral: "true"
+      behavioral: "false"
       # On. The repair worked -- run 35886543177 resolved to podman, the first
       # Linux run to do so since 2026-09-15 -- so there is a real container to
       # measure in for the first time. Four passes over the whole room: the
@@ -94,6 +98,7 @@ jobs:
     runs-on: ["self-hosted", "strix_halo", "Linux"]
     timeout-minutes: 180
     env:
+      ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
       ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
       ANTHROPIC_CUSTOM_HEADERS: |
         Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
@@ -328,6 +333,7 @@ jobs:
           print("harness is current")
           CHECK
 
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -464,13 +470,28 @@ jobs:
     name: The two skills that need an Instinct card
     needs: config
     if: needs.config.outputs.instinct == 'true'
-    runs-on: ["self-hosted", "mi300x", "gpu", "rocm"]
+    # The labels `evals.yml` uses for this pool. An earlier version of this
+    # job asked for ["self-hosted", "mi300x", "gpu", "rocm"], which is not the
+    # set the pool advertises.
+    runs-on: ["self-hosted", "Linux", "X64"]
     timeout-minutes: 300
+    # Where this pool's Anthropic access lives. It holds no API key: the four
+    # federation IDs below are not secrets, and the job trades a GitHub OIDC
+    # token for a short-lived Anthropic one.
+    environment: behavioral-instinct
+    permissions:
+      contents: read
+      # Required to request the OIDC token. Without it `credentials.py` gets
+      # no ACTIONS_ID_TOKEN_REQUEST_URL and the exchange cannot start.
+      id-token: write
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
-      ANTHROPIC_CUSTOM_HEADERS: |
-        Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
-        user: a1_ucicd
+      # Deliberately no ANTHROPIC_BASE_URL, no key, no gateway headers. This
+      # pool is off the network the gateway is on and talks straight to
+      # api.anthropic.com. Four runs hung here for the full 300 minutes
+      # because the job inherited a workflow-level base URL it had no route
+      # to -- and `evals.yml` says so in as many words: "The gateway runners
+      # above can't [use OIDC], since those tokens only work with
+      # api.anthropic.com."
       SKILLS: hyperloom-workload-optimizer
       ENGINES: claude-code
     steps:
@@ -478,6 +499,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
 
       # Falling through to `local` is what this used to do, and it cost six
       # weeks of results: from 2026-09-15 onwards the Linux runner's podman
@@ -523,6 +545,19 @@ jobs:
             "skillscope[podman,verify] @ git+https://github.com/rominf/skillscope@inspect-engine"
           python -m pip install --force-reinstall --no-deps --no-cache-dir \
             "skillscope @ git+https://github.com/rominf/skillscope@inspect-engine"
+      # The same exchange `skill-evals.yml` performs for this pool. Run here
+      # rather than through the reusable workflow because this trial drives a
+      # candidate harness, and placed after the install because it uses that
+      # harness's own `credentials.py`. Writes ANTHROPIC_AUTH_TOKEN into
+      # GITHUB_ENV. The four IDs are copied from evals.yml and are
+      # identifiers, not secrets.
+      - name: Trade the OIDC token for an Anthropic one
+        env:
+          FEDERATION_RULE_ID: fdrl_014u39zsJmsex5SkL1gWg7qo
+          FEDERATION_ORGANIZATION_ID: 9bdff596-1595-4140-8301-817e43ef8412
+          FEDERATION_SERVICE_ACCOUNT_ID: svac_016zcTqZ4XkFdjAJCag9jQC9
+          FEDERATION_WORKSPACE_ID: wrkspc_01EUPtU7mqFtoQowMAREPvoq
+        run: python -m skillscope.credentials
 
       - uses: actions/setup-node@v4
         with:
@@ -577,6 +612,7 @@ jobs:
     runs-on: ["self-hosted", "strix_halo", "Windows"]
     timeout-minutes: 180
     env:
+      ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
       ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
       ANTHROPIC_CUSTOM_HEADERS: |
         Ocp-Apim-Subscription-Key: ${{ secrets.ORCHESTR_API_KEY }}
