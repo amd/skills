@@ -594,6 +594,28 @@ jobs:
               echo "::endgroup::"
             done
           done
+
+          # `continue-on-error` below keeps one bad skill from discarding the
+          # rest, but it also means GitHub marks this step green whatever
+          # happened. That is how a run went green having graded two cases 4/4
+          # and then crashed writing the report: the only trace was a missing
+          # file nothing looked for, on hardware that is scarce and slow to
+          # book. Say it where the run page shows it.
+          missing=""
+          for engine in $ENGINES; do
+            for skill in $SKILLS; do
+              [ -s "instinct-$engine-$skill.json" ] \
+                || missing="$missing $skill($engine)"
+            done
+          done
+          if [ -n "$missing" ] || [ "$status" -ne 0 ]; then
+            {
+              echo "### :warning: Instinct produced no report for:\`$missing\`"
+              echo
+              echo "Cases may still have been graded -- check the .eval log in"
+              echo "the artifact before concluding the run measured nothing."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           exit $status
 
       - name: Keep the reports and the transcripts
