@@ -101,9 +101,6 @@ class Cli:
                 self.env[var] = str(config)
         self.env.update(
             {
-                # CI installs must never reach the skills.sh install counts.
-                "DISABLE_TELEMETRY": "1",
-                "DO_NOT_TRACK": "1",
                 "NO_COLOR": "1",
                 "CI": "1",
                 "GIT_TERMINAL_PROMPT": "0",

@@ -34,7 +34,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DISABLE_TELEMETRY: "1"
   DO_NOT_TRACK: "1"
   SKILLS_CLI_VERSION: ${{ inputs.cli-version || '1.7.0' }}
 
