@@ -93,6 +93,19 @@ def check() -> None:
     if not hasattr(engine_verify, "files_to_restore"):
         _fail("the sandboxed room is missing most of each skill")
 
+    # A hook that does not run leaves no trace: the case is graded as though
+    # its setup happened. On a shared GPU runner that means leaked containers
+    # holding memory into whatever runs next.
+    from skillscope.engine import hooks as engine_hooks
+
+    if not hasattr(engine_hooks, "setup_solver"):
+        _fail("evals/hooks.py setup and teardown would be skipped")
+    behavioral_src = inspect.getsource(
+        __import__("skillscope.engine.behavioral", fromlist=["x"]).build_task
+    )
+    if "cleanup=hooks.cleanup_fn" not in behavioral_src:
+        _fail("the behavioral task does not wire teardown to Task.cleanup")
+
     # --- counting, checked by behaviour ----------------------------------
     #
     # A bridged turn arrives on the sample and in the transcript as two

@@ -57,8 +57,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       linux: "false"
-      instinct: "false"
-      windows: "true"
+      instinct: "true"
+      windows: "false"
       # Diagnose and grade are mutually exclusive: the behavioral step is
       # gated on `instinct_diagnose != 'true'`, so leaving this on skips the
       # graded run rather than adding context to it. Diagnose answers whether
@@ -413,7 +413,7 @@ jobs:
       # to -- and `evals.yml` says so in as many words: "The gateway runners
       # above can't [use OIDC], since those tokens only work with
       # api.anthropic.com."
-      SKILLS: hyperloom-workload-optimizer
+      SKILLS: hyperloom-workload-optimizer serving-llms-on-instinct
       ENGINES: claude-code
     steps:
       - uses: actions/checkout@v4
