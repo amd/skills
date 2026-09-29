@@ -59,10 +59,13 @@ jobs:
       linux: "false"
       instinct: "true"
       windows: "false"
-      # Four Instinct runs have timed out and none produced a report, so
-      # nothing says whether the container starts, sees the card, or reaches
-      # the network. Ask before spending another two hours.
-      instinct_diagnose: "true"
+      # Diagnose and grade are mutually exclusive: the behavioral step is
+      # gated on `instinct_diagnose != 'true'`, so leaving this on skips the
+      # graded run rather than adding context to it. Diagnose answers whether
+      # the container starts, sees the card and reaches the network -- which
+      # run 36526038473 confirmed, along with the federation exchange -- and
+      # then it goes off so the grading can happen.
+      instinct_diagnose: "false"
       # Two Windows failures have each survived a fix aimed at a theory. This
       # run measures instead, and spends nothing on the model.
       windows_diagnose: "false"
