@@ -247,104 +247,9 @@ jobs:
       # Assume nothing about which build arrived: name something only the
       # current one has, and fail loudly rather than trialling last week's.
       - name: Check which harness actually installed
-        run: |
-          python - <<'CHECK'
-          import inspect
-          from skillscope import cli
-          from skillscope.engine import tools, verify
-          assert hasattr(tools, "workdir_path"), "older skillscope: no workdir_path"
-          assert "cwd=" in inspect.getsource(verify.build_task), (
-              "older skillscope: the claude-code leg still runs at the container root"
-          )
-          # The one that matters for this run. A literal tuple here once meant
-          # the host-CLI engine silently ran a different one while the report
-          # named the engine asked for. There is no guard left to get wrong --
-          # `legacy` is gone and every engine is an inspect engine -- so assert
-          # the dispatch names each engine it has, and refuses the rest.
-          _src = inspect.getsource(cli.cmd_behavioral)
-          for _e in cli.ENGINES:
-              assert f'args.engine == "{_e}"' in _src, (
-                  f"older skillscope: no behavioral branch for {_e}"
-              )
-          assert "has no behavioral leg" in _src, (
-              "older skillscope: the behavioral dispatch still has a silent default"
-          )
-          assert set(cli.INSPECT_ENGINES) == set(cli.ENGINES)
-          assert "legacy" not in cli.ENGINES, (
-              "older skillscope: the legacy engine is still present"
-          )
-          # Renamed: the old name said which binary it drove, which stopped
-          # distinguishing anything once every engine drove the same one.
-          from skillscope.engine import no_sandbox
-          assert hasattr(no_sandbox, "install_skill"), (
-              "older skillscope: the host leg runs the CLI with no skill installed"
-          )
-          assert "inspect" not in cli.ENGINES, (
-              "older skillscope: the harness-independent engine is still present"
-          )
-          # The reason this trial is being re-run: routing used to have one leg.
-          assert set(cli.ROUTING_ENGINES) == set(cli.ENGINES), (
-              "older skillscope: routing does not yet run on every engine"
-          )
-          from skillscope.engine import routing as engine_routing
-          assert hasattr(engine_routing, "routing_decision"), (
-              "older skillscope: routing cannot stop at the decision"
-          )
-          # What this run exists to measure. Without the guard a stale install
-          # would produce a clean-looking report of the behaviour being fixed:
-          # the host leg answering on its first tool call and then doing the
-          # whole job, which is most of that leg's cost and none of its result.
-          assert hasattr(engine_routing, "host_stop_when_factory"), (
-              "older skillscope: the host leg still works on after it decides"
-          )
-          # The budget was refitted after the last run. Three came from a mean
-          # that summed deciding and rummaging cases together; two is the
-          # measured decision peak doubled. A report generated under the old
-          # number is not comparable to this one.
-          assert engine_routing.SANDBOX_BUDGET_FACTOR == 2, (
-              "older skillscope: the routing budget predates its recalibration"
-          )
-          # The confound this run exists to remove. The sandboxed legs reach
-          # the agent through inspect_swe, whose effort argument defaults to
-          # the model's own rather than to the one every other leg is given --
-          # so the last comparison had one leg thinking as hard as it was told
-          # and another thinking as hard as it liked.
-          import inspect as _pyi
-          from skillscope.engine import verify as engine_verify
-          assert "effort" in _pyi.signature(engine_verify.build_task).parameters, (
-              "older skillscope: the sandboxed behavioral leg drops --effort"
-          )
-          assert "effort=" in _pyi.getsource(engine_routing._solver), (
-              "older skillscope: the sandboxed routing leg drops --effort"
-          )
-          # Counting, not grading: a bridged turn arrives on the sample and in
-          # the transcript as two objects with different message ids, and
-          # keying on those counted every call twice. Checked by behaviour --
-          # there is no version to read, and the column is the whole point of
-          # the run.
-          class _C:
-              def __init__(s, i): s.id, s.function, s.arguments = i, "Bash", {}
-          class _M:
-              def __init__(s, i, c): s.id, s.role, s.tool_calls = i, "assistant", c
-          class _E:
-              def __init__(s, m): s.output = type("O", (), {"message": m})()
-          class _S:
-              def __init__(s, m, e): s.messages, s.events = m, e
-          _dup = _S([_M("adopted", [_C("toolu_1")])], [_E(_M("transcript", [_C("toolu_1")]))])
-          assert len(list(engine_routing._tool_calls(_dup))) == 1, (
-              "older skillscope: one bridged turn is still counted twice"
-          )
-          # The room the sandboxed leg is graded on. inspect's installer
-          # carries SKILL.md plus scripts/references/assets and drops the
-          # rest, and this catalogue keeps reference.md and friends at the
-          # top level -- so the container held a third of each skill while
-          # the host legs held all of it, and the reports compared them.
-          assert hasattr(engine_verify, "files_to_restore"), (
-              "older skillscope: the sandboxed room is missing most of each skill"
-          )
-          print("harness is current")
-          CHECK
-
+        # Shared with the Windows job. Two copies drifted apart once and the
+        # stale one failed a run on hardware that is slow to book.
+        run: python .github/scripts/check_harness.py
 
       - uses: actions/setup-node@v4
         with:
@@ -352,9 +257,11 @@ jobs:
       - name: Install the claude CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      # Routing now has a leg on every engine, which is the point of this
-      # re-run. `legacy` is the baseline every recorded result was graded
-      # against; `claude-code` is the only leg whose room is guaranteed to hold
+      # Routing has a leg on every engine, which is the point of this
+      # re-run. `claude-code-no-sandbox` is the baseline now -- it replaced
+      # `legacy` on measured parity, and is what every other number is
+      # compared against; `claude-code` is the only leg whose room is
+      # guaranteed to hold
       # exactly the skills asked for, because its guest has no `~/.claude` to
       # contribute; `claude-code-no-sandbox` is what Windows gets, and it
       # refuses to start without ANTHROPIC_API_KEY because that credential is
@@ -688,19 +595,11 @@ jobs:
       # below reported that as success. Check the import before spending
       # anything.
       - name: Check the harness can actually run
-        # One line on purpose: PowerShell has no heredoc, and a here-string
-        # needs its terminator at column zero, which YAML indentation forbids.
-        run: |
-          python -c "import inspect, inspect_ai; from skillscope import cli; from skillscope.engine import no_sandbox; _s = inspect.getsource(cli.cmd_behavioral); assert all(f'args.engine == \"{e}\"' in _s for e in cli.ENGINES), 'older skillscope: an engine has no behavioral branch'; assert 'has no behavioral leg' in _s, 'older skillscope: the behavioral dispatch still has a silent default'; assert set(cli.INSPECT_ENGINES) == set(cli.ENGINES), 'older skillscope: not every engine runs under inspect'; assert 'legacy' not in cli.ENGINES, 'older skillscope: the legacy engine is still present'; assert cli.DEFAULT_ENGINE == 'claude-code-no-sandbox', 'older skillscope: the default is not the leg this runner can use'; assert hasattr(no_sandbox, 'install_skill'), 'older skillscope: the CLI runs with no skill installed'; assert 'inspect' not in cli.ENGINES, 'older skillscope: the harness-independent engine is still present'; from skillscope.engine import tools; assert 'FileNotFoundError' in inspect.getsource(tools.shell_prefix), 'older skillscope: the shell probe dies where there is no bash'; print('ok', inspect_ai.__version__)"
+        # A file, not `python -c`. PowerShell has no heredoc, so this lived on
+        # one line -- and an f-string's braces read to PowerShell as a
+        # ScriptBlock, which cost a run on this pool to discover.
+        run: python .github/scripts/check_harness.py
 
-      # This job is about the engine, not the skills. Most of this catalogue
-      # targets Linux hardware and tooling, so failures here are expected and
-      # say nothing about those skills -- what is being tested is whether real
-      # Claude Code runs at all under inspect_ai on a Windows host, which is
-      # the claim that makes `inspect_swe` being Linux-only survivable.
-      #
-      # `lemonade-router-builder` is the exception worth reading closely: it is
-      # the one skill here whose subject matter is native to this platform.
       - name: What does this runner actually have?
         if: needs.config.outputs.windows_diagnose == 'true'
         run: python .github/scripts/win_diag.py
