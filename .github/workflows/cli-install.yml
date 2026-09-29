@@ -1,0 +1,170 @@
+name: cli-install
+
+# Installs this catalog through `npx skills add`, the path users take, and
+# checks what lands on disk. See .github/scripts/test_cli_install.py for the
+# scenarios.
+#
+# Runs nightly, about an hour after federate-skills.yml, so it also covers the
+# skills that run imports from other repos without a pull request.
+#
+#   local       `main` installed from its checkout path; clones nothing.
+#   remote      amd/skills cloned from GitHub in every source form the README
+#               documents -- what users get.
+#   latest-cli  the same against the newest CLI release, as an early warning.
+#
+# Telemetry is off for every job, so none of these installs reach the skills.sh
+# install counts; the test script forces it off as well.
+
+on:
+  schedule:
+    # 07:23 UTC, after the 06:17 federation run has had time to land.
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+    inputs:
+      cli-version:
+        description: "`skills` CLI version for the pinned jobs (default 1.7.0)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cli-install-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DISABLE_TELEMETRY: "1"
+  DO_NOT_TRACK: "1"
+  SKILLS_CLI_VERSION: ${{ inputs.cli-version || '1.7.0' }}
+
+jobs:
+  local:
+    name: local / ${{ matrix.os }} / ${{ matrix.mode }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        mode: [symlink, copy]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install from the checkout
+        shell: bash
+        run: uv run .github/scripts/test_cli_install.py --source . --mode "${{ matrix.mode }}"
+
+  # Every remote job checks the clone against one checkout, so they all need the
+  # same revision of `main`, resolved once up front.
+  resolve:
+    name: Resolve main
+    if: github.repository == 'amd/skills'
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.main.outputs.sha }}
+    steps:
+      - id: main
+        run: |
+          sha=$(git ls-remote https://github.com/amd/skills refs/heads/main | cut -f1)
+          test -n "$sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Testing amd/skills@$sha"
+
+  remote:
+    name: remote / ${{ matrix.os }} / ${{ matrix.source }} / ${{ matrix.mode }}
+    needs: resolve
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        mode: [symlink, copy]
+        source: [shorthand, https, pinned-repo, pinned-skill]
+        include:
+          - source: shorthand
+            spec: "amd/skills"
+          - source: https
+            spec: "https://github.com/amd/skills"
+          - source: pinned-repo
+            spec: "https://github.com/amd/skills/tree/@SHA@"
+          - source: pinned-skill
+            spec: "https://github.com/amd/skills/tree/@SHA@/skills/local-ai-use"
+            extra: "--expect local-ai-use --scenarios install reinstall remove global update"
+    env:
+      SHA: ${{ needs.resolve.outputs.sha }}
+    steps:
+      - name: Check out amd/skills at the resolved main
+        uses: actions/checkout@v4
+        with:
+          repository: amd/skills
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install from GitHub
+        shell: bash
+        env:
+          SPEC: ${{ matrix.spec }}
+        run: |
+          uv run .github/scripts/test_cli_install.py \
+            --source "${SPEC//@SHA@/$SHA}" --mode "${{ matrix.mode }}" ${{ matrix.extra }}
+
+      # The unpinned forms clone whatever `main` is when they run; a merge
+      # landing mid-run makes them disagree with the checkout.
+      - name: Flag a moved main
+        if: failure() && (matrix.source == 'shorthand' || matrix.source == 'https')
+        shell: bash
+        run: |
+          now=$(git ls-remote https://github.com/amd/skills refs/heads/main | cut -f1)
+          if [ "$now" != "$SHA" ]; then
+            echo "::warning::main moved from $SHA to $now during the run; re-run before trusting this failure."
+          fi
+
+  latest-cli:
+    name: latest CLI / ${{ matrix.os }}
+    needs: resolve
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      SKILLS_CLI_VERSION: latest
+    steps:
+      - name: Check out amd/skills at the resolved main
+        uses: actions/checkout@v4
+        with:
+          repository: amd/skills
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install with the latest CLI
+        shell: bash
+        run: |
+          uv run .github/scripts/test_cli_install.py \
+            --source "https://github.com/amd/skills/tree/${{ needs.resolve.outputs.sha }}"
