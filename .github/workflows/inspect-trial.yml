@@ -57,8 +57,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       linux: "false"
-      instinct: "true"
-      windows: "false"
+      instinct: "false"
+      windows: "true"
       # Diagnose and grade are mutually exclusive: the behavioral step is
       # gated on `instinct_diagnose != 'true'`, so leaving this on skips the
       # graded run rather than adding context to it. Diagnose answers whether
