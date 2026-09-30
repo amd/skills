@@ -406,6 +406,12 @@ jobs:
       # no ACTIONS_ID_TOKEN_REQUEST_URL and the exchange cannot start.
       id-token: write
     env:
+      # On the job, not the minting step, because the behavioral loop re-mints
+      # between skills. Identifiers, not secrets.
+      FEDERATION_RULE_ID: fdrl_014u39zsJmsex5SkL1gWg7qo
+      FEDERATION_ORGANIZATION_ID: 9bdff596-1595-4140-8301-817e43ef8412
+      FEDERATION_SERVICE_ACCOUNT_ID: svac_016zcTqZ4XkFdjAJCag9jQC9
+      FEDERATION_WORKSPACE_ID: wrkspc_01EUPtU7mqFtoQowMAREPvoq
       # Deliberately no ANTHROPIC_BASE_URL, no key, no gateway headers. This
       # pool is off the network the gateway is on and talks straight to
       # api.anthropic.com. Four runs hung here for the full 300 minutes
@@ -473,11 +479,6 @@ jobs:
       # GITHUB_ENV. The four IDs are copied from evals.yml and are
       # identifiers, not secrets.
       - name: Trade the OIDC token for an Anthropic one
-        env:
-          FEDERATION_RULE_ID: fdrl_014u39zsJmsex5SkL1gWg7qo
-          FEDERATION_ORGANIZATION_ID: 9bdff596-1595-4140-8301-817e43ef8412
-          FEDERATION_SERVICE_ACCOUNT_ID: svac_016zcTqZ4XkFdjAJCag9jQC9
-          FEDERATION_WORKSPACE_ID: wrkspc_01EUPtU7mqFtoQowMAREPvoq
         run: python -m skillscope.credentials
 
       - uses: actions/setup-node@v4
@@ -501,10 +502,34 @@ jobs:
           SKILLSCOPE_SANDBOX: ${{ steps.sandbox.outputs.provider }}
           INSPECT_PODMAN_COMPOSE: podman-compose
         run: |
+          # The token this pool runs on lasts about twelve and a half minutes,
+          # and it is minted once at job start. A run that graded for longer
+          # than that died mid-case with `401 OAuth access token has expired`
+          # -- forty-eight times, twenty minutes in, on hardware that is slow
+          # to book. So mint a fresh one before each skill.
+          #
+          # Read back rather than left to $GITHUB_ENV: that file is applied
+          # between steps, and this is inside one. The delimiter is the
+          # writer's own.
+          mint() {
+            local scratch
+            scratch=$(mktemp)
+            if ! GITHUB_ENV="$scratch" python -m skillscope.credentials; then
+              rm -f "$scratch"; return 1
+            fi
+            ANTHROPIC_AUTH_TOKEN=$(
+              awk '/^ANTHROPIC_AUTH_TOKEN<</{getline; print; exit}' "$scratch"
+            )
+            export ANTHROPIC_AUTH_TOKEN
+            rm -f "$scratch"
+            [ -n "$ANTHROPIC_AUTH_TOKEN" ]
+          }
+
           status=0
           for engine in $ENGINES; do
             for skill in $SKILLS; do
               echo "::group::$skill ($engine)"
+              mint || { echo "FAILED: could not mint a token for $skill"; status=1; }
               skillscope behavioral --engine "$engine" --skills-dir 'skills/*' \
                 --timeout 3600 --skill "$skill" \
                 --output "instinct-$engine-$skill.json" \
