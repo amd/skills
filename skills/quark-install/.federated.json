@@ -1,0 +1,11 @@
+{
+  "source": "amd-quark",
+  "repo": "amd/Quark",
+  "ref": "release/*",
+  "resolved_ref": "release/0.13",
+  "commit": "313cb0b78ef364cb937598bc3431c46e28a226f4",
+  "path": "skills/quark-install",
+  "license": "MIT",
+  "content_hash": "67e90410400e75c4a0cef62aff2bea12f49435237f58f3dd39500c074515686a",
+  "imported_at": "2026-09-29T15:17:32Z"
+}

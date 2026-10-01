@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "model_analysis",
+  "type": "object",
+  "required": [
+    "analysis_status",
+    "model",
+    "quantization_targets",
+    "risks"
+  ],
+  "properties": {
+    "analysis_status": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "partial"
+      ]
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "model_path",
+        "model_type"
+      ],
+      "properties": {
+        "model_path": {
+          "type": "string"
+        },
+        "model_type": {
+          "type": "string"
+        },
+        "trust_remote_code": {
+          "type": "boolean"
+        },
+        "transformers_version": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "quantization_targets": {
+      "type": "object",
+      "required": [
+        "linear_layer_count",
+        "exclude_defaults"
+      ],
+      "properties": {
+        "linear_layer_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "has_non_linear_experts": {
+          "type": "boolean"
+        },
+        "exclude_defaults": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "severity",
+          "message"
+        ],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "recovery_hint": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

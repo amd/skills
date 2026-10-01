@@ -1,0 +1,11 @@
+{
+  "source": "amd-quark",
+  "repo": "amd/Quark",
+  "ref": "release/*",
+  "resolved_ref": "release/0.13",
+  "commit": "313cb0b78ef364cb937598bc3431c46e28a226f4",
+  "path": "skills/quark-torch-ptq",
+  "license": "MIT",
+  "content_hash": "b8135da2f24540f05ba4911b772c4f26f4e528976ea7910e0caf1e4260173726",
+  "imported_at": "2026-09-29T15:17:32Z"
+}
