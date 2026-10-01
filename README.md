@@ -140,7 +140,7 @@ The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integr
    gfx-target-...  triton-amd-...  ...               integration/    repos
 ```
 
-[`.github/federation.json`](.github/federation.json) is the whole registry: each
+[`.github/federation.json`](https://github.com/amd/skills/blob/main/.github/federation.json) is the whole registry: each
 entry names a source repo and the exact path of every skill folder to vendor
 from it.
 
@@ -157,7 +157,7 @@ A vendored skill mirrors its upstream folder, `evals/` included, so the
 datasets this repo grades a federated skill against are maintained in its
 product repo. Files over 100 KB, such as trace archives, stay upstream.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) to register a repo.
+See [CONTRIBUTING.md](https://github.com/amd/skills/blob/main/CONTRIBUTING.md) to register a repo.
 
 ## Manual installation
 
