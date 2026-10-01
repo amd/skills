@@ -79,6 +79,8 @@ Cross-stack skills, from client to cloud.
 | --- | --- | --- |
 | [`rocm-doctor`](https://github.com/amd/skills/blob/main/staging/rocm-doctor/SKILL.md) | Diagnose ROCm, HIP, PyTorch, or llama.cpp failures on AMD GPUs (Linux and Windows) against a closed list of known misconfigurations, then fix with consent or route upstream. Thin driver over the `rocm` CLI (`examine`, `diagnose`, or `fix`). | _planned_ |
 | [`lemonade-router-builder`](https://github.com/amd/skills/blob/main/skills/lemonade-router-builder/SKILL.md) | Set up a Lemonade model router that handles requests based on content, sensitivity, or required capabilities. | in-repo |
+| [`quark-install`](https://github.com/amd/skills/blob/main/skills/quark-install/SKILL.md) | Install or verify AMD Quark with an accelerator-matched PyTorch, from PyPI, a native-wheel index, a local wheel, or source, then verify imports, kernels, and `quark-cli`. | [Quark](https://github.com/amd/Quark) |
+| [`quark-torch-llm-ptq`](https://github.com/amd/skills/blob/main/skills/quark-torch-llm-ptq/SKILL.md) | Quantize PyTorch / Hugging Face LLMs with AMD Quark post-training quantization: inspect the model, pick a scheme (FP8, INT4, and more), and produce a verified quantized model. | [Quark](https://github.com/amd/Quark) |
 | `hrr-replay-analysis` | Record, replay, and analyze GPU workload behavior on ROCm across AMD Instinct, Radeon, and Ryzen hardware using HIP Record and Replay archives. | _planned_ |
 
 ### Server-native
