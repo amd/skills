@@ -19,6 +19,11 @@ skills are published and so compete for a prompt, which runners we own, and
 which key pays for a run. The graders themselves are not in this repo, so the
 same prompts score the same way in your product repo as they do here.
 
+Dataset discovery and OrchestrAI behavioral execution use the same immutable
+commit: the PR head for pull requests, or the triggering commit for other events.
+Discovery does not use GitHub's synthetic PR merge, which could contain skills
+from newer upstream commits that are absent from the tested PR head.
+
 For Strix behavioral runs, each GitHub skill/OS job includes a **Sanitized grader
 output** log group. Each job also shows the case/expectation totals, model and
 effort, and an **Unmet expectations** table with case IDs and sanitized judge

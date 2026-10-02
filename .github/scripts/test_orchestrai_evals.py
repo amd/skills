@@ -2956,6 +2956,21 @@ class ReportTests(unittest.TestCase):
             workflow,
         )
 
+    def test_discovery_and_orchestrai_use_the_same_commit(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(
+            encoding="utf-8"
+        )
+        discover = workflow.split("\n  discover:\n", 1)[1].split(
+            "\n  external-references:\n", 1
+        )[0]
+        checkout = discover.split("- name: Check out repository", 1)[1].split(
+            "- name: Check out Skillscope", 1
+        )[0]
+        tested_commit = "${{ github.event.pull_request.head.sha || github.sha }}"
+        self.assertIn(f"ref: {tested_commit}", checkout)
+        self.assertIn("fetch-depth: 0", checkout)
+        self.assertIn(f"TARGET_SHA: {tested_commit}", workflow)
+
     def test_reporting_edits_do_not_select_every_hardware_case(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(
             encoding="utf-8"
