@@ -130,6 +130,8 @@ class PlanTests(unittest.TestCase):
                 "feature/evals",
                 "--sha",
                 "a" * 40,
+                "--skillscope-ref",
+                "v0.1.3",
                 "--extended-flag=--no-extended",
                 "--run-id",
                 "42",
@@ -171,6 +173,7 @@ class PlanTests(unittest.TestCase):
             variables["SKILLS_REPO"], config["skills_source"]["repository"]
         )
         self.assertEqual(variables["SKILLS_REF"], "feature/evals")
+        self.assertEqual(variables["SKILLSCOPE_REF"], "v0.1.3")
         self.assertEqual(variables["SKILLS_SHA"], "a" * 40)
         self.assertEqual(variables["SOURCE_REPOSITORY"], "amd/skills")
         self.assertEqual(variables["SOURCE_REF"], "feature/evals")
@@ -189,6 +192,8 @@ class PlanTests(unittest.TestCase):
                 "main",
                 "--sha",
                 "b" * 40,
+                "--skillscope-ref",
+                "v0.1.3",
                 "--extended-flag=--no-extended",
                 "--run-id",
                 "43",
@@ -215,6 +220,8 @@ class PlanTests(unittest.TestCase):
                 "main",
                 "--sha",
                 "c" * 40,
+                "--skillscope-ref",
+                "v0.1.3",
                 "--extended-flag=--no-extended",
                 "--run-id",
                 "44",
@@ -267,6 +274,8 @@ class PlanTests(unittest.TestCase):
                 "main",
                 "--sha",
                 "d" * 40,
+                "--skillscope-ref",
+                "v0.1.3",
                 "--extended-flag=--no-extended",
                 "--run-id",
                 "45",
@@ -297,6 +306,8 @@ class PlanTests(unittest.TestCase):
                 "main",
                 "--sha",
                 "a" * 40,
+                "--skillscope-ref",
+                "v0.1.3",
                 "--extended-flag=--no-extended",
                 "--run-id",
                 "42",
@@ -318,6 +329,8 @@ class PlanTests(unittest.TestCase):
                 "main",
                 "--sha",
                 "a" * 40,
+                "--skillscope-ref",
+                "v0.1.3",
                 "--extended-flag=--no-extended",
                 "--run-id",
                 "42",
@@ -2755,7 +2768,12 @@ class ReportTests(unittest.TestCase):
         self.assertIn("run: exec python3 .github/scripts/orchestrai_run.py", workflow)
         self.assertIn("'evals / results'", workflow)
         self.assertIn("!cancelled()", workflow)
-        self.assertIn("github.event.label.name == 'run_behavioral'", workflow)
+        # Both gate labels must start a run: enable_mi_ci is the Instinct gate.
+        self.assertIn(
+            """contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name)""",
+            workflow,
+        )
+        self.assertNotIn("github.event.label.name == 'run_behavioral'", workflow)
 
     def test_workflow_tests_the_pr_head_and_fails_closed_without_hardware(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(

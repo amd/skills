@@ -54,8 +54,8 @@ on:
 concurrency:
   # Unrelated label events are no-ops and use a unique group, so they cannot
   # cancel or replace an in-flight graded run for the same pull request.
-  group: evals-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'labeled' && github.event.label.name != 'run_behavioral' && github.run_id || 'graded' }}
-  cancel-in-progress: ${{ github.event.action != 'labeled' || github.event.label.name == 'run_behavioral' }}
+  group: evals-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'labeled' && !contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name) && github.run_id || 'graded' }}
+  cancel-in-progress: ${{ github.event.action != 'labeled' || contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name) }}
 
 permissions:
   contents: read
@@ -68,8 +68,8 @@ env:
 
 jobs:
   discover:
-    name: ${{ github.event.action == 'labeled' && github.event.label.name != 'run_behavioral' && 'Ignore unrelated label (discover)' || 'Check dataset structure and select runs' }}
-    if: github.event.action != 'labeled' || github.event.label.name == 'run_behavioral'
+    name: ${{ github.event.action == 'labeled' && !contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name) && 'Ignore unrelated label (discover)' || 'Check dataset structure and select runs' }}
+    if: github.event.action != 'labeled' || contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -142,7 +142,7 @@ jobs:
 
           args += [
               "--routing-room", os.environ["ROUTING_ROOM_VALUE"],
-              "--infra-paths", ".github/workflows/evals.yml,.github/orchestrai-config.json,.github/scripts/build_orchestrai_plan.py,.github/scripts/orchestrai_run.py,.github/scripts/orchestrai_verdict.py",
+              "--infra-paths", ".github/workflows/evals.yml,.github/orchestrai-config.json,.github/scripts/build_orchestrai_plan.py,.github/scripts/orchestrai_run.py,.github/scripts/orchestrai_logs.py,.github/scripts/orchestrai_verdict.py",
               "--behavior-runner", '["orchestrai"]',
               "--behavior-os", "Linux,Windows",
               "--scoped-runner", '["self-hosted","Linux","X64"]',
@@ -243,8 +243,8 @@ jobs:
               output.write("\n".join(lines) + "\n")
 
   external-references:
-    name: ${{ github.event.action == 'labeled' && github.event.label.name != 'run_behavioral' && 'Ignore unrelated label (references)' || 'External references' }}
-    if: github.event.action != 'labeled' || github.event.label.name == 'run_behavioral'
+    name: ${{ github.event.action == 'labeled' && !contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name) && 'Ignore unrelated label (references)' || 'External references' }}
+    if: github.event.action != 'labeled' || contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -378,6 +378,7 @@ jobs:
           --repository "${{ github.repository }}"
           --ref "$TARGET_REF"
           --sha "$TARGET_SHA"
+          --skillscope-ref "$SKILLSCOPE_VERSION"
           --extended-flag="$EXTENDED_FLAG"
           --run-id "${{ github.run_id }}"
           --run-attempt "${{ github.run_attempt }}"
@@ -508,11 +509,11 @@ jobs:
           "$EXTENDED_FLAG"
 
   results:
-    name: ${{ github.event.action == 'labeled' && github.event.label.name != 'run_behavioral' && 'Ignore unrelated label (results)' || 'evals / results' }}
+    name: ${{ github.event.action == 'labeled' && !contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name) && 'Ignore unrelated label (results)' || 'evals / results' }}
     needs: [discover, routing, orchestrai-behavioral, orchestrai-verdict, behavior-scoped]
     if: >-
       always() &&
-      (github.event.action != 'labeled' || github.event.label.name == 'run_behavioral')
+      (github.event.action != 'labeled' || contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -574,6 +575,8 @@ jobs:
           BEHAVIOR_WANTED: ${{ needs.discover.outputs.default_any }}
           SCOPED_WANTED: ${{ needs.discover.outputs.scoped_any }}
           SKIPPED: ${{ needs.discover.outputs.skipped }}
+          ORCHESTRAI_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.orchestrai_mode || 'live' }}
+          ORCHESTRAI_OS: ${{ github.event_name == 'workflow_dispatch' && inputs.orchestrai_os || 'both' }}
         run: |
           import os
           import sys
@@ -616,6 +619,12 @@ jobs:
                   failures.append("Strix behavioral cases require a maintainer branch in amd/skills before hardware can be authorized.")
               else:
                   failures.append("Strix behavioral cases require the run_behavioral label.")
+          # This check attaches to a commit, so a dispatch that skipped hardware
+          # or an OS must not leave a green result a pull request could reuse.
+          if value("BEHAVIOR_WANTED") == "true" and value("ORCHESTRAI_MODE") == "mock":
+              failures.append("Mock OrchestrAI run: plan validated, no hardware tested.")
+          if value("BEHAVIOR_WANTED") == "true" and value("ORCHESTRAI_OS") != "both":
+              failures.append(f"OrchestrAI ran on {value('ORCHESTRAI_OS')} only; not a complete result.")
           if value("SCOPED_WANTED") == "true" and value("SCOPED") != "success":
               failures.append(f"Scoped behavioral cases did not pass ({value('SCOPED')}).")
           if failures:

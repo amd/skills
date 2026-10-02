@@ -30,6 +30,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repository", required=True)
     parser.add_argument("--ref", required=True)
     parser.add_argument("--sha", required=True)
+    parser.add_argument("--skillscope-ref", required=True)
     parser.add_argument(
         "--extended-flag", choices=("--extended", "--no-extended"), required=True
     )
@@ -158,6 +159,8 @@ def _linux_builds(config: dict, selected_os: set[str]) -> dict | None:
 
 def build_plan(args: argparse.Namespace) -> dict:
     _validate_source(args.repository, args.ref, args.sha)
+    if not REF_RE.fullmatch(args.skillscope_ref) or args.skillscope_ref.startswith("-"):
+        raise SystemExit("skillscope ref contains unsafe characters")
     config = _load_config(args.config, args.device_tags_json)
     test_paths = config["test_paths"]
     os_images = config["os_images"]
@@ -217,6 +220,9 @@ def build_plan(args: argparse.Namespace) -> dict:
                 "SKILLS_OS": os_name,
                 "SKILLS_EXTENDED": str(args.extended_flag == "--extended").lower(),
                 "SKILLS_TIMEOUT": "7200",
+                # The adapter runs this Skillscope release, so the Strix legs
+                # move with the same pin as discovery, routing, and Instinct.
+                "SKILLSCOPE_REF": args.skillscope_ref,
                 "SOURCE_REPOSITORY": args.repository,
                 "SOURCE_REF": args.ref,
                 "SOURCE_SHA": args.sha.lower(),
