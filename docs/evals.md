@@ -59,6 +59,14 @@ retries. Its terminal state must be confirmed within one minute or the controlle
 fails, while preserving the individual test results. Machine release remains
 managed by OrchestrAI.
 
+Validated ReportPortal links are retained across live polls. After cleanup, the
+controller refreshes the run record and live report metadata for up to one minute
+to recover late links. These reads do not replace completed test verdicts or
+grader logs with cancelled launcher snapshots. Summaries distinguish the pipeline
+and test snapshots before cleanup from the final parent state read after cleanup.
+Missing links/final metadata are reported explicitly without changing test grades;
+an unavailable link does not prove that the ReportPortal launch does not exist.
+
 The rest of this document is the dataset those stages read. You write one file, `evals/evals.json`, inside your skill folder. For a federated skill that folder lives in your product repo and is imported with the rest of the skill, so edit the dataset there; an edit made in this catalog is overwritten by the next import. Run `skillscope template` for a file to start from.
 
 ## What skill owners write

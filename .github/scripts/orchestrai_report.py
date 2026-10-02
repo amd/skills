@@ -305,7 +305,15 @@ def render(
 
         def report_link(row: dict) -> str:
             url = _safe_report_url(row.get("report_url"))
-            return f"[View Results](<{html.escape(url)}>)" if url else "Not published"
+            return (
+                f"[View Results](<{html.escape(url)}>)"
+                if url
+                else (
+                    "Not applicable (mock)"
+                    if row.get("status") == "mock"
+                    else "Unavailable (no validated link)"
+                )
+            )
 
         def diagnostic(row: dict) -> str:
             raw = row.get("error")
@@ -407,7 +415,12 @@ def render(
                 any(value != "unknown" for value in state.values()) for state in states
             ):
                 fields = []
-                for field in ("pipeline_status", "tests_status", "cleanup_status"):
+                for field in (
+                    "pipeline_status",
+                    "tests_status",
+                    "cleanup_status",
+                    "final_pipeline_status",
+                ):
                     values = {
                         state[field] for state in states if state[field] != "unknown"
                     }
@@ -417,7 +430,7 @@ def render(
                         else ("mixed snapshots" if values else "not reported")
                     )
                 controller_rows.append(
-                    f"| {os_name} | `{fields[0]}` | `{fields[1]}` | `{fields[2]}` |"
+                    f"| {os_name} | `{fields[0]}` | `{fields[1]}` | `{fields[2]}` | `{fields[3]}` |"
                 )
         if controller_rows:
             lines.extend(
@@ -425,8 +438,8 @@ def render(
                     "",
                     "### Controller snapshots",
                     "",
-                    "| OS | Pipeline snapshot | Tests snapshot | Parent termination |",
-                    "|---|---|---|---|",
+                    "| OS | Pipeline snapshot before cleanup | Tests snapshot before cleanup | Parent termination | Final parent state |",
+                    "|---|---|---|---|---|",
                     *controller_rows,
                 ]
             )
@@ -437,6 +450,7 @@ def render(
                 "",
                 "- **Behavioral failures:** read the unmet expectations and per-case breakdowns above for context.",
                 "- **Execution errors or missing output:** inspect the matching Linux/Windows controller job and follow **View Results** to ReportPortal (AMD access required).",
+                "- **Missing ReportPortal link:** the controller retries report metadata after cleanup. If no validated link is returned, check report registration in OrchestrAI; do not assume the report does not exist.",
                 "- **Partial counts:** do not treat missing cases as passed. Public output is bounded and sanitized; dependency logs and raw agent output remain in ReportPortal.",
                 "- **Timing and cleanup:** case time excludes acquisition and adapter setup, includes in-case work, and is not total wall time. Parent termination is a controller observation; machine release remains managed by OrchestrAI.",
             ]

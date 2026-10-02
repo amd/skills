@@ -120,6 +120,16 @@ def safe_report_url(value: object) -> str:
     return raw
 
 
+def snapshot_report_url(snapshot: object) -> str:
+    """Read only the existing, public-safe report URL fields."""
+    if not isinstance(snapshot, dict):
+        return ""
+    for key in ("rp_url", "rp_launch_url"):
+        if url := safe_report_url(snapshot.get(key)):
+            return url
+    return ""
+
+
 def require_linux_provisioning(plan: dict) -> None:
     """Fail before allocation when a live Linux run has no driver map."""
     linux_requested = any(
@@ -733,6 +743,10 @@ def merge_live_snapshot(previous: dict, current: dict) -> dict:
     redacted summary, never the full console, across those polls.
     """
     merged = deepcopy(current)
+    # Metadata can disappear from a later cached snapshot. Keep a validated
+    # report link, never the rest of the previous response or its raw logs.
+    if url := snapshot_report_url(current) or snapshot_report_url(previous):
+        merged["rp_url"] = url
     failure_lines = jenkins_failure_summary(previous) + jenkins_failure_summary(current)
     deduplicated: list[str] = []
     for line in failure_lines:
@@ -764,11 +778,7 @@ def build_results_manifest(
     failure_summary = jenkins_failure_summary(live)
     private_values = private_log_values(plan, live, dict(os.environ))
     launcher_reachable = launcher.get("reachable")
-    report_url = safe_report_url(
-        live.get("rp_url") or live.get("rp_launch_url")
-        if isinstance(live, dict)
-        else ""
-    )
+    report_url = snapshot_report_url(live)
     if (
         not failure_summary
         and pipeline_status in {"failed", "unstable", "error", "cancelled", "aborted"}
@@ -1137,6 +1147,71 @@ def collect_test_logs(
     return enriched
 
 
+def collect_report_metadata(
+    client: PortalClient,
+    *,
+    run_id: str,
+    initial_live: dict,
+    initial_pipeline_status: str = "",
+    timeout_seconds: int = 60,
+    poll_seconds: int = 5,
+) -> dict[str, str]:
+    """Refresh report metadata after cleanup without replacing test evidence.
+
+    Report registration and cached /live snapshots can lag completed tests.
+    Only retain a validated link and fixed terminal state; cancelled launcher
+    snapshots must never overwrite the pre-cleanup behavioral verdicts/logs.
+    Missing metadata is advisory and has a single bounded retry budget.
+    """
+    report_url = snapshot_report_url(initial_live)
+    final_status = (
+        initial_pipeline_status
+        if initial_pipeline_status in TERMINAL_PIPELINE_STATES
+        else "unknown"
+    )
+    deadline = time.monotonic() + max(0, min(timeout_seconds, 120))
+    while time.monotonic() < deadline:
+        for endpoint in (f"/api/runs/{run_id}", f"/api/runs/{run_id}/live"):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                snapshot = client.request(
+                    "GET",
+                    endpoint,
+                    timeout_seconds=max(1, min(10, int(remaining))),
+                )
+                if not isinstance(snapshot, dict):
+                    continue
+                report_url = snapshot_report_url(snapshot) or report_url
+                # /live is cached. The direct run record is authoritative for
+                # termination; do not replace it with a stale live status.
+                if endpoint == f"/api/runs/{run_id}":
+                    status = safe_status(
+                        snapshot.get("pipeline_status") or snapshot.get("status"),
+                        SAFE_PIPELINE_STATES,
+                    )
+                    if status in TERMINAL_PIPELINE_STATES:
+                        final_status = status
+            except RuntimeError:
+                pass  # Never echo Portal response bodies or change a verdict.
+            if report_url and final_status != "unknown":
+                break
+        if report_url and final_status != "unknown":
+            break
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(max(poll_seconds, 1), remaining))
+    if not report_url:
+        log("warning: ReportPortal link was unavailable after metadata refresh")
+    if final_status == "unknown":
+        log("warning: final parent status was unavailable after metadata refresh")
+    metadata = {"final_pipeline_status": final_status}
+    if report_url:
+        metadata["report_url"] = report_url
+    return metadata
+
+
 def collect_live_results(
     client: PortalClient,
     plan: dict,
@@ -1238,8 +1313,15 @@ def summary(
         handle.write("## OrchestrAI behavioral evals\n\n")
         handle.write(f"- Mode: `{mode}`\n- Plan: `{plan_name}`\n")
         if pipeline_status:
-            handle.write(f"- Pipeline: `{pipeline_status or 'unknown'}`\n")
-            handle.write(f"- Tests: `{tests_status or 'unknown'}`\n")
+            handle.write(
+                f"- Pipeline snapshot before cleanup: `{pipeline_status or 'unknown'}`\n"
+            )
+            handle.write(
+                f"- Tests snapshot before cleanup: `{tests_status or 'unknown'}`\n"
+            )
+        final_status = ((results or {}).get("run") or {}).get("final_pipeline_status")
+        if final_status in TERMINAL_PIPELINE_STATES or final_status == "unknown":
+            handle.write(f"- Final parent state: `{final_status}`\n")
         cleanup_status = ((results or {}).get("run") or {}).get("cleanup_status")
         if cleanup_status in {"confirmed", "unconfirmed"}:
             handle.write(f"- Parent cleanup: `{cleanup_status}`\n")
@@ -1261,7 +1343,15 @@ def summary(
                     "✅" if status == "passed" else ("🧪" if status == "mock" else "❌")
                 )
                 report_url = safe_report_url(item.get("report_url"))
-                report = f"[View Results](<{report_url}>)" if report_url else "—"
+                report = (
+                    f"[View Results](<{report_url}>)"
+                    if report_url
+                    else (
+                        "Not applicable (mock)"
+                        if mode == "mock"
+                        else "Unavailable (no validated link)"
+                    )
+                )
                 handle.write(
                     f"| `{item.get('skill', '')}` | {item.get('os', '')} | "
                     f"{icon} `{status}` | {report} |\n"
@@ -1494,6 +1584,16 @@ def main() -> int:
             ):
                 item["error"] = previous["error"]
         results = enriched_results
+        metadata = collect_report_metadata(
+            client,
+            run_id=run_id,
+            initial_live=latest_live,
+            initial_pipeline_status=pipeline_status,
+        )
+        results["run"]["final_pipeline_status"] = metadata["final_pipeline_status"]
+        if report_url := metadata.get("report_url"):
+            for item in results["items"]:
+                item["report_url"] = report_url
         results["run"]["cleanup_status"] = (
             ("confirmed" if cleanup_confirmed else "unconfirmed")
             if parent_run_still_active

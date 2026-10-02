@@ -1151,6 +1151,138 @@ class TriggerTests(unittest.TestCase):
             ["Machine acquisition timed out."],
         )
 
+    def test_live_poll_retains_report_link_when_later_snapshot_omits_it(self) -> None:
+        earlier = {
+            "rp_url": "https://reports.example/launch/42",
+            "secret": "private-value",
+        }
+        later = {"rp_url": "", "launcher": {"sessions": []}}
+        merged = orchestrai_run.merge_live_snapshot(earlier, later)
+        self.assertEqual(merged["rp_url"], earlier["rp_url"])
+        self.assertNotIn("secret", merged)
+        self.assertEqual(later["rp_url"], "")
+        merged = orchestrai_run.merge_live_snapshot(
+            earlier, {"rp_url": "http://unsafe"}
+        )
+        self.assertEqual(merged["rp_url"], earlier["rp_url"])
+        self.assertEqual(
+            orchestrai_run.snapshot_report_url(
+                {
+                    "rp_url": "http://unsafe",
+                    "rp_launch_url": earlier["rp_url"],
+                }
+            ),
+            earlier["rp_url"],
+        )
+
+    def test_report_metadata_retries_late_link_and_keeps_only_safe_fields(self) -> None:
+        client = mock.Mock()
+        client.request.side_effect = [
+            {"pipeline_status": "cancelled", "password": "private-secret"},
+            {"rp_url": "", "launcher": {"sessions": []}},
+            {"pipeline_status": "cancelled"},
+            {
+                "rp_launch_url": "https://reports.example/launch/42",
+                "raw": "private-log",
+            },
+        ]
+        with mock.patch.object(orchestrai_run.time, "sleep") as sleep:
+            metadata = orchestrai_run.collect_report_metadata(
+                client,
+                run_id="private-id",
+                initial_live={},
+            )
+        self.assertEqual(
+            metadata,
+            {
+                "final_pipeline_status": "cancelled",
+                "report_url": "https://reports.example/launch/42",
+            },
+        )
+        self.assertEqual(client.request.call_count, 4)
+        self.assertEqual(sleep.call_count, 1)
+        self.assertNotIn("private", json.dumps(metadata))
+
+    def test_report_metadata_timeout_is_bounded_and_advisory(self) -> None:
+        client = mock.Mock()
+        client.request.side_effect = RuntimeError("password=private-secret")
+        with (
+            mock.patch.object(
+                orchestrai_run.time, "monotonic", side_effect=iter(range(30))
+            ),
+            mock.patch.object(orchestrai_run.time, "sleep"),
+            mock.patch("sys.stdout", new_callable=io.StringIO) as output,
+        ):
+            metadata = orchestrai_run.collect_report_metadata(
+                client,
+                run_id="private-id",
+                initial_live={},
+                timeout_seconds=4,
+            )
+        self.assertEqual(metadata, {"final_pipeline_status": "unknown"})
+        self.assertLessEqual(client.request.call_count, 2)
+        self.assertIn("ReportPortal link was unavailable", output.getvalue())
+        self.assertNotIn("private", output.getvalue())
+
+    def test_metadata_refresh_never_uses_cached_live_state_as_final_parent(
+        self,
+    ) -> None:
+        client = mock.Mock()
+        client.request.side_effect = [
+            {"pipeline_status": "cancelled"},
+            {
+                "pipeline_status": "running",
+                "rp_url": "https://reports.example/launch/42",
+            },
+        ]
+        metadata = orchestrai_run.collect_report_metadata(
+            client, run_id="id", initial_live={}
+        )
+        self.assertEqual(metadata["final_pipeline_status"], "cancelled")
+
+    def test_metadata_refresh_rejects_unsafe_report_links(self) -> None:
+        client = mock.Mock()
+        client.request.side_effect = [
+            {"pipeline_status": "cancelled", "rp_url": "http://unsafe"},
+            {"rp_url": "https://user:password@example.com/report"},
+        ]
+        with (
+            mock.patch.object(
+                orchestrai_run.time, "monotonic", side_effect=[0, 0, 0, 0, 1, 2]
+            ),
+            mock.patch("sys.stdout", new_callable=io.StringIO),
+        ):
+            metadata = orchestrai_run.collect_report_metadata(
+                client,
+                run_id="id",
+                initial_live={},
+                timeout_seconds=1,
+            )
+        self.assertNotIn("report_url", metadata)
+
+    def test_summary_labels_pre_cleanup_and_final_parent_states(self) -> None:
+        results = orchestrai_run.mock_results_manifest(reporting_plan())
+        results["run"].update(
+            cleanup_status="confirmed", final_pipeline_status="cancelled"
+        )
+        for item in results["items"]:
+            item["status"] = "passed"
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "summary.md"
+            with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(path)}):
+                orchestrai_run.summary(
+                    mode="live",
+                    plan_name="test-plan",
+                    pipeline_status="running",
+                    tests_status="running",
+                    results=results,
+                )
+            text = path.read_text()
+        self.assertIn("Pipeline snapshot before cleanup: `running`", text)
+        self.assertIn("Final parent state: `cancelled`", text)
+        self.assertIn("Unavailable (no validated link)", text)
+        self.assertNotIn("- Pipeline: `running`", text)
+
     def test_sanitized_snapshot_omits_plan_urls_and_test_output(self) -> None:
         clean = orchestrai_run.sanitized_live_snapshot(
             {
@@ -1348,7 +1480,14 @@ class TriggerTests(unittest.TestCase):
     def test_controller_fails_closed_when_cleanup_is_unconfirmed(self) -> None:
         self._exercise_completed_controller(cleanup_confirmed=False)
 
-    def _exercise_completed_controller(self, *, cleanup_confirmed: bool) -> None:
+    def test_controller_recovers_late_link_without_changing_completed_verdicts(
+        self,
+    ) -> None:
+        self._exercise_completed_controller(cleanup_confirmed=True, late_report=True)
+
+    def _exercise_completed_controller(
+        self, *, cleanup_confirmed: bool, late_report: bool = False
+    ) -> None:
         plan = reporting_plan()
         snapshots = []
         for windows_session, windows_test in (
@@ -1358,7 +1497,9 @@ class TriggerTests(unittest.TestCase):
         ):
             snapshots.append(
                 {
-                    "rp_url": "https://reports.example/launch/42",
+                    "rp_url": ""
+                    if late_report
+                    else "https://reports.example/launch/42",
                     "launcher": {
                         "sessions": [
                             {
@@ -1403,11 +1544,22 @@ class TriggerTests(unittest.TestCase):
             if path == "/api/runs":
                 return {"id": "run-id"}
             if path == "/api/runs/run-id/live":
+                if live_reads == len(snapshots):
+                    events.append("metadata-live")
+                    return {
+                        "rp_url": "https://reports.example/launch/42",
+                        "launcher": {
+                            "sessions": [{"status": "cancelled", "raw": "private-log"}]
+                        },
+                    }
                 snapshot = snapshots[live_reads]
                 live_reads += 1
                 events.append(f"live-{live_reads}")
                 return snapshot
             if path == "/api/runs/run-id":
+                if "cancel" in events:
+                    events.append("metadata-state")
+                    return {"pipeline_status": "cancelled", "tests_status": "cancelled"}
                 return {"pipeline_status": "running", "tests_status": "passed"}
             if "/logs/" in path:
                 self.assertEqual(events[-1], "cancel")
@@ -1454,7 +1606,11 @@ class TriggerTests(unittest.TestCase):
             ):
                 self.assertEqual(orchestrai_run.main(), 0 if cleanup_confirmed else 1)
             manifest = json.loads(results_path.read_text(encoding="utf-8"))
-        self.assertEqual(events, ["live-1", "live-2", "live-3", "cancel"])
+        self.assertEqual(
+            events,
+            ["live-1", "live-2", "live-3", "cancel", "metadata-state"]
+            + (["metadata-live"] if late_report else []),
+        )
         self.assertEqual(sleep.call_count, 2)
         self.assertTrue(manifest["ready"])
         self.assertEqual(
@@ -1462,6 +1618,14 @@ class TriggerTests(unittest.TestCase):
             "confirmed" if cleanup_confirmed else "unconfirmed",
         )
         self.assertNotIn("private", json.dumps(manifest))
+        self.assertEqual(manifest["run"]["pipeline_status"], "running")
+        self.assertEqual(manifest["run"]["final_pipeline_status"], "cancelled")
+        self.assertTrue(
+            all(
+                item["report_url"] == "https://reports.example/launch/42"
+                for item in manifest["items"]
+            )
+        )
         self.assertEqual(
             [item["status"] for item in manifest["items"]], ["passed", "failed"]
         )
@@ -2063,6 +2227,7 @@ class VerdictTests(unittest.TestCase):
             "pipeline_status": "running",
             "tests_status": "failed",
             "cleanup_status": "confirmed",
+            "final_pipeline_status": "cancelled",
             "id": "private-run-id",
             "portal_url": "https://private.internal",
             "failure_summary": ["password=private-secret"],
@@ -2074,6 +2239,7 @@ class VerdictTests(unittest.TestCase):
                 "pipeline_status": "running",
                 "tests_status": "failed",
                 "cleanup_status": "confirmed",
+                "final_pipeline_status": "cancelled",
             },
         )
         item = {
@@ -2092,6 +2258,7 @@ class VerdictTests(unittest.TestCase):
                 "pipeline_status": {},
                 "tests_status": ["secret"],
                 "cleanup_status": "private-secret",
+                "final_pipeline_status": "private-state",
             },
         ):
             self.assertEqual(

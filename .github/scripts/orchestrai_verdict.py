@@ -244,6 +244,17 @@ def public_controller_state(run: dict) -> dict:
         "cleanup_status": run.get("cleanup_status")
         if run.get("cleanup_status") in ("confirmed", "unconfirmed", "not_needed")
         else "unknown",
+        "final_pipeline_status": run.get("final_pipeline_status")
+        if run.get("final_pipeline_status")
+        in (
+            "passed",
+            "failed",
+            "unstable",
+            "error",
+            "cancelled",
+            "aborted",
+        )
+        else "unknown",
     }
 
 
@@ -263,15 +274,23 @@ def _write_step_summary(item: dict, run: dict, *, ok: bool, mock: bool) -> None:
         handle.write(f"| Public log coverage | {log_coverage(item)} |\n")
         controller = public_controller_state(run)
         if not mock and controller["pipeline_status"] != "unknown":
-            handle.write(f"| Pipeline snapshot | `{controller['pipeline_status']}` |\n")
+            handle.write(
+                f"| Pipeline snapshot before cleanup | `{controller['pipeline_status']}` |\n"
+            )
         if not mock and controller["cleanup_status"] != "unknown":
             handle.write(f"| Parent termination | `{controller['cleanup_status']}` |\n")
+        if not mock:
+            handle.write(
+                f"| Final parent state | `{controller['final_pipeline_status']}` |\n"
+            )
         if duration := _safe_duration(item.get("duration")):
             handle.write(f"| Duration | `{html.escape(duration)}` |\n")
         if report_url := _safe_report_url(item.get("report_url")):
             handle.write(
                 f"| ReportPortal | [View Results](<{html.escape(report_url)}>) |\n"
             )
+        elif not mock:
+            handle.write("| ReportPortal | Unavailable (no validated link) |\n")
         if error := _safe_error(item.get("error")):
             error = html.escape(error)
             handle.write(f"\n> {error}\n")
@@ -320,8 +339,8 @@ def _write_job_log(item: dict, *, ok: bool, mock: bool) -> None:
         print(f"  Diagnostic: {error}")
     if report_url := _safe_report_url(item.get("report_url")):
         print(f"  Full logs (ReportPortal): {report_url}")
-    elif not ok and not mock:
-        print("  Full logs: unavailable; inspect the matching controller job")
+    elif not mock:
+        print("  ReportPortal link: unavailable; inspect the matching controller job")
     if not mock and (report := behavioral_summary_markdown(item)):
         # Put the overview and failed expectations outside the folded full
         # grader output so a failure is understandable without expanding it.
