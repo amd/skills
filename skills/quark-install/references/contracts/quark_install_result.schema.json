@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "quark_install_result",
+  "description": "Outcome of quark-install, including the selected compute mode and verification results.",
+  "type": "object",
+  "required": [
+    "status",
+    "quark_version"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "failed",
+        "skipped"
+      ]
+    },
+    "quark_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "install_source": {
+      "type": "string",
+      "enum": [
+        "pypi",
+        "source",
+        "wheel"
+      ]
+    },
+    "environment": {
+      "type": "object",
+      "properties": {
+        "python_executable": {
+          "type": "string"
+        },
+        "python_version": {
+          "type": "string"
+        },
+        "quark_module_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "torch_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "torch_backend": {
+          "type": "string",
+          "enum": [
+            "cpu",
+            "cuda",
+            "rocm",
+            "unknown"
+          ]
+        },
+        "gpu_available": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "gpu_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cpu_mode_confirmed": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "extras_installed": {
+      "type": "object",
+      "properties": {
+        "onnxruntime": {
+          "type": "boolean"
+        },
+        "llm_ptq_deps": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "import_ok": {
+          "type": "boolean"
+        },
+        "kernel_ok": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "onnx_ops_ok": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "torch_gpu_ok": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "cli_ok": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "pip_check_ok": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failure_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": true
+}

@@ -111,7 +111,6 @@ The scripts read `.github/federation.json` from your working tree.
 ```bash
 uv run .github/scripts/federate_skills.py --check-catalog  # schema only, no clone
 uv run .github/scripts/federate_skills.py --only <skill>   # vendor into skills/<skill>/ (repeat --only per skill)
-./.github/scripts/publish.sh                               # regenerate the manifests
 ./.github/scripts/check.sh                                 # validate (same command CI runs)
 ```
 
@@ -125,7 +124,8 @@ folder.
 
 ## 4. Open a pull request
 
-Commit `.github/federation.json`, `skills/**`, and the regenerated manifests. A
+Commit `.github/federation.json` and `skills/**` only; do not edit any
+marketplace manifest. A
 maintainer reviews and merges once CI passes. The `validate` workflow checks the
 manifests; the `evals` workflow runs [skillscope](https://github.com/amd/skillscope)
 — the structural checks, then your prompts against a real agent.

@@ -1,0 +1,45 @@
+{
+  "evaluations": [
+    {
+      "id": "quark-install-gpu-plan-before-changes",
+      "skill_should_trigger": true,
+      "prompt": "Set up AMD Quark in the active Python environment for this GPU. Inspect the environment and show the exact install and verification commands, but do not change anything until I approve.",
+      "expected_behavior": [
+        "Resolves and reports the exact Python interpreter, then inspects Python, pip, installed amd-quark and PyTorch, and available accelerator evidence before selecting an install.",
+        "Leaves the environment unchanged; if the checks establish a supported GPU path, shows dry-run results and exact commands before asking for approval, otherwise reports the blocking evidence and asks how to resolve the compute mode."
+      ],
+      "unexpected_behavior": [
+        "Runs pip install, changes PyTorch, invokes a system package manager, or compiles an optional component before explicit approval.",
+        "Silently falls back to CPU mode when GPU readiness cannot be established."
+      ]
+    },
+    {
+      "id": "quark-install-module-not-found",
+      "skill_should_trigger": true,
+      "prompt": "`python -c 'import quark'` fails with `ModuleNotFoundError: No module named quark` in my current virtual environment. Diagnose it and install the correct AMD Quark package if needed.",
+      "expected_behavior": [
+        "Resolves the exact interpreter and inspects that interpreter's pip metadata, PyTorch build, accelerator state, and environment before diagnosing why the import failed.",
+        "If compute mode is unresolved, reports the blocking evidence and asks whether to repair GPU support or explicitly use CPU; only after compute mode is confirmed does it preview dependency changes, show the exact command, and ask for execution approval."
+      ],
+      "unexpected_behavior": [
+        "Runs an install, changes PyTorch, or silently accepts CPU mode before receiving explicit approval.",
+        "Uses an unqualified pip command or assumes the active shell and the failing interpreter are the same environment without checking."
+      ]
+    },
+    {
+      "id": "quark-install-verify-existing-gpu-kernels",
+      "skill_should_trigger": true,
+      "prompt": "AMD Quark is already installed in my conda environment. Verify that it comes from that environment, that PyTorch can use the GPU, and that the Quark PyTorch kernel extension loads."
+    },
+    {
+      "id": "quark-install-no-trigger-standalone-pytorch",
+      "skill_should_trigger": false,
+      "prompt": "Install a ROCm-enabled PyTorch build in this virtual environment for a generic image-classification training job. AMD Quark is not involved."
+    },
+    {
+      "id": "quark-install-no-trigger-onnx-runtime-only",
+      "skill_should_trigger": false,
+      "prompt": "Install and verify ONNX Runtime for an existing ONNX image-classification application. AMD Quark is not involved."
+    }
+  ]
+}
