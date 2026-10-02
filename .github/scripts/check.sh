@@ -20,9 +20,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
-# Keep in step with the `uses:` ref in .github/workflows/evals.yml, which is
-# the version CI grades with.
-SKILLSCOPE_VERSION="v0.1.2"
+# Keep in step with SKILLSCOPE_VERSION in .github/workflows/evals.yml, which is
+# the released version CI grades with.
+SKILLSCOPE_VERSION="v0.1.3"
 SKILLSCOPE=(uv tool run --from "git+https://github.com/amd/skillscope@${SKILLSCOPE_VERSION}" skillscope)
 
 # Keep in step with the structural inputs in .github/workflows/evals.yml.

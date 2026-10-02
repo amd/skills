@@ -19,6 +19,46 @@ skills are published and so compete for a prompt, which runners we own, and
 which key pays for a run. The graders themselves are not in this repo, so the
 same prompts score the same way in your product repo as they do here.
 
+For Strix behavioral runs, each GitHub skill/OS job includes a **Sanitized grader
+output** log group. Each job also shows the case/expectation totals, model and
+effort, and an **Unmet expectations** table with case IDs and sanitized judge
+explanations, outside the collapsed log group. The same overview appears in the
+job summary and aggregate report. These overviews are reconstructed from
+recognized grader lines, not copied from arbitrary test output. Incomplete or
+inconsistent output is explicitly marked partial. Only recognized grader lines
+are published; credentials, network addresses, host identities, and machine paths are redacted,
+and output length is limited. The **ReportPortal / View Results** link retains
+the full stdout, dependency logs, and report attachments for internal debugging.
+
+The aggregate report separates skill/OS verdicts from observed graded-case and
+expectation totals. It includes a Linux/Windows overview, public-log coverage,
+model/effort and case timing when reported, and a visible **Needs attention**
+section with failure categories and sanitized explanations. Per-case breakdowns
+show which checks passed and failed. Missing data is labeled rather than counted
+as a pass. Controller snapshots include parent-termination status without machine
+identities; confirmation is not an independent verification of machine release.
+Case timing excludes acquisition and adapter dependency setup, but includes
+in-case setup and agent work. ReportPortal links require
+AMD access. These reporting details do not change the final CI gate.
+
+Like the routing summary, the OrchestrAI behavioral report has **Verdict / Count /
+Meaning**, **By expectation type**, and **Per skill** tables. The behavioral
+tables use case pass rates and expectation met rates, not routing recall or
+precision: each case loads its skill separately rather than competing against
+the routing room. Expectation-type counts include only retained grader lines
+associated with a recorded case. Missing/redacted lines are excluded and all
+rates are labeled observed; zero denominators are shown as **Not reported**.
+
+The controller fetches missing test streams through the authenticated Portal
+log endpoint, allowing up to two minutes for persisted logs to become available.
+Raw streams stay in memory; only sanitized grader lines enter GitHub artifacts.
+Timestamp wrappers are removed before filtering. When no grader lines can be
+shown, the job distinguishes missing output from received but unrecognized output.
+After all requested tests finish, an active parent is cancelled with bounded
+retries. Its terminal state must be confirmed within one minute or the controller
+fails, while preserving the individual test results. Machine release remains
+managed by OrchestrAI.
+
 The rest of this document is the dataset those stages read. You write one file, `evals/evals.json`, inside your skill folder. For a federated skill that folder lives in your product repo and is imported with the rest of the skill, so edit the dataset there; an edit made in this catalog is overwritten by the next import. Run `skillscope template` for a file to start from.
 
 ## What skill owners write
@@ -123,11 +163,10 @@ Keep prompts and expectations in the dataset even when you use hooks, so what is
 
 ### Running tests locally
 
-Install the harness once, at the version CI grades this repo with — the `uses:`
-ref in [`.github/workflows/evals.yml`](../.github/workflows/evals.yml):
+Install the same released harness version that CI uses:
 
 ```bash
-uv tool install --system-certs git+https://github.com/amd/skillscope@v0.1.2
+uv tool install --system-certs "git+https://github.com/amd/skillscope@v0.1.3"
 ```
 
 Then, from the repo root:
