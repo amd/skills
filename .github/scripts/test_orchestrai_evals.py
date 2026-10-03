@@ -513,10 +513,7 @@ class TriggerTests(unittest.TestCase):
         self.assertEqual(
             manifest["items"][1]["error"], "The behavioral test did not pass."
         )
-        self.assertEqual(
-            [item["report_url"] for item in manifest["items"]],
-            ["https://reports.example/launch/42"] * 2,
-        )
+        self.assertTrue(all("report_url" not in item for item in manifest["items"]))
         self.assertNotIn("run-42", json.dumps(manifest))
         self.assertNotIn("reportportal_url", manifest["run"])
 
@@ -662,12 +659,10 @@ class TriggerTests(unittest.TestCase):
             "/private/workspace",
             "hunter2",
             "private-job-id",
-            "stdout",
-            "stderr",
         ):
             self.assertNotIn(private_value, encoded)
 
-    def test_unknown_private_test_output_stays_generic(self) -> None:
+    def test_unknown_error_keeps_fixed_diagnostic_and_full_context(self) -> None:
         live = {
             "launcher": {
                 "sessions": [
@@ -691,7 +686,9 @@ class TriggerTests(unittest.TestCase):
         self.assertEqual(
             manifest["items"][0]["error"], "The behavioral test did not pass."
         )
-        self.assertNotIn("private endpoint", json.dumps(manifest))
+        self.assertIn(
+            "private endpoint", manifest["items"][0]["public_streams"]["stdout"]
+        )
 
     def test_portal_http_error_does_not_export_response_body(self) -> None:
         error = urllib.error.HTTPError(
@@ -937,9 +934,6 @@ class TriggerTests(unittest.TestCase):
         for private in (
             "private-job-id",
             "token=secret",
-            "dependency",
-            "stdout",
-            "stderr",
         ):
             self.assertNotIn(private, json.dumps(manifest))
             self.assertNotIn(
@@ -985,7 +979,7 @@ class TriggerTests(unittest.TestCase):
             )
         self.assertEqual(clock[0], 10)
         self.assertEqual(client.request.call_count, 4)
-        self.assertIn("some test logs were unavailable", output.getvalue())
+        self.assertIn("some test streams were unavailable", output.getvalue())
         self.assertNotIn("private", output.getvalue())
         manifest = orchestrai_run.build_results_manifest(plan, enriched, mode="live")
         self.assertEqual(manifest["items"][0]["status"], "passed")
@@ -1175,7 +1169,7 @@ class TriggerTests(unittest.TestCase):
             earlier["rp_url"],
         )
 
-    def test_report_metadata_retries_late_link_and_keeps_only_safe_fields(self) -> None:
+    def test_final_metadata_does_not_wait_for_reportportal(self) -> None:
         client = mock.Mock()
         client.request.side_effect = [
             {"pipeline_status": "cancelled", "password": "private-secret"},
@@ -1196,11 +1190,11 @@ class TriggerTests(unittest.TestCase):
             metadata,
             {
                 "final_pipeline_status": "cancelled",
-                "report_url": "https://reports.example/launch/42",
             },
         )
-        self.assertEqual(client.request.call_count, 4)
-        self.assertEqual(sleep.call_count, 1)
+        self.assertEqual(client.request.call_count, 1)
+        self.assertEqual(sleep.call_count, 0)
+        self.assertNotIn("/live", client.request.call_args.args[1])
         self.assertNotIn("private", json.dumps(metadata))
 
     def test_report_metadata_timeout_is_bounded_and_advisory(self) -> None:
@@ -1221,7 +1215,7 @@ class TriggerTests(unittest.TestCase):
             )
         self.assertEqual(metadata, {"final_pipeline_status": "unknown"})
         self.assertLessEqual(client.request.call_count, 2)
-        self.assertIn("ReportPortal link was unavailable", output.getvalue())
+        self.assertIn("final parent status was unavailable", output.getvalue())
         self.assertNotIn("private", output.getvalue())
 
     def test_metadata_refresh_never_uses_cached_live_state_as_final_parent(
@@ -1280,7 +1274,7 @@ class TriggerTests(unittest.TestCase):
             text = path.read_text()
         self.assertIn("Pipeline snapshot before cleanup: `running`", text)
         self.assertIn("Final parent state: `cancelled`", text)
-        self.assertIn("Unavailable (no validated link)", text)
+        self.assertIn("Test streams unavailable", text)
         self.assertNotIn("- Pipeline: `running`", text)
 
     def test_sanitized_snapshot_omits_plan_urls_and_test_output(self) -> None:
@@ -1381,10 +1375,8 @@ class TriggerTests(unittest.TestCase):
             reporting_plan(), live, mode="live"
         )
         sanitized = orchestrai_run.sanitized_live_snapshot(live)
-        self.assertEqual(
-            manifest["items"][0]["report_url"],
-            "https://reports.example/launch/42",
-        )
+        self.assertNotIn("report_url", manifest["items"][0])
+        self.assertNotIn("reports.example", json.dumps(manifest))
         self.assertNotIn("reports.example", json.dumps(sanitized))
         self.assertNotIn("launcher.example", json.dumps([manifest, sanitized]))
 
@@ -1608,8 +1600,7 @@ class TriggerTests(unittest.TestCase):
             manifest = json.loads(results_path.read_text(encoding="utf-8"))
         self.assertEqual(
             events,
-            ["live-1", "live-2", "live-3", "cancel", "metadata-state"]
-            + (["metadata-live"] if late_report else []),
+            ["live-1", "live-2", "live-3", "cancel", "metadata-state"],
         )
         self.assertEqual(sleep.call_count, 2)
         self.assertTrue(manifest["ready"])
@@ -1620,12 +1611,7 @@ class TriggerTests(unittest.TestCase):
         self.assertNotIn("private", json.dumps(manifest))
         self.assertEqual(manifest["run"]["pipeline_status"], "running")
         self.assertEqual(manifest["run"]["final_pipeline_status"], "cancelled")
-        self.assertTrue(
-            all(
-                item["report_url"] == "https://reports.example/launch/42"
-                for item in manifest["items"]
-            )
-        )
+        self.assertTrue(all("report_url" not in item for item in manifest["items"]))
         self.assertEqual(
             [item["status"] for item in manifest["items"]], ["passed", "failed"]
         )
@@ -2045,7 +2031,8 @@ class PublicLogTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, encoded)
         self.assertIn(
-            "[REDACTED: credential-related grader output; see ReportPortal]", lines
+            "[REDACTED: credential-related grader output; inspect the redacted test log]",
+            lines,
         )
 
     def test_public_log_status_distinguishes_filtering_from_missing_streams(
@@ -2073,7 +2060,7 @@ class PublicLogTests(unittest.TestCase):
                 skill="lemonade-router-builder",
             ),
             [
-                "[FAIL] build-router: 0/0 checks in 5.0s -- [Error details withheld; see ReportPortal]"
+                "[FAIL] build-router: 0/0 checks in 5.0s -- [Error details withheld; inspect the redacted test log]"
             ],
         )
         output = (
@@ -2343,12 +2330,9 @@ class VerdictTests(unittest.TestCase):
                 self.assertNotIn("actor-supplied table", public_output)
             self.assertLess(
                 completed.stdout.index("Unmet expectations"),
-                completed.stdout.index("::group::Sanitized grader output"),
+                completed.stdout.index("::group::Legacy grader output"),
             )
-            self.assertLess(
-                summary_text.index("Unmet expectations"),
-                summary_text.index("<details>"),
-            )
+            self.assertIn("stdout-stderr.log", summary_text)
             document = json.loads((root / "output" / "summary.json").read_text())
             self.assertEqual(document["total_tests"], 1)
             self.assertEqual(document["failed"], 1)
@@ -2450,6 +2434,10 @@ class VerdictTests(unittest.TestCase):
                                 "error": "",
                                 "report_url": "https://reports.example/launch/42",
                                 "stdout": "hello from the actor\n",
+                                "public_streams": {
+                                    "stdout": "hello from the actor\n[PASS] (files_exist) out.png\n[PASS] generate-cat-image: 1/1 checks in 12s\n",
+                                    "stderr": "",
+                                },
                                 "public_log": [
                                     "[PASS] (files_exist) out.png",
                                     "[PASS] generate-cat-image: 1/1 checks in 12s",
@@ -2481,23 +2469,23 @@ class VerdictTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertIn("Result: passed", completed.stdout)
-            self.assertIn(
-                "Full logs (ReportPortal): https://reports.example/launch/42",
-                completed.stdout,
-            )
-            self.assertNotIn("hello from the actor", completed.stdout)
+            self.assertNotIn("reports.example", completed.stdout)
+            self.assertIn("hello from the actor", completed.stdout)
             self.assertFalse((output_dir / "stdout.log").exists())
             self.assertIn("[PASS] (files_exist) out.png", completed.stdout)
-            self.assertIn("Sanitized grader output", completed.stdout)
+            self.assertIn("Test stdout/stderr (redacted)", completed.stdout)
+            self.assertIn(
+                "hello from the actor", (output_dir / "stdout-stderr.log").read_text()
+            )
             self.assertIn("out.png", (output_dir / "sanitized.log").read_text())
             summary = json.loads(
                 (output_dir / "summary.json").read_text(encoding="utf-8")
             )
             self.assertEqual(summary["passed"], 1)
-            self.assertEqual(summary["report_url"], "https://reports.example/launch/42")
-            self.assertIn(
-                "[View Results](<https://reports.example/launch/42>)",
-                step_summary.read_text(encoding="utf-8"),
+            self.assertNotIn("report_url", summary)
+            self.assertIn("stdout-stderr.log", step_summary.read_text(encoding="utf-8"))
+            self.assertNotIn(
+                "reports.example", step_summary.read_text(encoding="utf-8")
             )
             self.assertNotIn("stdout", summary["results"][0])
             encoded = json.dumps(summary)
@@ -2610,7 +2598,7 @@ class VerdictTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 1)
             self.assertIn(explanation, completed.stdout)
-            self.assertIn("https://reports.example/launch/42", completed.stdout)
+            self.assertNotIn("https://reports.example/launch/42", completed.stdout)
             self.assertIn(explanation, (Path(temp) / "summary.md").read_text())
             self.assertIn(
                 explanation, (Path(temp) / "output" / "sanitized.log").read_text()
@@ -2894,7 +2882,8 @@ class ReportTests(unittest.TestCase):
         )
         self.assertIn("1 failed, 1 passed", rendered)
         self.assertIn("no per-skill result artifact was published", rendered)
-        self.assertIn("[View Results](<https://reports.example/launch/42>)", rendered)
+        self.assertIn("stdout-stderr.log", rendered)
+        self.assertNotIn("reports.example", rendered)
 
     def test_workflow_never_uploads_the_live_controller_snapshot(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(

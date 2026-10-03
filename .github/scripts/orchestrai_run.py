@@ -18,6 +18,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from orchestrai_logs import private_log_values, public_log_status, public_test_log
+from orchestrai_stdout import MAX_STREAM_BYTES, public_streams, stream_coverage
 
 TERMINAL_PIPELINE_STATES = {
     "passed",
@@ -86,7 +87,7 @@ SAFE_PIPELINE_STATES = TERMINAL_PIPELINE_STATES | {
     "cancelling",
     "unknown",
 }
-MAX_TEST_LOG_BYTES = 2_000_000
+MAX_TEST_LOG_BYTES = MAX_STREAM_BYTES
 
 
 def env(name: str, default: str = "") -> str:
@@ -187,8 +188,8 @@ def classify_behavioral_test_output(test: dict[str, Any]) -> str:
 
     Launcher stdout and stderr can contain credentials, private hostnames,
     machine identities, paths, and full agent transcripts. They are therefore
-    inspected privately. Selected grader lines are exported separately through
-    orchestrai_logs' allowlist and redaction, never as complete raw streams.
+    inspected privately. Redacted complete test streams are published separately
+    through orchestrai_stdout; this classifier still emits only fixed diagnostics.
     Keep this allow-list exact and return only constant strings.
     """
     output = "\n".join(
@@ -778,7 +779,6 @@ def build_results_manifest(
     failure_summary = jenkins_failure_summary(live)
     private_values = private_log_values(plan, live, dict(os.environ))
     launcher_reachable = launcher.get("reachable")
-    report_url = snapshot_report_url(live)
     if (
         not failure_summary
         and pipeline_status in {"failed", "unstable", "error", "cancelled", "aborted"}
@@ -802,8 +802,6 @@ def build_results_manifest(
             "error": "",
             "terminal": False,
         }
-        if report_url:
-            item["report_url"] = report_url
         matches = [
             session
             for session in live_sessions
@@ -839,6 +837,8 @@ def build_results_manifest(
             continue
 
         test = matching_tests[0]
+        item["public_streams"] = public_streams(test, private_values)
+        item["stream_coverage"] = stream_coverage(item["public_streams"])
         item["public_log"] = public_test_log(
             test, skill=expected["skill"], private_values=private_values
         )
@@ -1138,11 +1138,11 @@ def collect_test_logs(
         if pending and remaining > 0:
             time.sleep(min(max(poll_seconds, 1), remaining))
     log(
-        f"retrieved {total - len(pending)}/{total} requested test log streams; only sanitized grader lines will be published"
+        f"retrieved {total - len(pending)}/{total} requested test log streams; complete received streams will be redacted before publication"
     )
     if pending:
         log(
-            "warning: some test logs were unavailable; full reports remain in ReportPortal"
+            "warning: some test streams were unavailable; public log coverage is incomplete"
         )
     return enriched
 
@@ -1156,14 +1156,11 @@ def collect_report_metadata(
     timeout_seconds: int = 60,
     poll_seconds: int = 5,
 ) -> dict[str, str]:
-    """Refresh report metadata after cleanup without replacing test evidence.
+    """Read final parent state without replacing pre-cleanup test evidence.
 
-    Report registration and cached /live snapshots can lag completed tests.
-    Only retain a validated link and fixed terminal state; cancelled launcher
-    snapshots must never overwrite the pre-cleanup behavioral verdicts/logs.
-    Missing metadata is advisory and has a single bounded retry budget.
+    Do not wait for report registration or read cached report links. The direct
+    run record is authoritative for termination, and metadata is advisory.
     """
-    report_url = snapshot_report_url(initial_live)
     final_status = (
         initial_pipeline_status
         if initial_pipeline_status in TERMINAL_PIPELINE_STATES
@@ -1171,7 +1168,7 @@ def collect_report_metadata(
     )
     deadline = time.monotonic() + max(0, min(timeout_seconds, 120))
     while time.monotonic() < deadline:
-        for endpoint in (f"/api/runs/{run_id}", f"/api/runs/{run_id}/live"):
+        for endpoint in (f"/api/runs/{run_id}",):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
@@ -1183,7 +1180,6 @@ def collect_report_metadata(
                 )
                 if not isinstance(snapshot, dict):
                     continue
-                report_url = snapshot_report_url(snapshot) or report_url
                 # /live is cached. The direct run record is authoritative for
                 # termination; do not replace it with a stale live status.
                 if endpoint == f"/api/runs/{run_id}":
@@ -1195,21 +1191,16 @@ def collect_report_metadata(
                         final_status = status
             except RuntimeError:
                 pass  # Never echo Portal response bodies or change a verdict.
-            if report_url and final_status != "unknown":
+            if final_status != "unknown":
                 break
-        if report_url and final_status != "unknown":
+        if final_status != "unknown":
             break
         remaining = deadline - time.monotonic()
         if remaining > 0:
             time.sleep(min(max(poll_seconds, 1), remaining))
-    if not report_url:
-        log("warning: ReportPortal link was unavailable after metadata refresh")
     if final_status == "unknown":
         log("warning: final parent status was unavailable after metadata refresh")
-    metadata = {"final_pipeline_status": final_status}
-    if report_url:
-        metadata["report_url"] = report_url
-    return metadata
+    return {"final_pipeline_status": final_status}
 
 
 def collect_live_results(
@@ -1335,22 +1326,17 @@ def summary(
             handle.write("```\n")
         items = (results or {}).get("items") or []
         if items:
-            handle.write("\n| Skill | OS | Result | ReportPortal |\n")
+            handle.write("\n| Skill | OS | Result | Test streams |\n")
             handle.write("|---|---|---|---|\n")
             for item in items:
                 status = str(item.get("status") or "unknown")
                 icon = (
                     "✅" if status == "passed" else ("🧪" if status == "mock" else "❌")
                 )
-                report_url = safe_report_url(item.get("report_url"))
                 report = (
-                    f"[View Results](<{report_url}>)"
-                    if report_url
-                    else (
-                        "Not applicable (mock)"
-                        if mode == "mock"
-                        else "Unavailable (no validated link)"
-                    )
+                    "Not run (mock)"
+                    if mode == "mock"
+                    else stream_coverage(item.get("public_streams") or {})
                 )
                 handle.write(
                     f"| `{item.get('skill', '')}` | {item.get('os', '')} | "
@@ -1591,9 +1577,6 @@ def main() -> int:
             initial_pipeline_status=pipeline_status,
         )
         results["run"]["final_pipeline_status"] = metadata["final_pipeline_status"]
-        if report_url := metadata.get("report_url"):
-            for item in results["items"]:
-                item["report_url"] = report_url
         results["run"]["cleanup_status"] = (
             ("confirmed" if cleanup_confirmed else "unconfirmed")
             if parent_run_still_active

@@ -10,13 +10,13 @@ import os
 import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from orchestrai_logs import (
     behavioral_summary_markdown,
     public_behavioral_summary,
     public_manifest_log,
 )
+from orchestrai_stdout import manifest_streams, stream_coverage
 
 SAFE_STATUSES = {
     "passed",
@@ -155,28 +155,6 @@ def _safe_error(value: object) -> str:
     return "The behavioral result could not be verified."
 
 
-def _safe_report_url(value: object) -> str:
-    raw = str(value or "").strip()
-    if (
-        not raw
-        or len(raw) > 2048
-        or any(character.isspace() or character in '<>"' for character in raw)
-    ):
-        return ""
-    try:
-        parsed = urlsplit(raw)
-    except ValueError:
-        return ""
-    if (
-        parsed.scheme != "https"
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-    ):
-        return ""
-    return raw
-
-
 def result_category(item: dict) -> str:
     status = _safe_status(item.get("status"))
     if status == "error" and (
@@ -285,12 +263,13 @@ def _write_step_summary(item: dict, run: dict, *, ok: bool, mock: bool) -> None:
             )
         if duration := _safe_duration(item.get("duration")):
             handle.write(f"| Duration | `{html.escape(duration)}` |\n")
-        if report_url := _safe_report_url(item.get("report_url")):
+        if not mock:
             handle.write(
-                f"| ReportPortal | [View Results](<{html.escape(report_url)}>) |\n"
+                f"| Test streams | {stream_coverage(manifest_streams(item, dict(os.environ)))} |\n"
             )
-        elif not mock:
-            handle.write("| ReportPortal | Unavailable (no validated link) |\n")
+            handle.write(
+                f"| Downloadable log | `test-results-{skill}-{os_name}` → `stdout-stderr.log` |\n"
+            )
         if error := _safe_error(item.get("error")):
             error = html.escape(error)
             handle.write(f"\n> {error}\n")
@@ -298,29 +277,20 @@ def _write_step_summary(item: dict, run: dict, *, ok: bool, mock: bool) -> None:
             handle.write("\nPlan validation only; no hardware test was executed.\n")
         elif report := behavioral_summary_markdown(item):
             handle.write("\n" + report)
-        if lines := public_manifest_log(item):
-            handle.write(
-                "\n<details><summary>Sanitized grader output</summary>\n\n```text\n"
-            )
-            handle.write("\n".join(lines) + "\n```\n\n</details>\n")
-        elif not mock:
-            handle.write(
-                f"\nSanitized grader output: {_log_unavailable_reason(item)}.\n"
-            )
         if not mock:
             handle.write(
-                "\nReportPortal requires AMD access. Pipeline status is a snapshot; confirmed parent termination is not a machine-release verification.\n"
+                "\nExpand **Test stdout/stderr (redacted)** in this job's log, or download the named artifact from this run. Full streams are not embedded in the size-limited step summary. Pipeline status is a snapshot; confirmed parent termination is not a machine-release verification.\n"
             )
 
 
 def _log_unavailable_reason(item: dict) -> str:
     if item.get("public_log_status") == "no_recognized_lines":
-        return "test output was received, but no publishable grader lines were recognized; see ReportPortal"
-    return "test output was unavailable; see full logs in ReportPortal"
+        return "test output was received, but no grader summary could be reconstructed; inspect Test stdout/stderr (redacted)"
+    return "test output was unavailable"
 
 
 def _write_job_log(item: dict, *, ok: bool, mock: bool) -> None:
-    """Print normalized fields and revalidated, sanitized grader lines."""
+    """Print normalized fields and complete, revalidated redacted streams."""
     status = _safe_status(item.get("status"))
     skill = str(item.get("skill") or "")
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,127}", skill):
@@ -337,21 +307,27 @@ def _write_job_log(item: dict, *, ok: bool, mock: bool) -> None:
         print(f"  Duration: {duration}")
     if error := _safe_error(item.get("error")):
         print(f"  Diagnostic: {error}")
-    if report_url := _safe_report_url(item.get("report_url")):
-        print(f"  Full logs (ReportPortal): {report_url}")
-    elif not mock:
-        print("  ReportPortal link: unavailable; inspect the matching controller job")
     if not mock and (report := behavioral_summary_markdown(item)):
         # Put the overview and failed expectations outside the folded full
         # grader output so a failure is understandable without expanding it.
         print("\n" + report)
-    if lines := public_manifest_log(item):
-        print("::group::Sanitized grader output (full logs in ReportPortal)")
-        for line in lines:
-            print(line)
+    streams = manifest_streams(item, dict(os.environ))
+    if streams:
+        print(f"  Test stream coverage: {stream_coverage(streams)}")
+        print(f"  Download: test-results-{skill}-{os_name} / stdout-stderr.log")
+        print("::group::Test stdout/stderr (redacted)")
+        for stream, text in streams.items():
+            print(f"--- {stream} ---")
+            print(text, end="" if text.endswith("\n") else "\n")
+        print("::endgroup::")
+    elif lines := public_manifest_log(item):
+        # Old manifests cannot reconstruct the full stream. Never label these
+        # recognized lines as complete output.
+        print("::group::Legacy grader output (full test streams unavailable)")
+        print("\n".join(lines))
         print("::endgroup::")
     elif not mock:
-        print(f"  Sanitized grader output: {_log_unavailable_reason(item)}")
+        print(f"  Test stdout/stderr: {_log_unavailable_reason(item)}")
 
 
 def evaluate(manifest: dict, *, skill: str, os_name: str) -> tuple[dict, dict, bool]:
@@ -383,7 +359,6 @@ def _summary_document(
     mock = status == "mock"
     duration = _safe_duration(item.get("duration"))
     error = _safe_error(item.get("error"))
-    report_url = _safe_report_url(item.get("report_url"))
     compact_item = {
         "skill": skill,
         "os": os_name,
@@ -403,8 +378,9 @@ def _summary_document(
         "results": [compact_item],
         "controller": public_controller_state(run),
     }
-    if report_url:
-        document["report_url"] = report_url
+    document["stream_coverage"] = stream_coverage(
+        manifest_streams(item, dict(os.environ))
+    )
     if lines := public_manifest_log(item):
         document["public_log"] = lines
         document["public_log_status"] = "available"
@@ -436,6 +412,14 @@ def main() -> int:
         skill=args.skill, os_name=args.os, item=item, run=run, ok=ok
     )
     output.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    if streams := manifest_streams(item, dict(os.environ)):
+        (args.output_dir / "stdout-stderr.log").write_text(
+            "".join(
+                f"--- {stream} ---\n{text}" + ("" if text.endswith("\n") else "\n")
+                for stream, text in streams.items()
+            ),
+            encoding="utf-8",
+        )
     if lines := public_manifest_log(item):
         (args.output_dir / "sanitized.log").write_text(
             "\n".join(lines) + "\n", encoding="utf-8"

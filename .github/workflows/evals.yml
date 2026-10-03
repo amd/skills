@@ -408,7 +408,7 @@ jobs:
           name: orchestrai-run-results-${{ matrix.slug }}
           # The live controller snapshot can contain private pipeline topology
           # (for example, stage names).  Verdict jobs need only the normalized,
-          # allow-listed manifest, so keep the snapshot inside this ephemeral
+          # normalized manifest with redacted test streams, so keep the snapshot inside this ephemeral
           # job workspace and out of public workflow artifacts.
           path: orchestrai-results.json
           if-no-files-found: warn

@@ -10,7 +10,6 @@ import json
 import os
 import re
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from orchestrai_logs import (
     behavioral_summary_markdown,
@@ -33,28 +32,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-json", default="[]")
     parser.add_argument("--output", type=Path, default=Path("orchestrai-report.md"))
     return parser
-
-
-def _safe_report_url(value: object) -> str:
-    raw = str(value or "").strip()
-    if (
-        not raw
-        or len(raw) > 2048
-        or any(character.isspace() or character in '<>"' for character in raw)
-    ):
-        return ""
-    try:
-        parsed = urlsplit(raw)
-    except ValueError:
-        return ""
-    if (
-        parsed.scheme != "https"
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-    ):
-        return ""
-    return raw
 
 
 def _expected(raw: str) -> list[tuple[str, str]]:
@@ -304,16 +281,9 @@ def render(
             )
 
         def report_link(row: dict) -> str:
-            url = _safe_report_url(row.get("report_url"))
-            return (
-                f"[View Results](<{html.escape(url)}>)"
-                if url
-                else (
-                    "Not applicable (mock)"
-                    if row.get("status") == "mock"
-                    else "Unavailable (no validated link)"
-                )
-            )
+            if row.get("status") == "mock":
+                return "Not run (mock)"
+            return f"`test-results-{row['skill']}-{row['os']}` → `stdout-stderr.log`"
 
         def diagnostic(row: dict) -> str:
             raw = row.get("error")
@@ -342,7 +312,7 @@ def render(
                     f"| `{row['skill']}` | {row['os']} | {result_category(row)} | {html.escape(diagnostic(row))} | {report_link(row)} |"
                 )
             # Failed case explanations are visible without expanding every
-            # passed skill. Raw infrastructure errors remain in ReportPortal.
+            # passed skill. Control-plane logs are never published here.
             for row in attention:
                 if behavioral := behavioral_summary_markdown(row):
                     lines.extend(
@@ -361,7 +331,7 @@ def render(
                 "",
                 "### All skill results",
                 "",
-                "| Skill | OS | Result | Cases passed | Expectations met | Model / effort | Case time | Public coverage | ReportPortal |",
+                "| Skill | OS | Result | Cases passed | Expectations met | Model / effort | Case time | Grader coverage | Downloadable test log |",
                 "|---|---|---|---|---|---|---|---|---|",
             ]
         )
@@ -449,9 +419,9 @@ def render(
                 "### How to investigate",
                 "",
                 "- **Behavioral failures:** read the unmet expectations and per-case breakdowns above for context.",
-                "- **Execution errors or missing output:** inspect the matching Linux/Windows controller job and follow **View Results** to ReportPortal (AMD access required).",
-                "- **Missing ReportPortal link:** the controller retries report metadata after cleanup. If no validated link is returned, check report registration in OrchestrAI; do not assume the report does not exist.",
-                "- **Partial counts:** do not treat missing cases as passed. Public output is bounded and sanitized; dependency logs and raw agent output remain in ReportPortal.",
+                "- **Test logs:** open the skill/OS job and expand **Test stdout/stderr (redacted)**, or download its **test-results-SKILL-OS** artifact from this run and open **stdout-stderr.log**. This includes all received test output, not only recognized grader lines.",
+                "- **Execution errors or missing output:** inspect the matching Linux/Windows controller job. A session that never started may have no test stream; raw control-plane logs and private attachments are not published.",
+                "- **Partial counts:** do not treat missing cases as passed. Grader parsing affects the overview only, never which test-output lines are published. Missing/oversized streams are labeled explicitly.",
                 "- **Timing and cleanup:** case time excludes acquisition and adapter setup, includes in-case work, and is not total wall time. Parent termination is a controller observation; machine release remains managed by OrchestrAI.",
             ]
         )

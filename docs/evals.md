@@ -24,16 +24,24 @@ commit: the PR head for pull requests, or the triggering commit for other events
 Discovery does not use GitHub's synthetic PR merge, which could contain skills
 from newer upstream commits that are absent from the tested PR head.
 
-For Strix behavioral runs, each GitHub skill/OS job includes a **Sanitized grader
-output** log group. Each job also shows the case/expectation totals, model and
+For Strix behavioral runs, each GitHub skill/OS job includes a **Test stdout/stderr
+(redacted)** log group and a downloadable `stdout-stderr.log` in its
+`test-results-SKILL-OS` artifact. Every received test-output line is retained;
+publication does not depend on recognizing Skillscope's format. Each job also shows the case/expectation totals, model and
 effort, and an **Unmet expectations** table with case IDs and sanitized judge
 explanations, outside the collapsed log group. The same overview appears in the
 job summary and aggregate report. These overviews are reconstructed from
 recognized grader lines, not copied from arbitrary test output. Incomplete or
-inconsistent output is explicitly marked partial. Only recognized grader lines
-are published; credentials, network addresses, host identities, and machine paths are redacted,
-and output length is limited. The **ReportPortal / View Results** link retains
-the full stdout, dependency logs, and report attachments for internal debugging.
+inconsistent output is explicitly marked partial. Known secrets, credential
+assignments/auth headers/private keys, opaque credential-shaped values, private
+URLs (including driver URLs), network addresses, host/user identities and machine
+paths are redacted **before** GitHub upload and revalidated before printing.
+Public package URLs, warnings, prompts and arbitrary errors remain visible.
+GitHub workflow-command sequences are neutralized. This covers test stdout/stderr,
+not raw control-plane consoles, hardware inventories or agent-transcript attachments.
+ReportPortal is not needed to read the published test logs; the shared private
+reporting backend is unchanged. Redaction reduces risk but cannot guarantee that
+arbitrary future agent output contains no sensitive information.
 
 The aggregate report separates skill/OS verdicts from observed graded-case and
 expectation totals. It includes a Linux/Windows overview, public-log coverage,
@@ -43,8 +51,7 @@ show which checks passed and failed. Missing data is labeled rather than counted
 as a pass. Controller snapshots include parent-termination status without machine
 identities; confirmation is not an independent verification of machine release.
 Case timing excludes acquisition and adapter dependency setup, but includes
-in-case setup and agent work. ReportPortal links require
-AMD access. These reporting details do not change the final CI gate.
+in-case setup and agent work. These reporting details do not change the final CI gate.
 
 Like the routing summary, the OrchestrAI behavioral report has **Verdict / Count /
 Meaning**, **By expectation type**, and **Per skill** tables. The behavioral
@@ -56,21 +63,22 @@ rates are labeled observed; zero denominators are shown as **Not reported**.
 
 The controller fetches missing test streams through the authenticated Portal
 log endpoint, allowing up to two minutes for persisted logs to become available.
-Raw streams stay in memory; only sanitized grader lines enter GitHub artifacts.
-Timestamp wrappers are removed before filtering. When no grader lines can be
-shown, the job distinguishes missing output from received but unrecognized output.
+Raw streams stay in memory; only redacted streams enter GitHub artifacts.
+Each stream has a 16 MB transport bound. Oversized responses are rejected rather
+than silently tail-truncated; unavailable/partial streams are labeled, never
+described as full output. Full received streams are printed in the job console
+and saved in the artifact, not embedded in the size-limited Markdown summary.
+Timestamp wrappers are removed only for reconstructing grader summaries.
 After all requested tests finish, an active parent is cancelled with bounded
 retries. Its terminal state must be confirmed within one minute or the controller
 fails, while preserving the individual test results. Machine release remains
 managed by OrchestrAI.
 
-Validated ReportPortal links are retained across live polls. After cleanup, the
-controller refreshes the run record and live report metadata for up to one minute
-to recover late links. These reads do not replace completed test verdicts or
-grader logs with cancelled launcher snapshots. Summaries distinguish the pipeline
+After cleanup, the controller refreshes final parent metadata for up to one minute.
+These reads do not replace completed test verdicts or
+logs with cancelled launcher snapshots. Summaries distinguish the pipeline
 and test snapshots before cleanup from the final parent state read after cleanup.
-Missing links/final metadata are reported explicitly without changing test grades;
-an unavailable link does not prove that the ReportPortal launch does not exist.
+Missing final metadata is reported explicitly without changing test grades.
 
 The rest of this document is the dataset those stages read. You write one file, `evals/evals.json`, inside your skill folder. For a federated skill that folder lives in your product repo and is imported with the rest of the skill, so edit the dataset there; an edit made in this catalog is overwritten by the next import. Run `skillscope template` for a file to start from.
 

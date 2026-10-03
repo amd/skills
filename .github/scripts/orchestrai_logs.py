@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Extract bounded, redacted grader output for public GitHub checks.
+"""Extract bounded grader evidence for structured GitHub summaries.
 
-This deliberately exports only Skillscope's case and expectation lines, not a
-redacted copy of arbitrary actor stdout. Dependency logs, agent transcripts,
-control-plane output and diagnostic attachments remain in ReportPortal.
+These recognized lines reconstruct informational counts only. Complete redacted
+stdout/stderr is published independently by orchestrai_stdout, so changes to the
+grader format cannot suppress test logs.
 """
 
 from __future__ import annotations
 
 import html
+import json
 import re
 import unicodedata
 from collections.abc import Iterable
@@ -66,9 +67,9 @@ OPAQUE_RE = re.compile(
     r"\b[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\b"
 )
 PUBLIC_NOTICES = {
-    "[REDACTED: credential-related grader output; see ReportPortal]",
-    "[REDACTED: address-related grader output; see ReportPortal]",
-    "[Sanitized log truncated; full output is in ReportPortal.]",
+    "[REDACTED: credential-related grader output; inspect the redacted test log]",
+    "[REDACTED: address-related grader output; inspect the redacted test log]",
+    "[Grader summary truncated; inspect the redacted test log.]",
 }
 
 
@@ -142,7 +143,9 @@ def private_log_values(plan: dict, live: dict, environ: dict) -> list[str]:
         str(value)
         for key, value in environ.items()
         if re.search(
-            r"(?i)password|passwd|secret|token|api.?key|llm_gateway|orchestrai", key
+            r"(?i)password|passwd|secret|token|api.?key|llm_gateway|"
+            r"orchestrai_(?:portal_url|user|space|device_tags|linux_driver_sources_json)$",
+            key,
         )
         and value
     ]
@@ -159,7 +162,7 @@ def private_log_values(plan: dict, live: dict, environ: dict) -> list[str]:
                     re.fullmatch(
                         r"(?i)(?:hostname|ip|ip_address|address|machine_name|actor_name|"
                         r"executionnode|username|launcher_url|jenkins_url|serial|"
-                        r".*(?:password|secret|token|api_key))",
+                        r"llm_gateway_(?:key|url|user)|.*(?:password|secret|token|api_key))",
                         str(key),
                     )
                     or (
@@ -175,6 +178,34 @@ def private_log_values(plan: dict, live: dict, environ: dict) -> list[str]:
                 walk(child, context)
 
     walk(live)
+    walk(plan)
+
+    # Driver maps and fleet settings are JSON secrets: replacing the complete
+    # JSON string would miss an individual URL/tag printed by dependency setup.
+    def strings(value: object) -> None:
+        if isinstance(value, str):
+            values.append(value)
+        elif isinstance(value, dict):
+            for child in value.values():
+                strings(child)
+        elif isinstance(value, list):
+            for child in value:
+                strings(child)
+
+    for key, value in environ.items():
+        if key.startswith("ORCHESTRAI_") and isinstance(value, str):
+            try:
+                strings(json.loads(value))
+            except (ValueError, TypeError):
+                pass
+    driver_vars = (plan.get("builds_json") or {}).get("vars") or {}
+    if isinstance(driver_vars, dict):
+        raw = driver_vars.get("driver_sources_json")
+        if isinstance(raw, str):
+            try:
+                strings(json.loads(raw))
+            except ValueError:
+                pass
     return values
 
 
@@ -185,7 +216,7 @@ def redact_grader_text(value: str, private_values: Iterable[str] = ()) -> str:
     if CREDENTIAL_RE.search(value) or re.search(
         r"(?i)\b(?:bearer|basic)\s+\S+|-----BEGIN .*PRIVATE KEY-----", value
     ):
-        return "[REDACTED: credential-related grader output; see ReportPortal]"
+        return "[REDACTED: credential-related grader output; inspect the redacted test log]"
     for private in sorted(set(private_values), key=len, reverse=True):
         if len(private) >= 4:
             value = value.replace(private, "[REDACTED]")
@@ -194,7 +225,9 @@ def redact_grader_text(value: str, private_values: Iterable[str] = ()) -> str:
     value = ADDRESS_RE.sub("[ADDRESS REDACTED]", value)
     # IPv6 addresses and double-colon control sequences suppress the line.
     if re.search(r"(?i)(?:[0-9a-f]{0,4}:){2,}[0-9a-f:.%_-]*", value):
-        return "[REDACTED: address-related grader output; see ReportPortal]"
+        return (
+            "[REDACTED: address-related grader output; inspect the redacted test log]"
+        )
     value = HOST_RE.sub("[HOST REDACTED]", value)
     value = IDENTITY_RE.sub("[IDENTITY REDACTED]", value)
     value = MACHINE_NAME_RE.sub("[IDENTITY REDACTED]", value)
@@ -249,7 +282,7 @@ def public_test_log(
                 # their arbitrary server-owned content in the full report.
                 line = (
                     case.group("result")
-                    + " -- [Error details withheld; see ReportPortal]"
+                    + " -- [Error details withheld; inspect the redacted test log]"
                 )
             clean = redact_grader_text(line, private_values)
             line_bytes = len(clean.encode("utf-8")) + 1
@@ -258,7 +291,7 @@ def public_test_log(
                 or used_bytes + line_bytes > MAX_PUBLIC_LOG_BYTES
             ):
                 lines.append(
-                    "[Sanitized log truncated; full output is in ReportPortal.]"
+                    "[Grader summary truncated; inspect the redacted test log.]"
                 )
                 return lines
             lines.append(clean)
@@ -351,7 +384,7 @@ def public_behavioral_summary(item: dict) -> dict:
                     {
                         "kind": "error",
                         "expectation": "(run failed)",
-                        "detail": "Error details withheld; see ReportPortal.",
+                        "detail": "Error details withheld; inspect the redacted test log.",
                     }
                 ]
             visible_failures = len(unmet)
@@ -362,7 +395,7 @@ def public_behavioral_summary(item: dict) -> dict:
                     {
                         "kind": "withheld",
                         "expectation": "Additional unmet expectations",
-                        "detail": "Some grader details were unavailable or redacted; see ReportPortal.",
+                        "detail": "Some grader details were unavailable or redacted; inspect the redacted test log.",
                     }
                 ]
             value = {
@@ -463,7 +496,7 @@ def behavioral_summary_markdown(item: dict) -> str:
     if not summary["complete"]:
         lines.extend(
             [
-                "Partial grader output: counts cover recorded cases only; see ReportPortal for the complete report.",
+                "Partial grader output: counts cover recorded cases only; inspect the redacted test log for context.",
                 "",
             ]
         )
@@ -491,7 +524,7 @@ def behavioral_summary_markdown(item: dict) -> str:
         )
     else:
         lines.append(
-            "Unmet expectation details were unavailable in the sanitized output; see ReportPortal."
+            "Unmet expectation details were unavailable in the grader summary; inspect the redacted test log."
         )
     lines.extend(
         [
@@ -514,7 +547,7 @@ def behavioral_summary_markdown(item: dict) -> str:
     lines.extend(
         [
             "",
-            "Case time excludes machine acquisition and adapter dependency setup; in-case setup and agent work are included. Public details are sanitized; full logs remain in ReportPortal.",
+            "Case time excludes machine acquisition and adapter dependency setup; in-case setup and agent work are included. Expand Test stdout/stderr (redacted) in the job log or download stdout-stderr.log from the per-skill artifact.",
         ]
     )
     return "\n".join(lines) + "\n"
