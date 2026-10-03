@@ -84,6 +84,7 @@ jobs:
       scoped: ${{ steps.plan.outputs.scoped }}
       scoped_any: ${{ steps.plan.outputs.scoped_any }}
       skipped: ${{ steps.plan.outputs.skipped }}
+      public_skillscope_commit: ${{ steps.skillscope_commit.outputs.sha }}
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -99,6 +100,10 @@ jobs:
           repository: ${{ env.SKILLSCOPE_REPOSITORY }}
           ref: ${{ env.SKILLSCOPE_VERSION }}
           path: .skillscope-action
+
+      - name: Record public Skillscope release commit
+        id: skillscope_commit
+        run: echo "sha=$(git -C .skillscope-action rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
@@ -392,6 +397,9 @@ jobs:
       - name: Acquire Strix machines and run behavioral evals
         id: orchestrai
         env:
+          # Verified public commits, not another dependency pin or new secrets.
+          PUBLIC_SKILLS_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          PUBLIC_SKILLSCOPE_COMMIT: ${{ needs.discover.outputs.public_skillscope_commit }}
           PLAN_FILE: orchestrai-plan.json
           MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.orchestrai_mode || 'live' }}
           POLL_TIMEOUT_SEC: "13800"
@@ -440,6 +448,9 @@ jobs:
           path: .orchestrai-report
       - name: Resolve skill verdict
         id: verdict
+        env:
+          PUBLIC_SKILLS_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          PUBLIC_SKILLSCOPE_COMMIT: ${{ needs.discover.outputs.public_skillscope_commit }}
         run: >-
           python3 .github/scripts/orchestrai_verdict.py
           --results .orchestrai-report/orchestrai-results.json

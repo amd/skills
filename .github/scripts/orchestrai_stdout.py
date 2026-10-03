@@ -49,9 +49,39 @@ IDENTITY = re.compile(
 )
 MACHINE_NAME = re.compile(r"\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+){2,}\b")
 PRIVATE_PATH = re.compile(
-    r"(?i)(?<![a-z0-9])(?:[a-z]:[\\/]|\\\\)[^\s<>\"']+|"
-    r"/(?:home|root|tmp|var|opt|mnt|srv|Users|private|workspace|builds)(?:/[^\s<>\"']*)?"
+    r"(?i)(?P<quote>[\"'])(?P<quoted>(?:[a-z]:[\\/]|\\\\|"
+    r"/(?:home|root|tmp|var|opt|mnt|srv|Users|private|workspace|builds)/)[^\r\n\"']+)(?P=quote)|"
+    r"(?P<bare>(?<![a-z0-9])(?:[a-z]:[\\/](?:Program Files(?: \(x86\))?[\\/]|Users[\\/][^\\/\r\n<>\"']+[\\/])?|\\\\)[^\s<>\"']+|"
+    r"(?<![\w:/])/(?:home|root|tmp|var|opt|mnt|srv|Users|private|workspace|builds)(?=/|$|[\s<>\"'])(?:/[^\s<>\"']*)?)"
 )
+PUBLIC_TEST_PATH = re.compile(
+    r"(?:testcases/)?L4-sys/skills/(?:linux|windows)/sys_func-skills_behavioral"
+)
+PUBLIC_TEST_SUFFIX = re.compile(r"(?:^|/)(" + PUBLIC_TEST_PATH.pattern + r")\Z")
+FILE_NAME = re.compile(
+    r"[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}\.(?:py|ps1|sh|js|mjs|cjs|exe|"
+    r"json|yaml|yml|md|txt|log|whl|zip|gz|toml|cfg|ini|so|dll|pyd)(?::\d+(?::\d+)?)?",
+    re.IGNORECASE,
+)
+COMMON_PATH_NAMES = {
+    "skills",
+    "skillscope",
+    "venv",
+    "artifacts",
+    "dependencies",
+    "bin",
+    "scripts",
+    "node_modules",
+    "cache",
+    "logs",
+    "results",
+    "site-packages",
+    "python",
+    "python3",
+    "pip",
+    "pip3",
+    "nodejs",
+}
 CREDENTIAL_ASSIGNMENT = re.compile(
     r"(?im)((?<![\w-])(?:[a-z0-9_]*(?:api[_-]?key|password|passwd|secret|token|access_key(?:_id)?|private_key|cookie)|"
     r"authorization|ocp-apim-subscription-key|anthropic_custom_headers|"
@@ -63,6 +93,10 @@ CLI_SECRET = re.compile(
     r"(?i)(--(?:api[-_]key|password|passwd|secret|token|access[-_]key|subscription[-_]key)(?:\s+|=))[^\r\n]+"
 )
 OPAQUE = re.compile(r"(?<![\w])[A-Za-z0-9_+/=-]{28,}(?![\w])")
+HEX_VALUE = re.compile(r"(?<![a-zA-Z0-9])[0-9a-fA-F]{28,}(?![a-zA-Z0-9])")
+UUID_VALUE = re.compile(
+    r"(?<![a-zA-Z0-9])[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}(?![a-zA-Z0-9])"
+)
 EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 ADDRESS = re.compile(r"(?<![\w])(?:\d{1,3}\.){3}\d{1,3}(?![\w])")
 IPV6 = re.compile(r"(?<![\w:])(?:[0-9a-fA-F]{0,4}:){2,}[0-9a-fA-F:.%_-]*(?![\w:])")
@@ -102,7 +136,47 @@ def _address(match: re.Match) -> str:
     return match[0] if address.is_loopback else "[ADDRESS REDACTED]"
 
 
-def sanitize_stream(raw: object, private_values: Iterable[str] = ()) -> str:
+def public_commits(environ: dict) -> set[str]:
+    """Only workflow-verified public revisions can bypass opaque-value masking.
+
+    Do not trust actor labels such as 'commit', or an allowlist in its manifest:
+    a credential can also be forty hexadecimal characters.
+    """
+    return {
+        value.lower()
+        for key in ("PUBLIC_SKILLS_COMMIT", "PUBLIC_SKILLSCOPE_COMMIT")
+        if isinstance(value := environ.get(key), str)
+        and re.fullmatch(r"[0-9a-fA-F]{40}", value)
+    }
+
+
+def _path(match: re.Match) -> str:
+    raw = match["quoted"] or match["bare"]
+    path = raw.replace("\\", "/")
+    trimmed = path.rstrip("),;].")
+    punctuation = path[len(trimmed) :]
+    basename = trimmed.rstrip("/").rsplit("/", 1)[-1]
+    # Reveal no private directory hierarchy, share name or username. Retain a
+    # plain filename/common tool name, or the fixed public adapter test path.
+    public_test = PUBLIC_TEST_SUFFIX.search(trimmed)
+    suffix = public_test[1] if public_test else ""
+    if not suffix and (
+        FILE_NAME.fullmatch(basename)
+        or basename.lower() in COMMON_PATH_NAMES
+        or re.fullmatch(r"(?i)python\d{2,3}|python3\.\d{1,2}", basename)
+    ):
+        suffix = basename
+    result = "<local>" + ("/" + suffix if suffix else "") + punctuation
+    quote = match["quote"] or ""
+    return quote + result + quote
+
+
+def sanitize_stream(
+    raw: object,
+    private_values: Iterable[str] = (),
+    *,
+    verified_commits: Iterable[str] = (),
+) -> str:
     """Retain every line; redact credentials and private infrastructure data.
 
     Known values (including multiline secrets and driver-map URLs) are replaced
@@ -143,27 +217,47 @@ def sanitize_stream(raw: object, private_values: Iterable[str] = ()) -> str:
     )
     value = IDENTITY.sub("[IDENTITY REDACTED]", value)
     value = MACHINE_NAME.sub("[IDENTITY REDACTED]", value)
-    value = PRIVATE_PATH.sub("[PATH REDACTED]", value)
+    value = PRIVATE_PATH.sub(_path, value)
     value = EMAIL.sub("[EMAIL REDACTED]", value)
     value = ADDRESS.sub(_address, value)
     value = MAC.sub("[HARDWARE ADDRESS REDACTED]", value)
     value = IPV6.sub(_address, value)
-    # Covers unlabelled node-bound keys/JWTs/opaque fleet IDs. Some package
-    # hashes are deliberately redacted too; the surrounding line is retained.
+    commits = {
+        sha.lower()
+        for sha in verified_commits
+        if isinstance(sha, str) and re.fullmatch(r"[0-9a-fA-F]{40}", sha)
+    }
+    # Normalized filenames may contain credentials or opaque actor IDs.
+    # Check their components too, not only the complete slash-containing token.
+    value = HEX_VALUE.sub(
+        lambda match: (
+            match[0] if match[0].lower() in commits else "[OPAQUE VALUE REDACTED]"
+        ),
+        value,
+    )
+    value = UUID_VALUE.sub("[OPAQUE VALUE REDACTED]", value)
+    # The fixed public test path is not a base64 credential just because it
+    # contains a slash, uppercase L, and the digit 4. Other slash-containing
+    # high-entropy strings still receive credential masking.
     value = OPAQUE.sub(
         lambda match: (
-            "[OPAQUE VALUE REDACTED]"
-            if re.fullmatch(r"[0-9a-fA-F]{28,}", match[0])
-            or re.fullmatch(
-                r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", match[0]
+            match[0]
+            if match[0].lower() in commits
+            or PUBLIC_TEST_PATH.fullmatch(match[0].lstrip("/"))
+            else (
+                "[OPAQUE VALUE REDACTED]"
+                if re.fullmatch(r"[0-9a-fA-F]{28,}", match[0])
+                or re.fullmatch(
+                    r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", match[0]
+                )
+                or match[0].startswith(("sk-", "ghp_", "gho_", "github_pat_", "eyJ"))
+                or (
+                    re.search(r"[A-Z]", match[0])
+                    and re.search(r"[a-z]", match[0])
+                    and re.search(r"[0-9]", match[0])
+                )
+                else match[0]
             )
-            or match[0].startswith(("sk-", "ghp_", "gho_", "github_pat_", "eyJ"))
-            or (
-                re.search(r"[A-Z]", match[0])
-                and re.search(r"[a-z]", match[0])
-                and re.search(r"[0-9]", match[0])
-            )
-            else match[0]
         ),
         value,
     )
@@ -171,9 +265,16 @@ def sanitize_stream(raw: object, private_values: Iterable[str] = ()) -> str:
     return value.replace("::", ": :")
 
 
-def public_streams(test: dict, private_values: Iterable[str] = ()) -> dict:
+def public_streams(
+    test: dict,
+    private_values: Iterable[str] = (),
+    *,
+    verified_commits: Iterable[str] = (),
+) -> dict:
     return {
-        stream: sanitize_stream(test.get(stream), private_values)
+        stream: sanitize_stream(
+            test.get(stream), private_values, verified_commits=verified_commits
+        )
         for stream in ("stdout", "stderr")
         if isinstance(test.get(stream), str)
     }
@@ -183,7 +284,11 @@ def manifest_streams(item: dict, environ: dict) -> dict:
     streams = item.get("public_streams")
     if not isinstance(streams, dict):
         return {}
-    return public_streams(streams, private_log_values({}, {}, environ))
+    return public_streams(
+        streams,
+        private_log_values({}, {}, environ),
+        verified_commits=public_commits(environ),
+    )
 
 
 def stream_coverage(streams: dict) -> str:

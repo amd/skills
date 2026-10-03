@@ -18,7 +18,12 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from orchestrai_logs import private_log_values, public_log_status, public_test_log
-from orchestrai_stdout import MAX_STREAM_BYTES, public_streams, stream_coverage
+from orchestrai_stdout import (
+    MAX_STREAM_BYTES,
+    public_commits,
+    public_streams,
+    stream_coverage,
+)
 
 TERMINAL_PIPELINE_STATES = {
     "passed",
@@ -837,7 +842,9 @@ def build_results_manifest(
             continue
 
         test = matching_tests[0]
-        item["public_streams"] = public_streams(test, private_values)
+        item["public_streams"] = public_streams(
+            test, private_values, verified_commits=public_commits(dict(os.environ))
+        )
         item["stream_coverage"] = stream_coverage(item["public_streams"])
         item["public_log"] = public_test_log(
             test, skill=expected["skill"], private_values=private_values

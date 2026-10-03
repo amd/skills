@@ -36,6 +36,12 @@ inconsistent output is explicitly marked partial. Known secrets, credential
 assignments/auth headers/private keys, opaque credential-shaped values, private
 URLs (including driver URLs), network addresses, host/user identities and machine
 paths are redacted **before** GitHub upload and revalidated before printing.
+Paths are normalized to `<local>/filename` (or a common tool directory), keeping
+traceback/script names without revealing private roots, usernames or directory
+hierarchies. Fixed public adapter test paths remain visible. Only the tested
+skills commit and the checked-out Skillscope release commit are exempted from
+opaque-value masking; the workflow supplies these verified revisions to both
+redaction passes. Actor-supplied hash labels or allowlists cannot exempt secrets.
 Public package URLs, warnings, prompts and arbitrary errors remain visible.
 GitHub workflow-command sequences are neutralized. This covers test stdout/stderr,
 not raw control-plane consoles, hardware inventories or agent-transcript attachments.

@@ -14,6 +14,7 @@ from orchestrai_stdout import (
     MAX_STREAM_BYTES,
     UNAVAILABLE,
     manifest_streams,
+    public_commits,
     public_streams,
     sanitize_stream,
     stream_coverage,
@@ -27,6 +28,112 @@ def pem_marker(kind, *, end=False):
 
 
 class FullStreamTests(unittest.TestCase):
+    def test_workflow_passes_verified_revisions_to_both_redaction_boundaries(self):
+        workflow = (Path(__file__).parents[1] / "workflows" / "evals.yml").read_text()
+        self.assertIn("git -C .skillscope-action rev-parse HEAD", workflow)
+        self.assertIn(
+            "public_skillscope_commit: ${{ steps.skillscope_commit.outputs.sha }}",
+            workflow,
+        )
+        self.assertEqual(
+            workflow.count(
+                "PUBLIC_SKILLSCOPE_COMMIT: ${{ needs.discover.outputs.public_skillscope_commit }}"
+            ),
+            2,
+        )
+        self.assertEqual(
+            workflow.count(
+                "PUBLIC_SKILLS_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}"
+            ),
+            2,
+        )
+
+    def test_paths_keep_filenames_not_private_roots_or_hierarchy(self):
+        samples = {
+            r"C:\Users\private-login\work\setup-skills.ps1": "<local>/setup-skills.ps1",
+            r"C:\Program Files\Python312\python.exe": "<local>/python.exe",
+            r"C:\Users\Private Login\work\run.ps1": "<local>/run.ps1",
+            '"C:\\Users\\Private Login\\private directory\\run.ps1"': '"<local>/run.ps1"',
+            "/home/private-login/private-project/setup-skills.sh": "<local>/setup-skills.sh",
+            '"/tmp/private directory/failure.py"': '"<local>/failure.py"',
+            "/tmp/private-run/failure.py:23)": "<local>/failure.py:23)",
+            "/opt/private-cache/venv": "<local>/venv",
+            "/var/private-pipeline/private-directory": "<local>",
+            r"\\private-host\private-share\private-directory\stderr.log": "<local>/stderr.log",
+            "/tmp/private-run/tmp.py": "<local>/tmp.py",
+        }
+        for raw, expected in samples.items():
+            with self.subTest(raw=raw):
+                sanitized = sanitize_stream(raw)
+                self.assertEqual(sanitized, expected)
+                self.assertEqual(sanitize_stream(sanitized), sanitized)
+
+    def test_public_test_paths_are_not_credential_shaped(self):
+        path = "L4-sys/skills/windows/sys_func-skills_behavioral"
+        self.assertEqual(
+            sanitize_stream(f"Path: {path}\nTest: {path}\n"),
+            f"Path: {path}\nTest: {path}\n",
+        )
+        self.assertEqual(
+            sanitize_stream("/tmp/private-checkout/testcases/" + path),
+            "<local>/testcases/" + path,
+        )
+        self.assertEqual(
+            sanitize_stream("https://github.com/amd/skills/blob/main/home/example.py"),
+            "https://github.com/amd/skills/blob/main/home/example.py",
+        )
+        self.assertNotIn("aA1" * 12, sanitize_stream("aA1" * 12 + "/aA1" * 12))
+
+    def test_only_verified_public_commits_are_kept(self):
+        skills_sha = "1a" * 20
+        harness_sha = "2b" * 20
+        unknown_key = "3c" * 20
+        environ = {
+            "PUBLIC_SKILLS_COMMIT": skills_sha,
+            "PUBLIC_SKILLSCOPE_COMMIT": harness_sha,
+        }
+        known = public_commits(environ)
+        raw = f"verifying {skills_sha}\nNote: switching to {harness_sha}\ncommit: {unknown_key}\n"
+        sanitized = sanitize_stream(raw, verified_commits=known)
+        self.assertIn(skills_sha, sanitized)
+        self.assertIn(harness_sha, sanitized)
+        self.assertNotIn(unknown_key, sanitized)
+        item = {
+            "public_streams": {"stdout": sanitized},
+            "verified_commits": [unknown_key],
+        }
+        self.assertEqual(manifest_streams(item, environ)["stdout"], sanitized)
+        self.assertNotIn(skills_sha, manifest_streams(item, {})["stdout"])
+        self.assertNotIn(
+            unknown_key,
+            sanitize_stream(f"api_key={unknown_key}", verified_commits={unknown_key}),
+        )
+        self.assertNotIn(
+            skills_sha,
+            sanitize_stream(skills_sha, [skills_sha], verified_commits=known),
+        )
+        self.assertEqual(
+            public_commits({"PUBLIC_SKILLS_COMMIT": "not-a-commit"}), set()
+        )
+
+    def test_credentials_and_identities_in_filenames_remain_redacted(self):
+        key = "0123456789abcdef" * 2
+        self.assertNotIn(key, sanitize_stream(f"/tmp/private-run/{key}.json"))
+        self.assertNotIn(key, sanitize_stream(f"/tmp/private-run/run_{key}.json"))
+        self.assertNotIn(
+            "11111111-2222",
+            sanitize_stream(
+                "/tmp/private-run/run_11111111-2222-4333-8444-555555555555.log"
+            ),
+        )
+        self.assertNotIn(
+            "private-login",
+            sanitize_stream("/tmp/private-run/private-login.py", ["private-login"]),
+        )
+        self.assertNotIn(
+            "LAB-UCICD-DT123", sanitize_stream("/tmp/private-run/LAB-UCICD-DT123.log")
+        )
+
     def test_unrecognized_lines_long_lines_and_entire_stream_are_retained(self):
         raw = "dependency setup warning\n" * 1000
         raw += "x" * 5000 + "\nRuntimeError: newly introduced harness error\n"
