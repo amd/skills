@@ -3,7 +3,7 @@ name: evals
 # Skillscope owns structure, selection, routing, and grading. OrchestrAI owns
 # acquisition and execution of the default Linux/Windows Strix Halo sessions.
 # The OrchestrAI controller receives only the selected skill/OS matrix and
-# publishes normalized, allow-listed verdicts back to GitHub Actions.
+# publishes normalized verdicts and complete redacted test streams to GitHub.
 
 on:
   pull_request:
@@ -16,8 +16,10 @@ on:
       - ".github/scripts/orchestrai_report.py"
       - ".github/scripts/orchestrai_run.py"
       - ".github/scripts/orchestrai_logs.py"
+      - ".github/scripts/orchestrai_stdout.py"
       - ".github/scripts/orchestrai_verdict.py"
       - ".github/scripts/test_orchestrai_evals.py"
+      - ".github/scripts/test_orchestrai_stdout.py"
       - "**/*.md"
   schedule:
     - cron: "0 12 * * 1"
@@ -117,7 +119,7 @@ jobs:
           --skill-sections 'Description,Owner,License'
 
       - name: Test OrchestrAI plan and trigger helpers
-        run: python3 .github/scripts/test_orchestrai_evals.py
+        run: python3 -m unittest discover -s .github/scripts -p 'test_orchestrai*.py'
 
       - name: Work out how to select
         id: how
