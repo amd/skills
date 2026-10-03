@@ -50,9 +50,10 @@ IDENTITY = re.compile(
 MACHINE_NAME = re.compile(r"\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+){2,}\b")
 PRIVATE_PATH = re.compile(
     r"(?i)(?P<quote>[\"'])(?P<quoted>(?:[a-z]:[\\/]|\\\\|"
-    r"/(?:home|root|tmp|var|opt|mnt|srv|Users|private|workspace|builds)/)[^\r\n\"']+)(?P=quote)|"
+    r"/(?:home|root|tmp|var|opt|mnt|srv|Users|private|workspace|builds|\[REDACTED\])/|\[REDACTED\][\\/])[^\r\n\"']+)(?P=quote)|"
     r"(?P<bare>(?<![a-z0-9])(?:[a-z]:[\\/](?:Program Files(?: \(x86\))?[\\/]|Users[\\/][^\\/\r\n<>\"']+[\\/])?|\\\\)[^\s<>\"']+|"
-    r"(?<![\w:/])/(?:home|root|tmp|var|opt|mnt|srv|Users|private|workspace|builds)(?=/|$|[\s<>\"'])(?:/[^\s<>\"']*)?)"
+    r"(?<![\w:/])/(?:home|root|tmp|var|opt|mnt|srv|Users|private|workspace|builds|\[REDACTED\])(?=/|$|[\s<>\"'])(?:/[^\s<>\"']*)?|"
+    r"\[REDACTED\][\\/][^\s<>\"']+)"
 )
 PUBLIC_TEST_PATH = re.compile(
     r"(?:testcases/)?L4-sys/skills/(?:linux|windows)/sys_func-skills_behavioral"

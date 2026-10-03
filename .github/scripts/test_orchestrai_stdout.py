@@ -133,6 +133,24 @@ class FullStreamTests(unittest.TestCase):
         self.assertNotIn(
             "LAB-UCICD-DT123", sanitize_stream("/tmp/private-run/LAB-UCICD-DT123.log")
         )
+        self.assertEqual(
+            sanitize_stream("/root/private-project/failure.py", ["root"]),
+            "<local>/failure.py",
+        )
+        self.assertEqual(
+            sanitize_stream(
+                "/home/private-login/private-project/failure.py",
+                ["/home/private-login"],
+            ),
+            "<local>/failure.py",
+        )
+        self.assertEqual(
+            sanitize_stream(
+                r"C:\Users\private-login\private-project\failure.py",
+                [r"C:\Users\private-login"],
+            ),
+            "<local>/failure.py",
+        )
 
     def test_unrecognized_lines_long_lines_and_entire_stream_are_retained(self):
         raw = "dependency setup warning\n" * 1000
