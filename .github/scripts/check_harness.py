@@ -137,5 +137,27 @@ def check() -> None:
     print(f"harness is current (inspect_ai {inspect_ai.__version__})")
 
 
+def check_commit() -> None:
+    """The installed build is the commit the run claims to measure.
+
+    The other checks prove the install is *recent*; a parity run is quoted
+    against one commit, so it has to prove it is *that* one. pip records the
+    resolved commit of a VCS install in `direct_url.json`.
+    """
+    import json
+    import os
+    from importlib import metadata
+
+    expected = os.environ.get("SKILLSCOPE_EXPECTED_COMMIT", "")
+    if not expected:
+        return
+    raw = metadata.distribution("skillscope").read_text("direct_url.json") or "{}"
+    got = json.loads(raw).get("vcs_info", {}).get("commit_id", "")
+    if got != expected:
+        _fail(f"installed skillscope is {got or 'not a VCS install'}, not {expected}")
+    print(f"skillscope commit: {got}")
+
+
 if __name__ == "__main__":
     check()
+    check_commit()

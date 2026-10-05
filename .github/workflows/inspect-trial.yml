@@ -11,9 +11,12 @@ name: inspect-engine trial
 # unreachable from main, from any pull request, and from the required checks.
 # Deleting the branch deletes the trial.
 #
-# Earlier runs answered whether the engine works at all. This one answers a
-# narrower question that the earlier ones left open by sampling: every skill in
-# the catalogue, against every engine that can reach its hardware. Three jobs
+# This run is the parity check asked for in review: the whole catalogue,
+# routing and behavioral, with the candidate pinned to one commit and the
+# released v0.1.3 run beside it on the same runners, the same cases and the
+# same flags. v0.1.3 is installed into its own venv and takes no --engine;
+# its only engine is the one the candidate replaces. Every invocation's wall
+# time goes into a timings TSV in each job's artifact. Three jobs
 # because three runner pools, and they overlap in wall clock.
 #
 #   linux    strix_halo, Linux    routing (whole catalogue) + 3 engines
@@ -35,6 +38,12 @@ permissions:
   contents: read
 
 env:
+  # The two builds being compared. The candidate is pinned by commit, and
+  # check_harness.py refuses to run if a different one installed.
+  CANDIDATE: ff33db4
+  SKILLSCOPE_EXPECTED_COMMIT: ff33db4f5e94bdf4cccdecfe7068af8c5e7fedb5
+  BASELINE: v0.1.3
+  BASELINE_SPEC: "skillscope @ git+https://github.com/amd/skillscope@v0.1.3"
   # NOT set workflow-wide. The Instinct pool sits outside the network this
   # host is on and cannot reach it; inheriting it there is what made four
   # runs hang until their 300-minute timeout. Each job that can reach the
@@ -56,9 +65,9 @@ jobs:
     name: Which pools to run
     runs-on: ubuntu-latest
     outputs:
-      linux: "false"
+      linux: "true"
       instinct: "true"
-      windows: "false"
+      windows: "true"
       # Diagnose and grade are mutually exclusive: the behavioral step is
       # gated on `instinct_diagnose != 'true'`, so leaving this on skips the
       # graded run rather than adding context to it. Diagnose answers whether
@@ -84,14 +93,14 @@ jobs:
       # measure in for the first time. Four passes over the whole room: the
       # two legs, plus a second pass on the baseline for the noise floor, without
       # which the flips between engines cannot be read.
-      routing: "false"
+      routing: "true"
       # Which engines the Linux job drives. The harness-independent `inspect`
       # engine has been removed, and `claude-cli` is now
       # `claude-code-no-sandbox`. Both remaining engines drive the real CLI;
       # what differs is where it runs.
       linux_engines: "claude-code claude-code-no-sandbox"
     steps:
-      - run: echo "windows=true only; three repetitions to measure variance"
+      - run: echo "parity run -- every pool, candidate ${{ env.CANDIDATE }} against ${{ env.BASELINE }}"
 
   # ---------------------------------------------------------------- Linux ---
   linux:
@@ -99,7 +108,8 @@ jobs:
     needs: config
     if: needs.config.outputs.linux == 'true'
     runs-on: ["self-hosted", "strix_halo", "Linux"]
-    timeout-minutes: 180
+    # Per-skill invocations and a fourth build make this the longest job.
+    timeout-minutes: 300
     env:
       ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
       ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
@@ -114,7 +124,9 @@ jobs:
       # had been grading `local-ai-use` alone, so five of those rows were
       # months old and predated both the --effort and the missing-files fixes.
       # 13 behavioral cases; the point is to refresh the table in one pass.
-      SKILLS: lemonade-router-builder,local-ai-app-integration,local-ai-use,magpie-kernel-evaluator,serving-llms-on-epyc,tracelens-analysis-orchestrator
+      # Space-separated: the loops below split on whitespace. Commas made
+      # every "per-skill" loop a single invocation over all six.
+      SKILLS: lemonade-router-builder local-ai-app-integration local-ai-use magpie-kernel-evaluator serving-llms-on-epyc tracelens-analysis-orchestrator
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -240,9 +252,9 @@ jobs:
           # branch moves, and `--upgrade` sees the same version already
           # installed and calls it satisfied.
           python -m pip install --no-cache-dir \
-            "skillscope[podman,verify] @ git+https://github.com/rominf/skillscope@inspect-engine"
+            "skillscope[podman,verify] @ git+https://github.com/rominf/skillscope@ff33db4f5e94bdf4cccdecfe7068af8c5e7fedb5"
           python -m pip install --force-reinstall --no-deps --no-cache-dir \
-            "skillscope @ git+https://github.com/rominf/skillscope@inspect-engine"
+            "skillscope @ git+https://github.com/rominf/skillscope@ff33db4f5e94bdf4cccdecfe7068af8c5e7fedb5"
 
       # Assume nothing about which build arrived: name something only the
       # current one has, and fail loudly rather than trialling last week's.
@@ -250,6 +262,16 @@ jobs:
         # Shared with the Windows job. Two copies drifted apart once and the
         # stale one failed a run on hardware that is slow to book.
         run: python .github/scripts/check_harness.py
+
+      # The baseline, in a venv of its own so neither build can shadow the
+      # other's entry point. Called by path below, never as bare `skillscope`.
+      - name: Install the baseline harness (${{ env.BASELINE }})
+        run: |
+          python -m venv .baseline
+          .baseline/bin/python -m pip install --upgrade pip
+          .baseline/bin/python -m pip install --no-cache-dir "$BASELINE_SPEC"
+          .baseline/bin/python -m pip show skillscope | head -2
+          .baseline/bin/skillscope --help > /dev/null
 
       - uses: actions/setup-node@v4
         with:
@@ -282,7 +304,16 @@ jobs:
           # sandboxed routing run produced. The behavioral step has always set
           # it; this one was written without it.
           INSPECT_PODMAN_COMPOSE: podman-compose
+          TIMING_JOB: linux
         run: |
+          # Wall time per invocation, for the per-skill, per-engine table.
+          timed() {  # label engine skill -- command...
+            local label=$1 engine=$2 skill=$3 t0=$SECONDS rc=0; shift 4
+            "$@" || rc=$?
+            printf '%s\t%s\t%s\t%s\t%s\n' "$label" "$engine" "$skill" \
+              "$((SECONDS - t0))" "$rc" >> "timings-$TIMING_JOB.tsv"
+            return $rc
+          }
           status=0
           for engine in claude-code claude-code-no-sandbox; do
             if [ "$engine" = "claude-code" ]; then
@@ -291,7 +322,7 @@ jobs:
               export SKILLSCOPE_SANDBOX=local
             fi
             echo "::group::routing ($engine, sandbox=$SKILLSCOPE_SANDBOX)"
-            skillscope routing --engine "$engine" \
+            timed routing "$engine" all -- skillscope routing --engine "$engine" \
               --skills-dir 'skills/*' \
               --routing-room '${{ env.ROUTING_ROOM }}' \
               --min-accuracy 0 \
@@ -306,11 +337,23 @@ jobs:
           # it, which is the one every other number is compared against.
           export SKILLSCOPE_SANDBOX=local
           echo "::group::routing (claude-code-no-sandbox, noise floor)"
-          skillscope routing --engine claude-code-no-sandbox \
+          timed routing claude-code-no-sandbox-again all -- \
+            skillscope routing --engine claude-code-no-sandbox \
             --skills-dir 'skills/*' \
             --routing-room '${{ env.ROUTING_ROOM }}' \
             --min-accuracy 0 \
             --output routing-claude-code-no-sandbox-again.json || status=1
+          echo "::endgroup::"
+
+          # The baseline: same room, same cases, same flags, on the host as it
+          # has always run. No --engine; v0.1.3 has one.
+          echo "::group::routing ($BASELINE)"
+          timed routing "$BASELINE" all -- .baseline/bin/skillscope routing \
+            --skills-dir 'skills/*' \
+            --routing-room '${{ env.ROUTING_ROOM }}' \
+            --min-accuracy 0 \
+            --output "routing-$BASELINE.json" \
+            || { echo "FAILED: routing ($BASELINE)"; status=1; }
           echo "::endgroup::"
 
           # `continue-on-error` above keeps one bad leg from discarding the
@@ -324,7 +367,7 @@ jobs:
           # trial, and a routing regression is the finding rather than a build
           # break -- but no longer silent.
           missing=""
-          for engine in claude-code claude-code-no-sandbox; do
+          for engine in claude-code claude-code-no-sandbox "$BASELINE"; do
             [ -s "routing-$engine.json" ] || missing="$missing $engine"
           done
           if [ -n "$missing" ] || [ "$status" -ne 0 ]; then
@@ -352,7 +395,16 @@ jobs:
           PROBED: ${{ steps.sandbox.outputs.provider }}
           ENGINES: ${{ needs.config.outputs.linux_engines }}
           INSPECT_PODMAN_COMPOSE: podman-compose
+          TIMING_JOB: linux
         run: |
+          # Wall time per invocation, for the per-skill, per-engine table.
+          timed() {  # label engine skill -- command...
+            local label=$1 engine=$2 skill=$3 t0=$SECONDS rc=0; shift 4
+            "$@" || rc=$?
+            printf '%s\t%s\t%s\t%s\t%s\n' "$label" "$engine" "$skill" \
+              "$((SECONDS - t0))" "$rc" >> "timings-$TIMING_JOB.tsv"
+            return $rc
+          }
           status=0
           for engine in $ENGINES; do
             if [ "$engine" = "claude-code-no-sandbox" ]; then
@@ -362,12 +414,23 @@ jobs:
             fi
             for skill in $SKILLS; do
               echo "::group::$skill ($engine, sandbox=$SKILLSCOPE_SANDBOX)"
-              skillscope behavioral --engine "$engine" --skills-dir 'skills/*' \
+              timed behavioral "$engine" "$skill" -- \
+                skillscope behavioral --engine "$engine" --skills-dir 'skills/*' \
                 --timeout 2700 --skill "$skill" \
                 --output "linux-$engine-$skill.json" \
                 || { echo "FAILED: $skill ($engine)"; status=1; }
               echo "::endgroup::"
             done
+          done
+          export SKILLSCOPE_SANDBOX=local
+          for skill in $SKILLS; do
+            echo "::group::$skill ($BASELINE)"
+            timed behavioral "$BASELINE" "$skill" -- \
+              .baseline/bin/skillscope behavioral --skills-dir 'skills/*' \
+              --timeout 2700 --skill "$skill" \
+              --output "linux-$BASELINE-$skill.json" \
+              || { echo "FAILED: $skill ($BASELINE)"; status=1; }
+            echo "::endgroup::"
           done
           exit $status
 
@@ -379,6 +442,7 @@ jobs:
           path: |
             routing-*.json
             linux-*.json
+            timings-*.tsv
             .skillscope/logs/
           # `.skillscope/logs` starts with a dot, and v4 skips hidden files
           # unless told otherwise. The transcripts were dropped on every run
@@ -469,9 +533,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install --no-cache-dir \
-            "skillscope[podman,verify] @ git+https://github.com/rominf/skillscope@inspect-engine"
+            "skillscope[podman,verify] @ git+https://github.com/rominf/skillscope@ff33db4f5e94bdf4cccdecfe7068af8c5e7fedb5"
           python -m pip install --force-reinstall --no-deps --no-cache-dir \
-            "skillscope @ git+https://github.com/rominf/skillscope@inspect-engine"
+            "skillscope @ git+https://github.com/rominf/skillscope@ff33db4f5e94bdf4cccdecfe7068af8c5e7fedb5"
+
+      - name: Check which harness actually installed
+        run: python .github/scripts/check_harness.py
+
+      - name: Install the baseline harness (${{ env.BASELINE }})
+        run: |
+          python -m venv .baseline
+          .baseline/bin/python -m pip install --upgrade pip
+          .baseline/bin/python -m pip install --no-cache-dir "$BASELINE_SPEC"
+          .baseline/bin/python -m pip show skillscope | head -2
+          .baseline/bin/skillscope --help > /dev/null
       # The same exchange `skill-evals.yml` performs for this pool. Run here
       # rather than through the reusable workflow because this trial drives a
       # candidate harness, and placed after the install because it uses that
@@ -501,6 +576,7 @@ jobs:
         env:
           SKILLSCOPE_SANDBOX: ${{ steps.sandbox.outputs.provider }}
           INSPECT_PODMAN_COMPOSE: podman-compose
+          TIMING_JOB: instinct
         run: |
           # The token this pool runs on lasts about twelve and a half minutes,
           # and it is minted once at job start. A run that graded for longer
@@ -511,6 +587,14 @@ jobs:
           # Read back rather than left to $GITHUB_ENV: that file is applied
           # between steps, and this is inside one. The delimiter is the
           # writer's own.
+          # Wall time per invocation, for the per-skill, per-engine table.
+          timed() {  # label engine skill -- command...
+            local label=$1 engine=$2 skill=$3 t0=$SECONDS rc=0; shift 4
+            "$@" || rc=$?
+            printf '%s\t%s\t%s\t%s\t%s\n' "$label" "$engine" "$skill" \
+              "$((SECONDS - t0))" "$rc" >> "timings-$TIMING_JOB.tsv"
+            return $rc
+          }
           mint() {
             local scratch
             scratch=$(mktemp)
@@ -530,12 +614,26 @@ jobs:
             for skill in $SKILLS; do
               echo "::group::$skill ($engine)"
               mint || { echo "FAILED: could not mint a token for $skill"; status=1; }
-              skillscope behavioral --engine "$engine" --skills-dir 'skills/*' \
+              timed behavioral "$engine" "$skill" -- \
+                skillscope behavioral --engine "$engine" --skills-dir 'skills/*' \
                 --timeout 3600 --skill "$skill" \
                 --output "instinct-$engine-$skill.json" \
                 || { echo "FAILED: $skill ($engine)"; status=1; }
               echo "::endgroup::"
             done
+          done
+          # The baseline runs on this host, as v0.1.3 always has here: it has
+          # no container to put the card in.
+          export SKILLSCOPE_SANDBOX=local
+          for skill in $SKILLS; do
+            echo "::group::$skill ($BASELINE)"
+            mint || { echo "FAILED: could not mint a token for $skill"; status=1; }
+            timed behavioral "$BASELINE" "$skill" -- \
+              .baseline/bin/skillscope behavioral --skills-dir 'skills/*' \
+              --timeout 3600 --skill "$skill" \
+              --output "instinct-$BASELINE-$skill.json" \
+              || { echo "FAILED: $skill ($BASELINE)"; status=1; }
+            echo "::endgroup::"
           done
 
           # `continue-on-error` below keeps one bad skill from discarding the
@@ -545,7 +643,7 @@ jobs:
           # file nothing looked for, on hardware that is scarce and slow to
           # book. Say it where the run page shows it.
           missing=""
-          for engine in $ENGINES; do
+          for engine in $ENGINES "$BASELINE"; do
             for skill in $SKILLS; do
               [ -s "instinct-$engine-$skill.json" ] \
                 || missing="$missing $skill($engine)"
@@ -568,6 +666,7 @@ jobs:
           name: matrix-instinct
           path: |
             instinct-*.json
+            timings-*.tsv
             .skillscope/logs/
           include-hidden-files: true
           if-no-files-found: warn
@@ -578,7 +677,8 @@ jobs:
     needs: config
     if: needs.config.outputs.windows == 'true'
     runs-on: ["self-hosted", "strix_halo", "Windows"]
-    timeout-minutes: 180
+    # Twelve invocations now, up from nine; tracelens alone is ~850s here.
+    timeout-minutes: 300
     env:
       ANTHROPIC_BASE_URL: https://llm-api.amd.com/Anthropic
       ANTHROPIC_API_KEY: ${{ secrets.ORCHESTR_API_KEY }}
@@ -612,8 +712,8 @@ jobs:
       - name: Install the candidate harness
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --no-cache-dir "skillscope[inspect] @ git+https://github.com/rominf/skillscope@inspect-engine"
-          python -m pip install --force-reinstall --no-deps --no-cache-dir "skillscope @ git+https://github.com/rominf/skillscope@inspect-engine"
+          python -m pip install --no-cache-dir "skillscope[inspect] @ git+https://github.com/rominf/skillscope@ff33db4f5e94bdf4cccdecfe7068af8c5e7fedb5"
+          python -m pip install --force-reinstall --no-deps --no-cache-dir "skillscope @ git+https://github.com/rominf/skillscope@ff33db4f5e94bdf4cccdecfe7068af8c5e7fedb5"
 
       # Three skills failed in under a second on the first attempt because the
       # harness installed without its extra, and `continue-on-error` on the leg
@@ -624,6 +724,15 @@ jobs:
         # one line -- and an f-string's braces read to PowerShell as a
         # ScriptBlock, which cost a run on this pool to discover.
         run: python .github/scripts/check_harness.py
+
+      - name: Install the baseline harness (${{ env.BASELINE }})
+        run: |
+          python -m venv .baseline
+          .baseline\Scripts\python.exe -m pip install --upgrade pip
+          .baseline\Scripts\python.exe -m pip install --no-cache-dir "$env:BASELINE_SPEC"
+          .baseline\Scripts\python.exe -m pip show skillscope | Select-Object -First 2
+          .baseline\Scripts\skillscope.exe --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: What does this runner actually have?
         if: needs.config.outputs.windows_diagnose == 'true'
@@ -639,7 +748,9 @@ jobs:
       # Repetition-major rather than skill-major: if the job is cut short, two
       # complete rounds across every skill beats three rounds of the first two
       # and none of the third.
-      - name: Behavioral -- claude-code-no-sandbox, three times
+      # Twice per build, interleaved, so a difference between the two can be
+      # read against how much each already disagrees with itself.
+      - name: Behavioral -- claude-code-no-sandbox and ${{ env.BASELINE }}, twice each
         if: needs.config.outputs.windows_diagnose != 'true'
         continue-on-error: true
         run: |
@@ -648,14 +759,25 @@ jobs:
             "local-ai-use",
             "tracelens-analysis-orchestrator"
           )
+          $builds = @(
+            @{ Name = "claude-code-no-sandbox"; Exe = "skillscope"; Args = @("--engine", "claude-code-no-sandbox") },
+            @{ Name = $env:BASELINE; Exe = ".baseline\Scripts\skillscope.exe"; Args = @() }
+          )
           $status = 0
-          foreach ($run in 1..3) {
+          foreach ($run in 1..2) {
             foreach ($s in $skills) {
-              Write-Host "::group::$s (claude-code-no-sandbox on Windows, run $run)"
-              skillscope behavioral --engine claude-code-no-sandbox --skills-dir "skills/*" `
-                --timeout 2700 --skill $s --output "windows-claude-code-no-sandbox-$s-run$run.json"
-              if ($LASTEXITCODE -ne 0) { Write-Host "FAILED: $s (run $run)"; $status = 1 }
-              Write-Host "::endgroup::"
+              foreach ($b in $builds) {
+                $name = $b.Name
+                Write-Host "::group::$s ($name on Windows, run $run)"
+                $t0 = Get-Date
+                & $b.Exe behavioral @($b.Args) --skills-dir "skills/*" `
+                  --timeout 2700 --skill $s --output "windows-$name-$s-run$run.json"
+                $rc = $LASTEXITCODE
+                $secs = [int]((Get-Date) - $t0).TotalSeconds
+                "behavioral`t$name`t$s`t$secs`t$rc" | Add-Content -Path "timings-windows.tsv"
+                if ($rc -ne 0) { Write-Host "FAILED: $s ($name, run $run)"; $status = 1 }
+                Write-Host "::endgroup::"
+              }
             }
           }
           exit $status
@@ -679,6 +801,7 @@ jobs:
           name: matrix-windows
           path: |
             windows-*.json
+            timings-*.tsv
             .skillscope/logs/
           include-hidden-files: true
           if-no-files-found: warn
