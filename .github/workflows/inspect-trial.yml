@@ -285,6 +285,9 @@ jobs:
           .baseline/bin/python -m pip show skillscope | head -2
           .baseline/bin/skillscope --help > /dev/null
           git fetch --no-tags --depth 1 origin "$BASELINE_CATALOGUE"
+          # These runners persist. Checkout deletes the last run's tree but
+          # not git's record of it, and `add` refuses a registered path.
+          git worktree prune
           git worktree add --detach baseline-tree FETCH_HEAD
 
       - uses: actions/setup-node@v4
@@ -569,6 +572,9 @@ jobs:
           .baseline/bin/python -m pip show skillscope | head -2
           .baseline/bin/skillscope --help > /dev/null
           git fetch --no-tags --depth 1 origin "$BASELINE_CATALOGUE"
+          # These runners persist. Checkout deletes the last run's tree but
+          # not git's record of it, and `add` refuses a registered path.
+          git worktree prune
           git worktree add --detach baseline-tree FETCH_HEAD
       # The same exchange `skill-evals.yml` performs for this pool. Run here
       # rather than through the reusable workflow because this trial drives a
@@ -761,6 +767,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           git fetch --no-tags --depth 1 origin $env:BASELINE_CATALOGUE
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          # Persistent runner: see the Linux job.
+          git worktree prune
           git worktree add --detach baseline-tree FETCH_HEAD
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
