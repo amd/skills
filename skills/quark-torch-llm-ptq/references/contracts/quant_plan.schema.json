@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "quant_plan",
+  "type": "object",
+  "required": [
+    "model",
+    "global_scheme",
+    "exclude_layers",
+    "layer_quant_config",
+    "requires_confirmation"
+  ],
+  "properties": {
+    "model": {
+      "type": "object",
+      "required": [
+        "model_type",
+        "analysis_ref"
+      ],
+      "properties": {
+        "model_type": {
+          "type": "string"
+        },
+        "analysis_ref": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "global_scheme": {
+      "type": "string"
+    },
+    "kv_cache_scheme": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "exclude_layers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "layer_quant_config": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Per-pattern quantization scheme overrides. Each key is a layer name or wildcard pattern (e.g. '*self_attn*', 'lm_head', '*experts*'), each value is a quantization scheme. Emitted as one --layer_quant_scheme PATTERN SCHEME pair per entry."
+    },
+    "algorithm": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "evaluation_intent": {
+      "type": "string",
+      "enum": [
+        "none",
+        "smoke",
+        "full"
+      ]
+    },
+    "requires_confirmation": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": true
+}

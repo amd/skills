@@ -77,21 +77,19 @@ def build_base(
         encoding="utf-8",
     )
     (base / ".github" / "skill_owners.json").write_text(
-        json.dumps(
-            {
-                "repos": [
-                    {
-                        "repo": repo,
-                        "engineering_owner": "octocat",
-                        "product_release_owner": "octocat",
-                    }
-                    for repo in approved
-                ]
-            }
-        ),
+        json.dumps({"repos": [approval(scope) for scope in approved]}),
         encoding="utf-8",
     )
     return base
+
+
+def approval(scope: str) -> dict:
+    """A registry entry for `owner/repo` or, scoped to a subdirectory, `owner/repo/sub/dir`."""
+    owner, name, *subdir = scope.split("/")
+    entry = {"repo": f"{owner}/{name}"}
+    if subdir:
+        entry["path"] = "/".join(subdir)
+    return {**entry, "engineering_owner": "octocat", "product_release_owner": "octocat"}
 
 
 def report(
@@ -142,34 +140,27 @@ class TestVendoredEdits(unittest.TestCase):
                 ],
             )
 
-    def test_the_skills_own_evals_folder_is_the_catalogs_to_edit(self):
-        # Federation neither imports nor overwrites a skill's top-level
-        # `evals/`, so editing it here is the only way to edit it. Closing
-        # those pull requests would leave the datasets unmaintainable.
+    def test_editing_the_evals_folder_is_a_vendored_edit(self):
+        # Federation imports `evals/` too, so an edit there is overwritten by
+        # the next nightly run like any other.
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             base = build_base(tmp, vendored={"tracelens-orchestrator": TRACELENS})
-            self.assertEqual(
-                report(
-                    tmp,
-                    base,
-                    changed=(
-                        "skills/tracelens-orchestrator/evals/evals.json",
-                        "skills/tracelens-orchestrator/evals/machine.yml",
-                    ),
-                )["vendored_edits"],
-                [],
-            )
-            # A folder of the same name deeper in the tree is upstream's.
-            self.assertEqual(
-                len(
-                    report(
-                        tmp,
-                        base,
-                        changed=("skills/tracelens-orchestrator/agents/evals/notes.md",),
-                    )["vendored_edits"]
+            edits = report(
+                tmp,
+                base,
+                changed=(
+                    "skills/tracelens-orchestrator/evals/evals.json",
+                    "skills/tracelens-orchestrator/evals/machine.yml",
                 ),
-                1,
+            )["vendored_edits"]
+            self.assertEqual(len(edits), 1)
+            self.assertEqual(
+                edits[0]["paths"],
+                [
+                    "skills/tracelens-orchestrator/evals/evals.json",
+                    "skills/tracelens-orchestrator/evals/machine.yml",
+                ],
             )
 
     def test_a_declaration_alone_makes_a_skill_federated(self):
@@ -198,6 +189,33 @@ class TestVendoredEdits(unittest.TestCase):
             self.assertEqual(len(edits), 1)
             self.assertEqual(edits[0]["repo"], "AMD-AGI/Hyperloom")
             self.assertEqual(edits[0]["source_path"], "examples/skills/optimizer")
+            self.assertEqual(edits[0]["branch"], "main")
+            self.assertEqual(edits[0]["source_ref"], "main")
+
+    def test_the_upstream_link_follows_the_tracked_branch(self):
+        # The comment tells the contributor where to land the change, so a
+        # source on a release pattern links to the release it last resolved
+        # to rather than to a `main` it may not even have.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            quark = source("amd/Quark", {"path": ".claude/skills/q", "as": "q"})
+            quark["branch"] = "release/*"
+            base = build_base(tmp, local=("q",), sources=[quark])
+
+            def edit() -> dict:
+                return report(tmp, base, changed=("skills/q/SKILL.md",))[
+                    "vendored_edits"
+                ][0]
+
+            # Before the first import there is no release to point at yet.
+            self.assertEqual(edit()["branch"], "release/*")
+            self.assertEqual(edit()["source_ref"], "HEAD")
+
+            (base / "skills" / "q" / guard.fed.MARKER_FILENAME).write_text(
+                json.dumps({"ref": "release/*", "resolved_ref": "release/0.12"}),
+                encoding="utf-8",
+            )
+            self.assertEqual(edit()["source_ref"], "release/0.12")
 
     def test_a_marker_no_source_declares_does_not_make_a_skill_federated(self):
         # `magpie-kernel-evaluator` on main: a vendored copy left behind by a
@@ -323,6 +341,71 @@ class TestProductRepoApproval(unittest.TestCase):
                 [],
             )
 
+    def test_a_subdirectory_approval_covers_only_that_project(self):
+        # rocm-systems is a super-repo of unrelated projects, each with its own
+        # owners. Signing off on rocprofiler-sdk must not clear its neighbours.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(
+                tmp, approved=("ROCm/rocm-systems/projects/rocprofiler-sdk",)
+            )
+            pending = report(
+                tmp,
+                base,
+                head_sources=[
+                    source(TRACELENS, {"path": "agent/orchestrator"}),
+                    source(
+                        "ROCm/rocm-systems",
+                        {
+                            "path": "projects/rocprofiler-sdk/skills/profile",
+                            "as": "rocprof-profile",
+                        },
+                        {"path": "projects/rocprofiler-sdk", "as": "rocprof-root"},
+                        {"path": "projects/rocprofiler-sdk-extra/skills/x", "as": "extra"},
+                        {"path": "projects/rocm-smi/skills/smi", "as": "smi"},
+                        {"path": ".claude/skills/whole-repo", "as": "whole-repo"},
+                    ),
+                ],
+            )["new_skills_needing_approval"]
+            # Matched by whole path segment, so a sibling sharing the prefix
+            # (`rocprofiler-sdk-extra`) is not inside the approved directory.
+            self.assertEqual(
+                sorted(p["skill"] for p in pending), ["extra", "smi", "whole-repo"]
+            )
+
+    def test_a_whole_repo_approval_still_covers_every_subdirectory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(tmp, approved=("ROCm/rocm-systems",))
+            self.assertEqual(
+                report(
+                    tmp,
+                    base,
+                    head_sources=[
+                        source(TRACELENS, {"path": "agent/orchestrator"}),
+                        source("ROCm/rocm-systems", {"path": "projects/a/skills/s"}),
+                    ],
+                )["new_skills_needing_approval"],
+                [],
+            )
+
+    def test_a_malformed_path_is_not_widened_to_the_whole_repo(self):
+        # Reading a broken `path` as "no path" would turn a scoped approval
+        # into a clearance for the entire super-repo.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(tmp)
+            (base / ".github" / "skill_owners.json").write_text(
+                json.dumps({"repos": [{**approval("ROCm/rocm-systems"), "path": None}]}),
+                encoding="utf-8",
+            )
+            pending = report(
+                tmp,
+                base,
+                head_sources=[source("ROCm/rocm-systems", {"path": "projects/a/s"})],
+            )["new_skills_needing_approval"]
+            self.assertEqual([p["repo"] for p in pending], ["ROCm/rocm-systems"])
+
     def test_skills_already_declared_are_grandfathered(self):
         # TraceLens predates the approval process and is not in the registry.
         # Its existing skill must keep merging, or the gate breaks the catalog
@@ -381,6 +464,63 @@ class TestProductRepoApproval(unittest.TestCase):
                 base,
                 head_sources=[
                     source("AMD-Org/Fork", {"path": "agent/orchestrator", "as": "tl-orch"})
+                ],
+            )["new_skills_needing_approval"]
+            self.assertEqual([p["repo"] for p in pending], ["AMD-Org/Fork"])
+
+    def test_declaring_a_skill_already_in_the_catalog_is_not_a_new_skill(self):
+        # `magpie-kernel-evaluator` on main: shipped in the catalog, but its
+        # upstream was not declared. Declaring it keeps the same skill in sync;
+        # it adds nothing to the catalog, so there is nothing new to approve.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(
+                tmp,
+                vendored={"magpie-evaluator": "AMD-AGI/Magpie"},
+                sources=[source(TRACELENS, {"path": "agent/orchestrator"})],
+            )
+            self.assertEqual(
+                report(
+                    tmp,
+                    base,
+                    head_sources=[
+                        source(TRACELENS, {"path": "agent/orchestrator"}),
+                        source(
+                            "AMD-AGI/Magpie",
+                            {"path": "skills/magpie", "as": "magpie-evaluator"},
+                        ),
+                    ],
+                )["new_skills_needing_approval"],
+                [],
+            )
+
+    def test_federating_a_skill_authored_here_is_not_a_new_skill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(tmp, local=("local-ai-use",))
+            self.assertEqual(
+                report(
+                    tmp,
+                    base,
+                    head_sources=[
+                        source(TRACELENS, {"path": "agent/orchestrator"}),
+                        source("AMD-Org/Lemonade", {"path": "skills/l", "as": "local-ai-use"}),
+                    ],
+                )["new_skills_needing_approval"],
+                [],
+            )
+
+    def test_repointing_a_declared_skill_on_disk_still_needs_approval(self):
+        # The catalog exemption must not reopen the repo-swap case: the folder
+        # exists, but it is already declared from a different repo.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base = build_base(tmp, vendored={"tl-orch": TRACELENS})
+            pending = report(
+                tmp,
+                base,
+                head_sources=[
+                    source("AMD-Org/Fork", {"path": "skills/tl-orch", "as": "tl-orch"})
                 ],
             )["new_skills_needing_approval"]
             self.assertEqual([p["repo"] for p in pending], ["AMD-Org/Fork"])

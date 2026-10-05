@@ -19,7 +19,7 @@ skills are published and so compete for a prompt, which runners we own, and
 which key pays for a run. The graders themselves are not in this repo, so the
 same prompts score the same way in your product repo as they do here.
 
-The rest of this document is the dataset those stages read. You write one file, `evals/evals.json`, inside your skill folder in this catalog. For now `evals/` is the one folder federation does not carry, so unlike the rest of a federated skill the dataset is authored and edited here rather than imported from your repo, and a re-import never overwrites it. Run `skillscope template` for a file to start from.
+The rest of this document is the dataset those stages read. You write one file, `evals/evals.json`, inside your skill folder. For a federated skill that folder lives in your product repo and is imported with the rest of the skill, so edit the dataset there; an edit made in this catalog is overwritten by the next import. Run `skillscope template` for a file to start from.
 
 ## What skill owners write
 

@@ -16,10 +16,8 @@ Rule 1 -- vendored skills are edited upstream, not here.
     A federated skill folder is a mirror of a folder in a product repo.
     `federate_skills.py` re-imports it with rmtree + copytree, so anything
     committed here is deleted by the next nightly run: an edit that looks
-    merged is really just pending its own reversal. The one exception is the
-    skill's top-level `evals/` folder, which federation never carries -- the
-    catalog owns those datasets, so editing them here is the only way to edit
-    them at all.
+    merged is really just pending its own reversal. That includes the skill's
+    `evals/` folder, which is imported like everything else.
 
     Federated means declared in `.github/federation.json`, and nothing else.
     The vendored copies carry a `.federated.json` marker too, but the marker is
@@ -35,14 +33,18 @@ Rule 1 -- vendored skills are edited upstream, not here.
 Rule 2 -- a new federated skill needs its product repo approved.
     `.github/skill_owners.json` records the repos whose engineering owner and
     product release owner have both signed off, via the `product-repo-approval`
-    workflow. A pull request that declares a skill from a repo missing from
-    that registry is asking the catalog to vendor code nobody has vouched for.
+    workflow. An entry with a `path` approves only that subdirectory, for
+    super-repos whose projects each have their own owners. A pull request that
+    declares a skill no entry covers is asking the catalog to vendor code
+    nobody has vouched for.
 
-    Only skills the pull request *adds* are held to this. A skill already
-    declared on the base branch predates the registry and stays as it is, so
-    the rule cannot retroactively break the catalog. "Already declared" is
-    keyed on the (repo, local skill name) pair: moving a skill's upstream path
-    is maintenance, but pointing an existing name at a different repo is a new
+    Only skills the pull request *adds to the catalog* are held to this. A
+    skill whose folder already exists under `skills/` on the base branch is
+    part of the catalog already, whether or not it is declared, so starting to
+    federate it from upstream does not need a new approval and the rule cannot
+    retroactively break the catalog. The one exception is keyed on the (repo,
+    local skill name) pair of a skill that is already declared: moving its
+    upstream path is maintenance, but pointing it at a different repo is a new
     approval question.
 
     The registry is read from the base branch too. Reading the pull request's
@@ -91,12 +93,17 @@ def read_changed_files(path: Path) -> list[str]:
     return [line.strip().replace("\\", "/") for line in lines if line.strip()]
 
 
-def load_approved_repos(registry: Path) -> set[str]:
-    """Return the approved repos from `.github/skill_owners.json`, lowercased.
+def load_approvals(registry: Path) -> set[tuple[str, str]]:
+    """Return the approved scopes from `.github/skill_owners.json`.
+
+    Each scope is (repo lowercased, subdirectory). An empty subdirectory is the
+    whole repo; otherwise the approval covers only skills under that directory,
+    which is how one project in a super-repo is approved without the rest.
 
     A missing or malformed registry reads as "nothing is approved" rather than
     as an error: the strict reading is the safe one, and `record_skill_owner.py`
-    is what validates the file when it writes it.
+    is what validates the file when it writes it. For the same reason an entry
+    whose `path` is not a string is dropped, not widened to the whole repo.
     """
     if not registry.is_file():
         return set()
@@ -107,20 +114,48 @@ def load_approved_repos(registry: Path) -> set[str]:
     repos = data.get("repos") if isinstance(data, dict) else None
     if not isinstance(repos, list):
         return set()
-    return {
-        entry["repo"].strip().lower()
-        for entry in repos
-        if isinstance(entry, dict) and isinstance(entry.get("repo"), str)
-    }
+    approvals = set()
+    for entry in repos:
+        if not isinstance(entry, dict) or not isinstance(entry.get("repo"), str):
+            continue
+        path = entry.get("path", "")
+        if not isinstance(path, str):
+            continue
+        approvals.add((entry["repo"].strip().lower(), path.strip().strip("/")))
+    return approvals
+
+
+def is_approved(repo: str, skill_path: str, approvals: set[tuple[str, str]]) -> bool:
+    """Whether some approval covers the skill at `skill_path` in `repo`.
+
+    Compared segment by segment, so `projects/rocprofiler` does not cover
+    `projects/rocprofiler-sdk`.
+    """
+    parts = skill_path.strip("/").split("/")
+    for approved_repo, subdir in approvals:
+        if approved_repo != repo.lower():
+            continue
+        if not subdir:
+            return True
+        scope = subdir.split("/")
+        if parts[: len(scope)] == scope:
+            return True
+    return False
+
+
+def source_ref(skill_dir: Path, branch: str) -> str:
+    """A ref that github.com can browse for a skill tracked at `branch`.
+
+    A pattern is not a ref, so it is swapped for the release branch the last
+    import resolved it to, or for the repo's default branch before any import.
+    """
+    if not fed.branches.is_pattern(branch):
+        return branch
+    return fed.read_marker(skill_dir).get("resolved_ref") or "HEAD"
 
 
 def vendored_edits(changed: list[str], declared: dict[str, dict]) -> list[dict]:
-    """Group the changed paths that edit a vendored skill, by skill.
-
-    The `evals/` exemption mirrors `federate_skills.UNFEDERATED_DIR_NAMES` and
-    the way that module's `content_hash` applies it, so what counts as "not
-    federated" is the same on both sides rather than a second opinion.
-    """
+    """Group the changed paths that edit a vendored skill, by skill."""
     hits: dict[str, dict] = {}
     for path in changed:
         if not path.startswith(SKILLS_PREFIX):
@@ -129,18 +164,18 @@ def vendored_edits(changed: list[str], declared: dict[str, dict]) -> list[dict]:
         if not tail:
             # Something directly under `skills/`, not inside a skill.
             continue
-        parts = tail.split("/")
-        if len(parts) > 1 and parts[0] in fed.UNFEDERATED_DIR_NAMES:
-            continue
         entry = declared.get(name)
         if entry is None:
             continue
+        branch = entry.get("branch", fed.branches.DEFAULT_BRANCH)
         hit = hits.setdefault(
             name,
             {
                 "skill": name,
                 "repo": entry["repo"],
                 "source_path": entry["path"],
+                "branch": branch,
+                "source_ref": entry.get("source_ref", branch),
                 "paths": [],
             },
         )
@@ -164,15 +199,33 @@ def declared_skills(sources: list[fed.Source]) -> dict[tuple[str, str], dict]:
     return declared
 
 
+def catalog_skills(base_dir: Path) -> set[str]:
+    """The skill folders the base branch ships under `skills/`."""
+    skills_dir = base_dir / SKILLS_PREFIX
+    if not skills_dir.is_dir():
+        return set()
+    return {p.name for p in skills_dir.iterdir() if (p / "SKILL.md").is_file()}
+
+
 def new_skills_needing_approval(
     base: dict[tuple[str, str], dict],
     head: dict[tuple[str, str], dict],
-    approved: set[str],
+    approvals: set[tuple[str, str]],
+    catalog: set[str],
 ) -> list[dict]:
+    declared_names = {name for _, name in base}
+
+    def already_in_catalog(key: tuple[str, str]) -> bool:
+        if key in base:
+            return True
+        name = key[1]
+        return name in catalog and name not in declared_names
+
     return [
         entry
         for key, entry in sorted(head.items())
-        if key not in base and key[0] not in approved
+        if not already_in_catalog(key)
+        and not is_approved(entry["repo"], entry["path"], approvals)
     ]
 
 
@@ -223,16 +276,25 @@ def build_report(args: argparse.Namespace) -> dict:
     # which skills are federated, so an unreadable one leaves both rules with
     # nothing to go on. Report that instead of passing every pull request.
     try:
-        base = declared_skills(
-            fed.parse_federation(base_dir / ".github" / "federation.json")
-        )
+        base_sources = fed.parse_federation(base_dir / ".github" / "federation.json")
     except (ValueError, FileNotFoundError) as exc:
         report["federation_error"] = f"base branch copy: {exc}"
         return report
+    base = declared_skills(base_sources)
+    branch_of = {source.repo: source.branch for source in base_sources}
 
     report["vendored_edits"] = vendored_edits(
         read_changed_files(args.changed_files),
-        {entry["skill"]: entry for entry in base.values()},
+        {
+            entry["skill"]: {
+                **entry,
+                "branch": branch_of[entry["repo"]],
+                "source_ref": source_ref(
+                    base_dir / SKILLS_PREFIX / entry["skill"], branch_of[entry["repo"]]
+                ),
+            }
+            for entry in base.values()
+        },
     )
 
     if args.head_federation is None:
@@ -250,7 +312,8 @@ def build_report(args: argparse.Namespace) -> dict:
     report["new_skills_needing_approval"] = new_skills_needing_approval(
         base,
         head,
-        load_approved_repos(base_dir / ".github" / "skill_owners.json"),
+        load_approvals(base_dir / ".github" / "skill_owners.json"),
+        catalog_skills(base_dir),
     )
     return report
 

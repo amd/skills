@@ -9,16 +9,16 @@ name: federation-guard
 #    each one with rmtree + copytree, so an edit landed here is deleted by the
 #    next run. Closing is kinder than merging something that will silently
 #    revert -- the change belongs in the product repo the skill comes from.
-#    A skill's own `evals/` folder is the catalog's, and edits there are fine.
+#    That includes the skill's `evals/` folder, which is imported too.
 #
 # 2. A pull request that federates a *new* skill from a product repo missing
 #    from `.github/skill_owners.json` fails this check and gets a comment
-#    pointing at the approval issue. Skills already declared on the base
-#    branch are left alone, so the gate applies to what is being added rather
-#    than to what is already shipping.
+#    pointing at the approval issue. Skills already in the catalog on the base
+#    branch, declared or not, are left alone, so the gate applies to what is
+#    being added rather than to what is already shipping.
 #
 # Both rules read the base branch: whether a skill is vendored, which skills
-# are already declared, and which repos are approved all come from `main`, not
+# are already in the catalog, and which repos are approved all come from `main`, not
 # from the pull request. Otherwise a pull request could approve itself.
 #
 # `pull_request_target` rather than `pull_request`, because a fork's
@@ -168,11 +168,12 @@ jobs:
                   `allowed because it is ${fromBot ? "opened by automation" : `labeled \`${overrideLabel}\``}.`
                 );
               } else {
+                const branchText = b => b.includes("*") ? `the newest \`${b}\` branch` : `\`${b}\``;
                 const rows = edits.map(e => {
                   const upstream = e.source_path
-                    ? `[\`${e.repo}/${e.source_path}\`](https://github.com/${e.repo}/tree/main/${e.source_path})`
+                    ? `[\`${e.repo}/${e.source_path}\`](https://github.com/${e.repo}/tree/${e.source_ref}/${e.source_path})`
                     : `[\`${e.repo}\`](https://github.com/${e.repo})`;
-                  return `| \`skills/${e.skill}\` | ${upstream} |`;
+                  return `| \`skills/${e.skill}\` | ${upstream} | ${branchText(e.branch)} |`;
                 });
                 await upsert("<!-- federation-guard:vendored-edit -->", [
                   `## Closed: this is a vendored copy`,
@@ -181,14 +182,12 @@ jobs:
                   `The nightly \`federate-skills\` run re-imports the folder wholesale, so a change merged here is ` +
                   `deleted the next time the source repo moves. Please make it upstream instead:`,
                   ``,
-                  `| Vendored copy | Edit it here |`,
-                  `| --- | --- |`,
+                  `| Vendored copy | Edit it here | Land it on |`,
+                  `| --- | --- | --- |`,
                   ...rows,
                   ``,
-                  `Once it is on \`main\` there, this catalog picks it up on its own (nightly, or by dispatching`,
+                  `Once it is on that branch there, this catalog picks it up on its own (nightly, or by dispatching`,
                   `\`federate-skills\`). See [CONTRIBUTING.md](https://github.com/${owner}/${repo}/blob/main/CONTRIBUTING.md#update-or-remove).`,
-                  ``,
-                  `A skill's own \`evals/\` folder is the exception — the catalog owns those datasets, so edit them here.`,
                   ``,
                   `Maintainers: if the change has to land here (retiring a federated skill, forcing a re-import), ` +
                   `add the \`${overrideLabel}\` label and reopen.`,
@@ -222,11 +221,14 @@ jobs:
             await upsert("<!-- federation-guard:approval -->", [
               `## Product repo approval required`,
               ``,
-              `${repos.map(r => `\`${r}\``).join(", ")} ${repos.length === 1 ? "is" : "are"} not in ` +
-              `[\`.github/skill_owners.json\`](https://github.com/${owner}/${repo}/blob/main/.github/skill_owners.json), ` +
-              `so ${pending.map(p => `\`${p.skill}\``).join(", ")} cannot be federated yet.`,
+              `No entry in ` +
+              `[\`.github/skill_owners.json\`](https://github.com/${owner}/${repo}/blob/main/.github/skill_owners.json) ` +
+              `covers these skills, so they cannot be federated yet:`,
               ``,
-              `1. Open a [Product repo approval issue](${newIssue}) for ${repos.map(r => `\`${r}\``).join(", ")}.`,
+              ...pending.map(p => `- \`${p.skill}\` from \`${p.repo}/${p.path}\``),
+              ``,
+              `1. Open a [Product repo approval issue](${newIssue}) for ${repos.map(r => `\`${r}\``).join(", ")}. ` +
+              `If the repo is a super-repo of unrelated projects, name the project's directory instead, as \`owner/repo/sub/dir\`.`,
               `2. The engineering owner and the product release owner each comment \`/approve\` on it.`,
               `3. Merge the registry pull request that opens, then push here again.`,
               ``,

@@ -15,18 +15,23 @@ so they are guarded here:
     turns every quiet night into a no-op pull request. That includes moving
     between platforms: the hash has to agree between a maintainer's machine
     and the Linux runner.
-  - `main`-only tracking. A source entry that manages to name a ref must
-    fail the run, not get silently coerced to `main`.
+  - Branch tracking. A source follows `main` unless it names a branch, and a
+    release pattern such as `release/*` follows the newest release by version,
+    not alphabetically. A tag or commit must fail the run, not get silently
+    coerced to `main`.
 """
 
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
@@ -81,13 +86,39 @@ class TestFederationFile(unittest.TestCase):
     def test_source_slug_derives_from_repo(self):
         self.assertEqual(parse(one_source())[0].name, "amd-org-myproject")
 
-    def test_tracks_main_and_rejects_any_other_ref(self):
-        self.assertEqual(parse(one_source())[0].ref, "main")
-        for key in ("ref", "branch", "tag", "commit"):
+    def test_tracks_main_unless_a_branch_is_set(self):
+        self.assertEqual(parse(one_source())[0].branch, "main")
+        for branch in ("develop", "release/1.0", "release/*", "releases/v*"):
+            with self.subTest(branch=branch):
+                self.assertEqual(parse(one_source(branch=branch))[0].branch, branch)
+
+    def test_rejects_tags_commits_and_other_pins(self):
+        # Only a branch can be tracked. Naming a tag or commit must fail
+        # loudly rather than quietly track `main` instead.
+        for key in ("ref", "tag", "commit", "rev"):
             with self.subTest(key=key):
                 with self.assertRaises(ValueError) as ctx:
-                    parse(one_source(**{key: "release/1.0"}))
-                self.assertIn("main", str(ctx.exception))
+                    parse(one_source(**{key: "v1.0"}))
+                self.assertIn("branch", str(ctx.exception))
+
+    def test_rejects_branches_git_would_misread(self):
+        for branch in (
+            "",
+            " ",
+            "-rf",
+            "main..evil",
+            "release/",
+            "release//1",
+            "a b",
+            "release/*/*",
+            "main.lock",
+            "$(whoami)",
+            7,
+        ):
+            with self.subTest(branch=branch):
+                with self.assertRaises(ValueError):
+                    parse(one_source(branch=branch))
+
 
     def test_rejects_the_previous_yaml_schema(self):
         # A source-level `path` plus skills named by folder is how the old
@@ -123,6 +154,90 @@ class TestFederationFile(unittest.TestCase):
         self.assertEqual(skills[0].path, "TraceLens/Agent/skills/orchestrator")
 
 
+class TestReleaseBranches(unittest.TestCase):
+    QUARK = ["main", "release/0.8", "release/0.9", "release/0.10", "release/0.12", "release/0.11"]
+
+    def test_the_newest_release_wins_by_version_not_alphabet(self):
+        # Alphabetically `release/0.9` sorts last; by version it is old.
+        self.assertEqual(
+            fed.branches.latest_matching("release/*", self.QUARK), "release/0.12"
+        )
+
+    def test_only_version_numbers_match_the_wildcard(self):
+        names = self.QUARK + ["release/next", "release/0.13-wip", "release/0.13/x"]
+        self.assertEqual(fed.branches.latest_matching("release/*", names), "release/0.12")
+
+    def test_a_release_candidate_is_newer_than_the_previous_release(self):
+        names = self.QUARK + ["release/0.13-rc1"]
+        self.assertEqual(
+            fed.branches.latest_matching("release/*", names), "release/0.13-rc1"
+        )
+
+    def test_the_final_release_beats_its_candidates(self):
+        names = self.QUARK + [
+            "release/0.13-rc2",
+            "release/0.13",
+            "release/0.13-rc10",
+            "release/0.13-beta1",
+        ]
+        self.assertEqual(fed.branches.latest_matching("release/*", names), "release/0.13")
+
+    def test_candidates_rank_by_stage_then_number(self):
+        names = [
+            "release/0.13-rc2",
+            "release/0.13-rc10",
+            "release/0.13-beta3",
+            "release/0.13-alpha9",
+        ]
+        self.assertEqual(
+            fed.branches.latest_matching("release/*", names), "release/0.13-rc10"
+        )
+        self.assertEqual(
+            fed.branches.latest_matching("release/*", names[2:]), "release/0.13-beta3"
+        )
+
+    def test_pre_release_spellings(self):
+        for middle in ("0.13-rc1", "0.13rc1", "0.13-rc.1", "0.13.rc1", "0.13-RC1", "0.13-rc"):
+            with self.subTest(middle=middle):
+                self.assertEqual(
+                    fed.branches.latest_matching(
+                        "release/*", ["release/0.12", f"release/{middle}"]
+                    ),
+                    f"release/{middle}",
+                )
+
+    def test_trailing_zeros_do_not_make_a_release_newer(self):
+        # `1.0` and `1` are the same release, so `1.0.1` is what wins.
+        names = ["rel-1.0", "rel-1", "rel-1.0.1-rc1"]
+        self.assertEqual(fed.branches.latest_matching("rel-*", names), "rel-1.0.1-rc1")
+
+    def test_multi_part_and_v_prefixed_versions(self):
+        names = ["rel-v1.2.9", "rel-v1.10", "rel-v1.2.10", "rel-2"]
+        self.assertEqual(fed.branches.latest_matching("rel-*", names), "rel-2")
+        self.assertEqual(
+            fed.branches.latest_matching("rel-*", names[:3]), "rel-v1.10"
+        )
+
+    def test_no_match_is_none(self):
+        self.assertIsNone(fed.branches.latest_matching("release/*", ["main", "dev"]))
+
+    def test_a_plain_branch_is_used_as_is(self):
+        source = parse(one_source(branch="develop"))[0]
+        self.assertEqual(fed.resolve_branch(source), "develop")
+
+    def test_the_marker_records_what_a_pattern_resolved_to(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp)
+            source = parse(one_source(branch="release/*"))[0]
+            fed.write_marker(skill, source, "release/0.12", "abc", "skills/x", "h")
+            marker = fed.read_marker(skill)
+            self.assertEqual(marker["ref"], "release/*")
+            self.assertEqual(marker["resolved_ref"], "release/0.12")
+
+            fed.write_marker(skill, parse(one_source())[0], "main", "abc", "skills/x", "h")
+            self.assertNotIn("resolved_ref", fed.read_marker(skill))
+
+
 class TestVendoredCopy(unittest.TestCase):
     def test_files_absent_upstream_are_deleted_from_the_vendored_copy(self):
         # The vendored folder mirrors upstream, so a re-import is also how a
@@ -141,11 +256,9 @@ class TestVendoredCopy(unittest.TestCase):
             )
             self.assertEqual((dest / "SKILL.md").read_text(encoding="utf-8"), "new")
 
-    def test_evals_are_outside_federation_in_both_directions(self):
-        # The catalog owns and runs the datasets, so a re-import must neither
-        # delete the local `evals/` nor import upstream's over it. Both halves
-        # fail silently: a wiped dataset only shows up as an eval that stopped
-        # running, and an imported one as expectations nobody here wrote.
+    def test_evals_are_mirrored_like_everything_else(self):
+        # Upstream's `evals/` replaces the catalog's, and a local file upstream
+        # does not ship is removed.
         with tempfile.TemporaryDirectory() as tmp:
             src = write_skill(
                 Path(tmp) / "src",
@@ -153,24 +266,112 @@ class TestVendoredCopy(unittest.TestCase):
             )
             dest = write_skill(
                 Path(tmp) / "dest",
-                {"SKILL.md": "old", "evals/evals.json": '{"local": true}'},
+                {
+                    "SKILL.md": "old",
+                    "evals/evals.json": '{"local": true}',
+                    "evals/hooks.py": "local",
+                },
             )
             fed.copy_skill(src, dest)
             self.assertEqual(
                 (dest / "evals" / "evals.json").read_text(encoding="utf-8"),
-                '{"local": true}',
+                '{"upstream": true}',
             )
+            self.assertFalse((dest / "evals" / "hooks.py").exists())
 
-    def test_a_nested_evals_folder_is_ordinary_content(self):
-        # Only the skill's own top-level `evals/` is the catalog's; a folder
-        # of the same name deeper in the tree is upstream's to ship.
+    def test_local_machine_yml_is_kept_when_upstream_has_none(self):
+        # The catalog's runners are not the product repo's, so the catalog's
+        # runner choice survives an upstream that does not make one.
         with tempfile.TemporaryDirectory() as tmp:
             src = write_skill(
-                Path(tmp) / "src", {"SKILL.md": "new", "agents/evals/notes.md": "x"}
+                Path(tmp) / "src", {"SKILL.md": "new", "evals/evals.json": "{}"}
             )
-            dest = write_skill(Path(tmp) / "dest", {"SKILL.md": "old"})
+            dest = write_skill(
+                Path(tmp) / "dest",
+                {"SKILL.md": "old", "evals/machine.yml": "labels: [gpu]"},
+            )
             fed.copy_skill(src, dest)
-            self.assertTrue((dest / "agents" / "evals" / "notes.md").is_file())
+            self.assertEqual(
+                (dest / "evals" / "machine.yml").read_text(encoding="utf-8"),
+                "labels: [gpu]",
+            )
+            self.assertEqual((dest / "SKILL.md").read_text(encoding="utf-8"), "new")
+
+    def test_upstream_machine_yml_replaces_the_local_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write_skill(
+                Path(tmp) / "src", {"SKILL.md": "new", "evals/machine.yml": "os: [Linux]"}
+            )
+            dest = write_skill(
+                Path(tmp) / "dest",
+                {"SKILL.md": "old", "evals/machine.yml": "labels: [gpu]"},
+            )
+            fed.copy_skill(src, dest)
+            self.assertEqual(
+                (dest / "evals" / "machine.yml").read_text(encoding="utf-8"),
+                "os: [Linux]",
+            )
+
+    def test_large_files_are_left_upstream(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = write_skill(
+                Path(tmp) / "src",
+                {
+                    "SKILL.md": "new",
+                    "evals/traces.tar.gz": "x" * (fed.MAX_FILE_BYTES + 1),
+                    "evals/small.csv": "x" * fed.MAX_FILE_BYTES,
+                },
+            )
+            dest = Path(tmp) / "dest"
+            omitted = fed.copy_skill(src, dest)
+            self.assertEqual(omitted, ["evals/traces.tar.gz"])
+            self.assertFalse((dest / "evals" / "traces.tar.gz").exists())
+            self.assertTrue((dest / "evals" / "small.csv").is_file())
+
+    def test_links_to_large_files_point_upstream(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = write_skill(
+                Path(tmp) / "dest",
+                {"SKILL.md": "[a](evals/traces.tar.gz) [b](evals/small.csv)"},
+            )
+            fed.rewrite_external_references(
+                dest,
+                "skills/x",
+                {"skills/x/evals/traces.tar.gz", "skills/x/evals/small.csv"},
+                "AMD-Org/MyProject",
+                "abc",
+                [],
+                omitted=["evals/traces.tar.gz"],
+            )
+            self.assertEqual(
+                (dest / "SKILL.md").read_text(encoding="utf-8"),
+                "[a](https://github.com/AMD-Org/MyProject/blob/abc/skills/x/evals/traces.tar.gz) "
+                "[b](evals/small.csv)",
+            )
+
+    def test_links_in_nested_docs_resolve_from_their_own_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = write_skill(
+                Path(tmp) / "dest",
+                {
+                    "SKILL.md": "body",
+                    "evals/README.md": "[r](RUBRICS.md) [d](../../docs/guide.md)",
+                    "evals/RUBRICS.md": "rubrics",
+                },
+            )
+            fed.rewrite_external_references(
+                dest,
+                "skills/x",
+                {"skills/x/SKILL.md", "skills/x/evals/RUBRICS.md", "docs/guide.md"},
+                "AMD-Org/MyProject",
+                "abc",
+                [],
+            )
+            self.assertEqual(
+                (dest / "evals" / "README.md").read_text(encoding="utf-8"),
+                "[r](RUBRICS.md) "
+                "[d](https://github.com/AMD-Org/MyProject/blob/abc/docs/guide.md)",
+            )
 
 
 class TestChangeDetection(unittest.TestCase):
@@ -206,18 +407,22 @@ class TestChangeDetection(unittest.TestCase):
                 fed.content_hash(root, exclude=[fed.MARKER_FILENAME]), digest
             )
 
-    def test_hash_ignores_the_skills_own_evals_folder(self):
-        # Federation does not move `evals/` any more, so an upstream edit
-        # there must not re-vendor the skill, and the local dataset must not
-        # make the vendored copy look stale on every run.
+    def test_hash_covers_the_evals_folder(self):
+        # An upstream edit to the dataset alone must re-vendor the skill.
         with tempfile.TemporaryDirectory() as tmp:
             root = write_skill(Path(tmp) / "skill", {"SKILL.md": "body"})
             digest = fed.content_hash(root)
             write_skill(root, {"evals/evals.json": '{"evaluations": []}'})
-            self.assertEqual(fed.content_hash(root), digest)
-            # Same name, but nested: that is upstream's content and counts.
-            write_skill(root, {"agents/evals/notes.md": "x"})
             self.assertNotEqual(fed.content_hash(root), digest)
+
+    def test_hash_ignores_files_too_large_to_vendor(self):
+        # They are never copied, so counting them would make every vendored
+        # copy look stale against its upstream.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = write_skill(Path(tmp) / "skill", {"SKILL.md": "body"})
+            digest = fed.content_hash(root)
+            write_skill(root, {"evals/t.tar.gz": "x" * (fed.MAX_FILE_BYTES + 1)})
+            self.assertEqual(fed.content_hash(root), digest)
 
     def test_hash_covers_contents_and_layout(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -266,16 +471,54 @@ class TestChangeDetection(unittest.TestCase):
                     fed.is_up_to_date({**marker, key: value}, source, spec, "abc")
                 )
 
+    def test_a_new_release_branch_with_the_same_contents_is_not_a_bump(self):
+        # The marker is compared on the declared pattern, not on the release
+        # it resolved to, so `release/0.13` arriving with an identical skill
+        # folder leaves the vendored copy alone.
+        source = parse(one_source(branch="release/*"))[0]
+        marker = {
+            "repo": "AMD-Org/MyProject",
+            "ref": "release/*",
+            "resolved_ref": "release/0.12",
+            "path": "skills/my-skill",
+            "content_hash": "abc",
+        }
+        self.assertTrue(fed.is_up_to_date(marker, source, source.skills[0], "abc"))
+        self.assertFalse(
+            fed.is_up_to_date({**marker, "ref": "main"}, source, source.skills[0], "abc")
+        )
+
 
 class TestPullRequestSummary(unittest.TestCase):
-    def result(self, folder: str, commit: str, updated: bool = True):
-        source = fed.Source(repo="AMD-Org/MyProject", license="MIT")
+    def result(
+        self,
+        folder: str,
+        commit: str,
+        updated: bool = True,
+        branch: str = "main",
+        resolved: str | None = None,
+    ):
+        source = fed.Source(repo="AMD-Org/MyProject", license="MIT", branch=branch)
         return fed.ImportResult(
             source=source,
             folder=folder,
             path=f"skills/{folder}",
             commit=commit,
             updated=updated,
+            branch=resolved or branch,
+        )
+
+    def test_the_body_names_the_branch_each_bump_came_from(self):
+        summary = fed.build_summary(
+            [
+                self.result("a", "1111111"),
+                self.result("b", "2222222", branch="release/*", resolved="release/0.12"),
+            ]
+        )
+        self.assertIn("on `main`", summary["body"])
+        self.assertIn("on `release/0.12` (newest `release/*`)", summary["body"])
+        self.assertEqual(
+            [u["branch"] for u in summary["updated"]], ["main", "release/0.12"]
         )
 
     def test_single_bump_names_the_skill_and_short_commit(self):
@@ -295,6 +538,64 @@ class TestPullRequestSummary(unittest.TestCase):
     def test_several_bumps_share_one_title(self):
         two = [self.result("a", "1111111"), self.result("b", "2222222")]
         self.assertEqual(fed.build_summary(two)["title"], "Bump 2 federated skills")
+
+
+class TestSkillFanOut(unittest.TestCase):
+    """`--list-skills` is what the workflow fans out over, one pull request per
+    skill, so its stdout has to be exactly the JSON array of local names."""
+
+    def list_skills(self, payload: dict, *extra: str, vendored: dict[str, dict] | None = None):
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = Path(tmp) / "federation.json"
+            catalog.write_text(json.dumps(payload), encoding="utf-8")
+            skills_dir = Path(tmp) / "skills"
+            for name, marker in (vendored or {}).items():
+                write_skill(skills_dir / name, {fed.MARKER_FILENAME: json.dumps(marker)})
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.object(fed, "SKILLS_DIR", skills_dir), \
+                    redirect_stdout(out), redirect_stderr(err):
+                code = fed.main(["--catalog", str(catalog), "--list-skills", *extra])
+        self.assertEqual(code, 0)
+        return json.loads(out.getvalue()), err.getvalue()
+
+    TWO_SOURCES = {
+        "sources": [
+            {"repo": "AMD-Org/One", "skills": [{"path": "skills/a", "as": "one-a"}]},
+            {
+                "repo": "AMD-Org/Two",
+                "skills": [{"path": "skills/b"}, {"path": "x/c", "as": "two-c"}],
+            },
+        ]
+    }
+
+    def test_lists_every_skill_by_its_local_name_in_declaration_order(self):
+        names, _ = self.list_skills(self.TWO_SOURCES)
+        self.assertEqual(names, ["one-a", "b", "two-c"])
+
+    def test_only_narrows_the_list(self):
+        names, _ = self.list_skills(self.TWO_SOURCES, "--only", "two-c")
+        self.assertEqual(names, ["two-c"])
+
+    def test_only_rejects_unknown_names(self):
+        with self.assertRaises(ValueError):
+            self.list_skills(self.TWO_SOURCES, "--only", "nope")
+
+    def test_rejects_a_name_declared_twice(self):
+        payload = {
+            "sources": [
+                {"repo": "AMD-Org/One", "skills": [{"path": "skills/a", "as": "dup"}]},
+                {"repo": "AMD-Org/Two", "skills": [{"path": "skills/b", "as": "dup"}]},
+            ]
+        }
+        with self.assertRaises(ValueError):
+            self.list_skills(payload)
+
+    def test_reports_undeclared_vendored_skills_on_stderr_only(self):
+        names, err = self.list_skills(
+            self.TWO_SOURCES, vendored={"gone": {"repo": "AMD-Org/Old"}}
+        )
+        self.assertEqual(names, ["one-a", "b", "two-c"])
+        self.assertIn("skills/gone", err)
 
 
 if __name__ == "__main__":

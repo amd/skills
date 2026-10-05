@@ -1,0 +1,45 @@
+{
+  "evaluations": [
+    {
+      "id": "quark-torch-ptq-fp8-qwen3-confirmed-flow",
+      "skill_should_trigger": true,
+      "note": "Named Hugging Face model plus an explicit scheme and output path.",
+      "prompt": "Use AMD Quark to quantize Qwen/Qwen3-8B to FP8 and save the Hugging Face model under ./artifacts/qwen3-fp8. Show me the plan before doing expensive work.",
+      "expected_behavior": [
+        "Begins with read-only model intake, presents model_analysis.json, and waits for confirmation before planning or executing quantization."
+      ],
+      "unexpected_behavior": [
+        "Runs the generated quark-cli quantization command, downloads model weights, creates the output directory, or starts PTQ before the user explicitly approves that exact command."
+      ]
+    },
+    {
+      "id": "quark-torch-ptq-hf-repo-general-request",
+      "skill_should_trigger": true,
+      "prompt": "I have the Hugging Face model mistralai/Mistral-7B-v0.1. Help me choose an AMD Quark quantization scheme and take it through PTQ to a quantized safetensors output."
+    },
+    {
+      "id": "quark-torch-ptq-local-safetensors-int4",
+      "skill_should_trigger": true,
+      "prompt": "Quantize the local PyTorch LLM at /models/my-llama-safetensors with Quark INT4 weight-only PTQ, preserving the model-specific exclusions and writing the result to /models/quantized/my-llama.",
+      "expected_behavior": [
+        "Resolves the local model path and verifies that the directory and config.json exist before reading model metadata or planning quantization.",
+        "If the model path is unavailable, reports the exact missing input and stops at intake without inventing model facts or creating the output directory."
+      ],
+      "unexpected_behavior": [
+        "Loads model weights, creates the output directory, chooses exclusions, or builds an execution command before the model intake is valid and confirmed."
+      ]
+    },
+    {
+      "id": "quark-torch-ptq-no-trigger-llm-finetuning",
+      "skill_should_trigger": false,
+      "note": "Training is outside the catalog's quantization and environment workflows.",
+      "prompt": "Fine-tune a language model on my customer-support conversations for three epochs, add LoRA adapters, and produce training-loss plots."
+    },
+    {
+      "id": "quark-torch-ptq-no-trigger-general-pytorch-refactor",
+      "skill_should_trigger": false,
+      "note": "Ordinary application code changes should not trigger any Quark catalog skill.",
+      "prompt": "Refactor this PyTorch Dataset class to cache decoded images and add unit tests for corrupt JPEG handling. Do not quantize anything."
+    }
+  ]
+}

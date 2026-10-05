@@ -11,12 +11,36 @@
       ]
     },
     {
+      "repo": "AMD-AGI/Magpie",
+      "license": "MIT",
+      "skills": [
+        {
+          "path": "skills/magpie",
+          "as": "magpie-kernel-evaluator"
+        }
+      ]
+    },
+    {
       "repo": "AMD-AGI/TraceLens",
       "license": "MIT",
       "skills": [
         {
           "path": "TraceLens/Agent/Analysis/skills/analysis-orchestrator",
           "as": "tracelens-analysis-orchestrator"
+        }
+      ]
+    },
+    {
+      "repo": "amd/Quark",
+      "license": "MIT",
+      "branch": "release/*",
+      "skills": [
+        {
+          "path": "skills/quark-torch-ptq",
+          "as": "quark-torch-llm-ptq"
+        },
+        {
+          "path": "skills/quark-install"
         }
       ]
     }

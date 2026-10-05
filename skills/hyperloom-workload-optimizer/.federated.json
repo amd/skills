@@ -2,9 +2,9 @@
   "source": "amd-agi-hyperloom",
   "repo": "AMD-AGI/Hyperloom",
   "ref": "main",
-  "commit": "f6a17b3330863383516f525e65fc199b49dd180d",
+  "commit": "0012585b70046adaf4e70ea0ed1da63436f6a0b4",
   "path": "examples/skills/hyperloom-workload-optimizer",
   "license": "MIT",
-  "content_hash": "05e316b7fda3cdd600c3c552947dd6661e7dff44ee31119bd15da40742a35374",
-  "imported_at": "2026-09-22T06:45:27Z"
+  "content_hash": "5477b4269c0b277be195017ba30dd064e40f4b5edff547c5dc716ebd06bd8ee9",
+  "imported_at": "2026-09-25T15:04:58Z"
 }

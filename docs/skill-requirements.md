@@ -106,14 +106,10 @@ See [evals.md](evals.md) for what to put in the file and how it is graded.
 
 ## Publishing
 
-All published skills ship together in one `amd-skills` plugin, listed as
-`./skills/<name>` entries in
-[`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json). The
-importer adds your entry for you, and `./.github/scripts/publish.sh`
-regenerates the derived Cursor, Codex, and repo-marketplace manifests from it.
-
-Nothing here is hand-edited. The validator only checks that the manifests are
-in sync, so if it complains, rerun `publish.sh` and commit the result.
+Do not edit any marketplace manifest (`.claude-plugin/marketplace.json`,
+`.cursor-plugin/marketplace.json`, `.agents/plugins/marketplace.json`) in your
+PR, and do not run `publish.sh`. Which skills go into the published
+`amd-skills` bundle is decided separately, after your skill merges.
 
 ## Before you open the PR
 
@@ -124,7 +120,7 @@ CI will reject the skill if any of these are false:
 - [ ] `SKILL.md` body is ≤ 500 lines
 - [ ] `skill-card.md` exists with non-empty Description, Owner, and License
 - [ ] `evals/evals.json` has ≥ 3 `true` and ≥ 2 `false` evaluations, with unique ids
-- [ ] Manifests are regenerated and in sync
+- [ ] No marketplace manifests are edited
 - [ ] `./.github/scripts/check.sh` passes
 
 A reviewer will push back if any of these are false:

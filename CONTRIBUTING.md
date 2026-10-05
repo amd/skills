@@ -34,19 +34,35 @@ request adding the repo to
 [`.github/skill_owners.json`](.github/skill_owners.json); once it merges, the
 repo can federate as many skills as it likes and never needs approving again.
 
+If your repo is a super-repo of unrelated projects (such as `ROCm/rocm-systems`),
+approve only your project: enter its directory as `owner/repo/sub/dir`, e.g.
+`ROCm/rocm-systems/projects/rocprofiler-sdk`. That approval covers only skills
+under that directory, and each other project in the repo is approved
+separately by its own owners.
+
 ## 1. Author the skill in your repo
 
 Each skill is a folder holding a valid `SKILL.md`, a `skill-card.md`, and an
 `evals/evals.json` dataset. Put the folders anywhere in your repo, commonly
 `skills/` or `.agents/skills/`.
 
-The catalog always tracks your **`main`** branch. That is deliberate: the
-catalog cannot be pointed at a side branch, so what reaches users is what your
-own review process has already merged. Land skill changes on `main` and the
-catalog follows.
+The catalog tracks one branch of your repo, **`main`** unless your
+`federation.json` entry sets `branch` (see below). It can be:
+
+- a branch name, such as `main` or `develop`, followed as it moves;
+- a release pattern, such as `release/*`, which follows your newest release
+  branch. The `*` stands for a version number, optionally with an `alpha`,
+  `beta`, or `rc` suffix. Versions compare numerically, and a release
+  candidate sorts after the previous release but before its own final
+  release:
+  `release/0.9` < `release/0.12` < `release/0.13-rc1` < `release/0.13-rc2` < `release/0.13`.
+
 
 Everything in the folder ships, so the requirements are yours to maintain
-upstream alongside the skill. See
+upstream alongside the skill. Two exceptions: files over 100 KB are not
+vendored, so a skill or eval that needs a large trace or archive should
+download it from your repo; and if you ship no `evals/machine.yml`, the
+catalog keeps its own, since its runners may differ from yours. See
 [docs/skill-requirements.md](docs/skill-requirements.md) for what a valid skill
 must contain and [docs/best-practices.md](docs/best-practices.md) for how to
 make it good.
@@ -80,12 +96,13 @@ one repo can federate as many skills as it likes from wherever they live:
 
 | Field | Meaning |
 | --- | --- |
-| `repo` | GitHub `<owner>/<repo>`, must be AMD-owned. Always tracked at `main` |
+| `repo` | GitHub `<owner>/<repo>`, must be AMD-owned |
 | `license` | SPDX id, carried into each vendored copy's marker file |
+| `branch` | Optional. The branch to track, or a release pattern such as `release/*`. Defaults to `main` |
 | `skills[].path` | Path of the skill folder inside your repo, from the repo root |
 | `skills[].as` | Optional local catalog name; use it to namespace as `<project>-<skill>` so names stay unique |
 
-There is no ref, branch, or commit field. Federation is `main`-only by design.
+There is no tag or commit field. A source always follows a branch.
 
 ## 3. Vendor and validate locally
 
@@ -94,7 +111,6 @@ The scripts read `.github/federation.json` from your working tree.
 ```bash
 uv run .github/scripts/federate_skills.py --check-catalog  # schema only, no clone
 uv run .github/scripts/federate_skills.py --only <skill>   # vendor into skills/<skill>/ (repeat --only per skill)
-./.github/scripts/publish.sh                               # regenerate the manifests
 ./.github/scripts/check.sh                                 # validate (same command CI runs)
 ```
 
@@ -106,12 +122,10 @@ skill that is already federated on `main`, and make sure your `as:` name does
 not match a skill already under `skills/`, since the import replaces that
 folder.
 
-The importer also adds your skill to the published bundle, so there is no
-manifest to edit by hand.
-
 ## 4. Open a pull request
 
-Commit `.github/federation.json`, `skills/**`, and the regenerated manifests. A
+Commit `.github/federation.json` and `skills/**` only; do not edit any
+marketplace manifest. A
 maintainer reviews and merges once CI passes. The `validate` workflow checks the
 manifests; the `evals` workflow runs [skillscope](https://github.com/amd/skillscope)
 — the structural checks, then your prompts against a real agent.
@@ -152,8 +166,9 @@ URLs on a schedule to catch link rot.
 
 ## Update or remove
 
-Merge the change to `main` in your repo and the catalog picks it up on its own.
+Merge the change to your tracked branch (or push a new release branch, if you
+track `release/*`) and the catalog picks it up on its own.
 The `federate-skills` workflow runs nightly (and on demand), re-vendors any
-skill whose upstream folder contents changed, and opens a pull request titled
-`Bump <skill> to <short commit>`. A night with no upstream change produces no
+skill whose upstream folder contents changed, and opens one pull request per
+changed skill, titled `Bump <skill> to <short commit>`. A night with no upstream change produces no
 pull request, so the only ones you see are real bumps.
