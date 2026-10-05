@@ -1333,21 +1333,16 @@ def summary(
             handle.write("```\n")
         items = (results or {}).get("items") or []
         if items:
-            handle.write("\n| Skill | OS | Result | Test streams |\n")
-            handle.write("|---|---|---|---|\n")
+            handle.write("\n| Skill | OS | Result |\n")
+            handle.write("|---|---|---|\n")
             for item in items:
                 status = str(item.get("status") or "unknown")
                 icon = (
                     "✅" if status == "passed" else ("🧪" if status == "mock" else "❌")
                 )
-                report = (
-                    "Not run (mock)"
-                    if mode == "mock"
-                    else stream_coverage(item.get("public_streams") or {})
-                )
                 handle.write(
                     f"| `{item.get('skill', '')}` | {item.get('os', '')} | "
-                    f"{icon} `{status}` | {report} |\n"
+                    f"{icon} `{status}` |\n"
                 )
 
 

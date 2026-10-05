@@ -1274,8 +1274,28 @@ class TriggerTests(unittest.TestCase):
             text = path.read_text()
         self.assertIn("Pipeline snapshot before cleanup: `running`", text)
         self.assertIn("Final parent state: `cancelled`", text)
-        self.assertIn("Test streams unavailable", text)
+        self.assertIn("| Skill | OS | Result |\n|---|---|---|", text)
+        self.assertNotIn("Test streams", text)
         self.assertNotIn("- Pipeline: `running`", text)
+
+    def test_summary_table_omits_stream_coverage_for_live_and_mock(self) -> None:
+        for mode in ("live", "mock"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temp:
+                results = orchestrai_run.mock_results_manifest(reporting_plan())
+                for item in results["items"]:
+                    item["public_streams"] = {"stdout": "output", "stderr": ""}
+                path = Path(temp) / "summary.md"
+                with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(path)}):
+                    orchestrai_run.summary(
+                        mode=mode, plan_name="test-plan", results=results
+                    )
+                text = path.read_text()
+                self.assertIn("| Skill | OS | Result |\n|---|---|---|", text)
+                self.assertNotIn("Test streams", text)
+                self.assertNotIn("stdout + stderr", text)
+                rows = [line for line in text.splitlines() if line.startswith("| `")]
+                self.assertEqual(len(rows), len(results["items"]))
+                self.assertTrue(all(row.count("|") == 4 for row in rows))
 
     def test_sanitized_snapshot_omits_plan_urls_and_test_output(self) -> None:
         clean = orchestrai_run.sanitized_live_snapshot(
