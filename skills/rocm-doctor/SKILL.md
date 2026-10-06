@@ -145,7 +145,7 @@ passes — the GPU is AMD. Linux, Windows and WSL2 all run the same workflow.
    rocm fix <fix-id> --yes      # required to apply in a non-interactive shell
    ```
 
-   Only the four auto-applicable fixes are ones the CLI runs itself. The other 21
+   Only the four auto-applicable fixes are ones the CLI runs itself. The other 22
    are **print-only** (bootloader, kernel, reinstall, Windows driver, …): `rocm
    fix <id>` just prints the plan for the user to run themselves — no prompt, and
    the CLI never performs those.

@@ -93,7 +93,7 @@ non-interactive shell without `--yes`, and confirm first. **Two exceptions:**
   pinned. Run `rocm fix fix-9-igpu-dgpu --device-index N` (not the bare id)
   once you know N.
 
-## Closed catalog (25 failure modes)
+## Closed catalog (26 failure modes)
 
 The OS column is the platform family the CLI scopes an entry to, and WSL2 is a
 family of its own — not a flavour of `linux`. An entry reaches a WSL host only
@@ -118,6 +118,7 @@ reporting confident nonsense.
 | `fix-13-hip-sdk-missing` | windows | HIP SDK not installed | no HIP SDK under Program Files, `hipInfo` not recognized | print-only |
 | `fix-14-adrenalin-too-old` | windows | Adrenalin / kernel-mode driver too old for the HIP SDK | `hipInfo` can't enumerate, "driver too old", HSA "no agents found" | print-only |
 | `fix-15-msvc-redist` | windows | MSVC runtime missing (HIP DLLs can't load) | `vcruntime140.dll` / `vcruntime140_1.dll` missing | print-only |
+| `fix-16-vllm-oom` | linux/wsl | vLLM reserved ~90% of the GPU's TOTAL VRAM for its KV cache and ran out at startup | vLLM engine start fails with an out-of-memory error; the GPU is shared/busy, or the model does not fit | print-only |
 | `fix-17-torch-dlpack` | linux | `torch-c-dlpack-ext` loads its CUDA prebuilt on a ROCm torch, aborting vLLM's engine start at import time | vLLM engine start fails on import; error names `torch_c_dlpack_ext` or tvm_ffi's `_optional_torch_c_dlpack` | print-only |
 | `fix-18-comgr-conflict` | linux/wsl | The code object manager library (`libamd_comgr`) that would load belongs to a different installation than the HIP runtime that would load, so device code compilation fails with an error naming neither | compilation error naming neither library; `rocm examine --json`'s `comgr_selected`/`hip_selected` resolve to two different `install_root`s | print-only |
 | `fix-19-shm-too-small` | linux/wsl | `/dev/shm` too small for a serving workload, which needs gigabytes where a container and WSL2 both default to 64 MB | reported under 1 GiB; a data-loader worker killed by a bus error, or a failed write to a temporary file, with nothing naming shared memory | print-only |
@@ -129,14 +130,15 @@ reporting confident nonsense.
 | `fix-wsl-6-host-driver-too-old` | wsl | Windows host driver too old or absent, with the distro side already complete | the Windows host reports no AMD display adapter | print-only |
 | `fix-wsl-7-wsl1` | wsl | Distro running under WSL 1, which exposes no GPU device at all | the running kernel is a WSL 1 kernel | print-only |
 
-Two things the numbering does not tell you. `fix-16` is a reserved handle, not a
-missing row — ids are stable handles rather than positions. And the `fix-wsl-N`
-entries are a parallel series, not a continuation of the numeric one, because
-they answer for a different platform family.
+One thing the numbering does not tell you: the `fix-wsl-N` entries are a parallel
+series, not a continuation of the numeric one, because they answer for a
+different platform family. The numeric series itself now runs `fix-1` through
+`fix-19` with no gaps, but the ids remain stable handles rather than positions —
+a retired entry would leave a hole rather than renumber the ones after it.
 
 Linux-only: fix-3, -4, -5, -7, -10, -11, -12, -17. Windows-only: fix-13, -14, -15.
 WSL-only: fix-wsl-1 through fix-wsl-7. Linux + Windows: fix-9.
-Linux + WSL: fix-18, -19. Linux + Windows + WSL: fix-1, -2, -6, -8.
+Linux + WSL: fix-16, -18, -19. Linux + Windows + WSL: fix-1, -2, -6, -8.
 
 ## Framework routing
 
