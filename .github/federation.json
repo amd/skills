@@ -43,6 +43,15 @@
           "path": "skills/quark-install"
         }
       ]
+    },
+    {
+      "repo": "ROCm/rocm-cli",
+      "license": "MIT",
+      "skills": [
+        {
+          "path": "skills/rocm-doctor"
+        }
+      ]
     }
   ]
 }
