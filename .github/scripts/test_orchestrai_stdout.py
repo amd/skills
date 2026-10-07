@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from orchestrai_logs import private_log_values
+from orchestrai_logs import private_log_values, public_manifest_log, public_test_log
 from orchestrai_stdout import (
     MAX_STREAM_BYTES,
     UNAVAILABLE,
@@ -229,13 +229,305 @@ class FullStreamTests(unittest.TestCase):
         self.assertNotIn(
             "driver.zip", sanitize_stream(raw, private_log_values(plan, {}, {}))
         )
+        # Public-hosted private driver URLs and escaped known values retain the
+        # same precedence when a logger serializes them as JSON strings.
+        escaped = json.dumps(
+            {
+                "debug": "https://github.com/private-release/driver.zip",
+                "value": "dummy\nmultiline-secret",
+                "result": "pass",
+            }
+        ).replace("/", "\\/")
+        result = sanitize_stream(escaped, values)
+        self.assertNotIn("driver.zip", result)
+        self.assertNotIn("multiline-secret", result)
+        self.assertEqual(json.loads(result)["result"], "pass")
+        self.assertEqual(sanitize_stream(result, values), result)
+        self.assertEqual(
+            manifest_streams({"public_streams": {"stdout": escaped}}, environ)[
+                "stdout"
+            ],
+            result,
+        )
+
+    def test_any_scheme_urls_remove_userinfo_and_private_hosts(self):
+        # Synthetic values, deliberately not real credentials or endpoints.
+        for scheme in (
+            "postgres",
+            "postgresql",
+            "mysql",
+            "redis",
+            "mongodb",
+            "mongodb+srv",
+            "amqp",
+            "sftp",
+            "vendor+driver-v2.1",
+        ):
+            for authority in (
+                "dummy-user:dummy-url-secret@dbhost:3306",
+                "dummy%2Duser:dummy%3Aurl%40secret@github.com",
+                "dummy%3Aurl%40secret@localhost:8000",
+                "dummy-user%3Adummy-url-secret%40github.com",
+                "dummy-user@github.com",
+                "dbhost:3306",
+            ):
+                with self.subTest(scheme=scheme, authority=authority):
+                    raw = f"could not connect to {scheme}://{authority}/prod\nnext diagnostic\n"
+                    expected = (
+                        "could not connect to [PRIVATE URL REDACTED]\nnext diagnostic\n"
+                    )
+                    self.assertEqual(sanitize_stream(raw), expected)
+                    self.assertEqual(sanitize_stream(expected), expected)
+        self.assertNotIn(
+            "dummy-url-secret",
+            sanitize_stream("vendor://dummy:dummy-url-secret@[malformed-ipv6]/prod"),
+        )
+        escaped = '{"dsn":"postgres:\\/\\/dummy-user:dummy-url-secret@dbhost/prod", "result":"pass"}'
+        result = sanitize_stream(escaped)
+        self.assertNotIn("dummy-url-secret", result)
+        self.assertEqual(json.loads(result)["result"], "pass")
+        self.assertEqual(sanitize_stream(result), result)
+        public = '{"url":"https:\\/\\/github.com\\/amd\\/skills"}'
+        self.assertEqual(sanitize_stream(public), public)
+
+    def test_known_json_encoded_values_stay_private_in_both_log_paths(self):
+        samples = (
+            ({}, {"LLM_GATEWAY_KEY": "dummy\nmultiline-secret"}, "dummy\nmultiline-secret", "multiline-secret"),
+            (
+                {"builds_json": {"vars": {"driver_source": r"\\fixture-host\Private Driver Folder\fixture-driver.zip"}}},
+                {}, r"\\fixture-host\Private Driver Folder\fixture-driver.zip", "Driver Folder",
+            ),
+        )
+        for plan, environ, private, suffix in samples:
+            with self.subTest(kind="windows-source" if plan else "multiline-secret"):
+                values = private_log_values(plan, {}, environ)
+                self.assertIn(private, values)
+                raw = (
+                    "[PASS] (expected_behavior) retained diagnostic -- llm_judge: "
+                    + json.dumps(private)
+                )
+                full = public_streams({"stdout": raw}, values)
+                lines = public_test_log(
+                    {"stdout": raw}, skill="fixture-skill", private_values=values
+                )
+                item = {"skill": "fixture-skill", "public_log": lines, "public_streams": full}
+                summary = public_manifest_log(item)
+                self.assertTrue(summary)
+                for published in (*full.values(), *lines, *summary):
+                    self.assertNotIn(suffix, published)
+                    self.assertIn("retained diagnostic", published)
+                    self.assertIn("[REDACTED]", published)
+                self.assertEqual(public_manifest_log({**item, "public_log": summary}), summary)
+                self.assertEqual(manifest_streams(item, environ), full)
+
+    def test_hyphenated_headers_and_keys_redact_arbitrary_short_values(self):
+        keys = (
+            "X-Amz-Security-Token",
+            "x-amz-security-token",
+            "x-custom-api-key",
+            "x-api-key",
+            "db-api-key",
+            "custom-api-key",
+            "client-api-key",
+            "service-password",
+            "client-secret",
+            "access-key-id",
+            "private-key",
+            "Set-Cookie",
+            "Ocp-Apim-Subscription-Key",
+        )
+        for key in keys:
+            for separator in (": ", "="):
+                with self.subTest(key=key, separator=separator):
+                    raw = f"{key}{separator}dummyshortlowercase\nnext diagnostic\n"
+                    result = sanitize_stream(raw)
+                    self.assertNotIn("dummyshortlowercase", result)
+                    self.assertIn(key, result)
+                    self.assertIn("next diagnostic", result)
+                    self.assertEqual(result.count("\n"), raw.count("\n"))
+                    self.assertEqual(sanitize_stream(result), result)
+
+    def test_structured_values_preserve_safe_adjacent_fields(self):
+        records = (
+            {"user": "dummy-user", "result": "pass", "items": 5},
+            {"host": "build-node-42", "result": "pass", "message": "download done"},
+            {"api_key": "dummy-json-key", "result": "pass"},
+            {"X-Amz-Security-Token": "dummy-json-token", "result": "pass"},
+            {
+                "credentials": {"login": "dummy-user", "value": "dummy-nested-secret"},
+                "result": "pass",
+            },
+            {"device_tags": ["dummy-private-tag", "build-node-42"], "result": "pass"},
+            {"session_id": 42, "result": "pass"},
+            {"user": 'dummy user with "escaped quotes"', "result": "pass"},
+            {"user": "dummy\\private\\user", "result": "pass"},
+        )
+        for record in records:
+            with self.subTest(record=record):
+                raw = json.dumps(record)
+                result = sanitize_stream(raw)
+                decoded = json.loads(result)
+                self.assertEqual(decoded["result"], "pass")
+                self.assertEqual(set(decoded), set(record))
+                for key in set(record) - {"result", "items", "message"}:
+                    self.assertIn("REDACTED", decoded[key])
+                self.assertEqual(sanitize_stream(result), result)
+        self.assertEqual(
+            sanitize_stream("host=build-node-42 result=pass\n"),
+            "host=[IDENTITY REDACTED] result=pass\n",
+        )
+
+    def test_multiline_values_and_folded_headers_preserve_line_boundaries(self):
+        samples = (
+            'api_key="dummy-first-line\ndummy-second-line"\nresult=pass\n',
+            "X-Amz-Security-Token: dummy-first-line\n  dummy-second-line\nresult: pass\n",
+            'X-Amz-Security-Token: "dummy-first-line"\n  dummy-second-line\nresult: pass\n',
+            "client-secret: |\n  dummy-first-line\n  dummy-second-line\nresult: pass\n",
+            "password: >-\r\n  dummy-first-line\r\n  dummy-second-line\r\nresult: pass\r\n",
+            '{"api_key":\n  "dummy-first-line\\ndummy-second-line",\n  "result": "pass"}\n',
+            '{"device_tags": [\n "dummy-first-line",\n "dummy-second-line"\n], "result": "pass"}\n',
+        )
+        for raw in samples:
+            with self.subTest(raw=raw):
+                result = sanitize_stream(raw)
+                self.assertNotIn("dummy-first-line", result)
+                self.assertNotIn("dummy-second-line", result)
+                self.assertIn("pass", result)
+                self.assertEqual(result.count("\n"), raw.count("\n"))
+                self.assertEqual(sanitize_stream(result), result)
+                if raw.startswith("{"):
+                    self.assertEqual(json.loads(result)["result"], "pass")
+
+    def test_unstructured_credential_punctuation_does_not_end_redaction(self):
+        for raw in (
+            "Cookie: session=dummy-first; other=dummy-second\nnext diagnostic\n",
+            "custom-api-key: dummy-first,dummy-second\nnext diagnostic\n",
+            'password="dummy-first" "dummy-second"\nnext diagnostic\n',
+            "x-amz-security-token: dummy-first]dummy-second\nnext diagnostic\n",
+            "Authorization: dummy-first; dummy-second\nnext diagnostic\n",
+            'credentials={"value":"dummy-first"}; dummy-second\nnext diagnostic\n',
+            '"X-Amz-Security-Token": dummy-first,dummy-second\nnext diagnostic\n',
+            '"Cookie": session=dummy-first; csrf=dummy-second\nnext diagnostic\n',
+            'Cookie": dummy-first; csrf=dummy-second\nnext diagnostic\n',
+            '"custom-api-key": "dummy-first",dummy-second\nnext diagnostic\n',
+            '{"custom-api-key": dummy-first,dummy-second}\nnext diagnostic\n',
+        ):
+            with self.subTest(raw=raw):
+                result = sanitize_stream(raw)
+                self.assertNotIn("dummy-first", result)
+                self.assertNotIn("dummy-second", result)
+                self.assertIn("next diagnostic", result)
+                self.assertEqual(sanitize_stream(result), result)
+
+    def test_deep_or_unterminated_credential_containers_fail_closed(self):
+        for value in (
+            "[" * 2000 + '"dummy-nested-secret"' + "]" * 2000,
+            '{"value":"dummy-nested-secret"',
+            '"dummy-nested-secret',
+        ):
+            with self.subTest(shape=value[:20]):
+                raw = '{"credentials": ' + value + ', "result": "pass"}\n'
+                result = sanitize_stream(raw)
+                self.assertNotIn("dummy-nested-secret", result)
+                self.assertEqual(sanitize_stream(result), result)
+
+    def test_unknown_bare_machine_names_are_redacted(self):
+        for machine in (
+            "build-node-42",
+            "runner-linux-a1",
+            "rack-node-dt123",
+            "Build-Node-42",
+        ):
+            with self.subTest(machine=machine):
+                raw = f"connection from {machine} failed; retry pending\n"
+                result = sanitize_stream(raw)
+                self.assertNotIn(machine, result)
+                self.assertIn("failed; retry pending", result)
+                self.assertEqual(sanitize_stream(result), result)
+        self.assertNotIn(
+            "build-node-42", sanitize_stream("/tmp/private-run/build-node-42.log")
+        )
+
+    def test_lowercase_nonhex_tokens_do_not_need_a_large_alphabet(self):
+        token = "abcdefghijklmnopqrstuvwxyzghijkl"
+        digit_token = "abcdefghijklmno0123456789qrstuv"
+        for raw in (
+            f"unlabelled {token}\n",
+            f"/tmp/private-run/run_{token}.json",
+            token.upper(),
+            digit_token,
+            digit_token.upper(),
+            f"/tmp/private-run/run_{digit_token}.json",
+            "gh" * 16,
+            "ghijk" * 7,
+        ):
+            with self.subTest(raw=raw):
+                result = sanitize_stream(raw)
+                self.assertNotIn(token, result.lower())
+                self.assertNotIn(digit_token, result.lower())
+                self.assertNotIn("gh" * 16, result)
+                self.assertNotIn("ghijk" * 7, result)
+                self.assertEqual(sanitize_stream(result), result)
+        # Repetitive output and ordinary skill/file names are not random keys.
+        raw = (
+            "x" * 5000 + "\n"
+            "tracelens-analysis-orchestrator.py\nsetup-skills.ps1\n"
+            "https://files.pythonhosted.org/packages/onnx-runtime-1.2.3.whl\n"
+            "https://github.com/amd/skills/blob/main/local-ai-use/SKILL.md\n"
+        )
+        self.assertEqual(sanitize_stream(raw), raw)
+
+    def test_controller_and_verdict_boundaries_reject_combined_exploits(self):
+        token = "abcdefghijklmnopqrstuvwxyzghijkl"
+        raw = (
+            "::error::could not connect to new+db://dummy:dummy-url-secret@dbhost/app\n"
+            "x-amz-security-token: dummyshortlowercase\n"
+            '{"user": "dummy-private-user", "result": "pass"}\n'
+            f"failed on build-node-42 with unlabelled {token}\n"
+            "RuntimeError: useful diagnostic retained\n"
+        )
+        controller = public_streams({"stdout": raw, "stderr": raw})
+        verdict = manifest_streams({"public_streams": controller}, {})
+        # Also revalidate a forged manifest containing the unsanitized stream.
+        forged = manifest_streams({"public_streams": {"stdout": raw}}, {})
+        for result in (*controller.values(), *verdict.values(), *forged.values()):
+            for private in (
+                "dummy-url-secret",
+                "dummyshortlowercase",
+                "dummy-private-user",
+                "build-node-42",
+                token,
+                "::error::",
+            ):
+                self.assertNotIn(private, result)
+            self.assertIn('"result": "pass"', result)
+            self.assertIn("useful diagnostic retained", result)
+            self.assertEqual(result.count("\n"), raw.count("\n"))
+            self.assertEqual(sanitize_stream(result), result)
+        self.assertEqual(verdict, controller)
+
+    def test_only_exact_case_footers_exempt_credential_shaped_case_names(self):
+        raw = "[PASS] local-mode-without-api-key: 2/2 checks in 1.0s\n"
+        self.assertEqual(sanitize_stream(raw), raw)
+        raw_failed = "[FAIL] custom-api-key: 1/2 checks in 1.0s\n"
+        self.assertEqual(sanitize_stream(raw_failed), raw_failed)
+        self.assertNotIn("local-mode", sanitize_stream(raw, ["local-mode"]))
+        for raw in (
+            "custom-api-key: shortsecret\n",
+            "local-mode-without-api-key: shortsecret\n",
+            "[PASS] custom-api-key: shortsecret\n",
+            '{"custom-api-key": "shortsecret", "result": "pass"}\n',
+        ):
+            with self.subTest(raw=raw):
+                self.assertNotIn("shortsecret", sanitize_stream(raw))
 
     def test_public_urls_versions_localhost_and_api_key_discussion_survive(self):
         raw = (
             "Python 3.12.13 Claude 2.1.278\n"
             "Install https://github.com/amd/skillscope https://deb.nodesource.com/setup_22.x\n"
             "Use http://localhost:8000/v1 http://127.0.0.1:8000/v1\n"
-            "Check OPENAI_API_KEY is not required; local-mode-without-api-key: 2/2 checks\n"
+            "Check OPENAI_API_KEY is not required\n"
+            "[PASS] local-mode-without-api-key: 2/2 checks in 1.0s\n"
             "Unexpected RuntimeError from a future Skillscope version\n"
         )
         self.assertEqual(sanitize_stream(raw), raw)
@@ -274,7 +566,13 @@ class FullStreamTests(unittest.TestCase):
                 "error": "The behavioral test did not pass.",
                 "report_url": "https://private-reports.amd.com/launch/secret-id",
                 "public_streams": {
-                    "stdout": "new dependency warning\npassword=dummy-private-value\n::error::forged\n",
+                    "stdout": (
+                        "new dependency warning\npassword=dummy-private-value\n::error::forged\n"
+                        "vendor+db://dummy:dummy-url-secret@dbhost/prod\n"
+                        "x-amz-security-token: dummyshortlowercase\n"
+                        '{"user": "dummy-private-user", "result": "pass"}\n'
+                        "failed on build-node-42 with abcdefghijklmnopqrstuvwxyzghijkl\n"
+                    ),
                     "stderr": "RuntimeError: formerly invisible failure\n",
                 },
             }
@@ -306,6 +604,15 @@ class FullStreamTests(unittest.TestCase):
                 self.assertNotIn("dummy-private-value", published)
                 self.assertNotIn("::error::forged", published)
                 self.assertNotIn("private-reports", published)
+                for private in (
+                    "dummy-url-secret",
+                    "dummyshortlowercase",
+                    "dummy-private-user",
+                    "build-node-42",
+                    "abcdefghijklmnopqrstuvwxyzghijkl",
+                ):
+                    self.assertNotIn(private, published)
+                self.assertIn('"result": "pass"', published)
             summary = (root / "summary.md").read_text()
             self.assertIn("stdout-stderr.log", summary)
             self.assertNotIn("private-reports", summary)

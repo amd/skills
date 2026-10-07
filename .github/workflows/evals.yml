@@ -17,9 +17,9 @@ on:
       - ".github/scripts/orchestrai_run.py"
       - ".github/scripts/orchestrai_logs.py"
       - ".github/scripts/orchestrai_stdout.py"
+      - ".github/scripts/orchestrai_readiness.py"
       - ".github/scripts/orchestrai_verdict.py"
-      - ".github/scripts/test_orchestrai_evals.py"
-      - ".github/scripts/test_orchestrai_stdout.py"
+      - ".github/scripts/test_orchestrai*.py"
       - "**/*.md"
   schedule:
     - cron: "0 12 * * 1"
@@ -380,6 +380,9 @@ jobs:
           # Same per-Ubuntu-release mapping used by Playbooks.  Keep it as a
           # secret here so its URLs are masked in this public repository's logs.
           ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON: ${{ secrets.ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON }}
+          # The shared Windows installer accepts an internal UNC or staged
+          # local source. Secret masking also covers Actions' env preamble.
+          ORCHESTRAI_WINDOWS_DRIVER_SOURCE: ${{ secrets.ORCHESTRAI_WINDOWS_DRIVER_SOURCE }}
           SOURCE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: >-
           python3 .github/scripts/build_orchestrai_plan.py

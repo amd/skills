@@ -157,6 +157,68 @@ def _linux_builds(config: dict, selected_os: set[str]) -> dict | None:
     }
 
 
+def _windows_builds(config: dict, selected_os: set[str]) -> dict | None:
+    """Keep the Playbooks Windows driver input in the private trigger body.
+
+    The graphics installer accepts UNC or locally staged sources, not download
+    URLs. Missing secrets are allowed while constructing mock plans; the live
+    controller requires this payload before it contacts the Portal.
+    """
+    if selected_os != {"Windows"}:
+        return None
+    source = os.environ.get("ORCHESTRAI_WINDOWS_DRIVER_SOURCE", "").strip()
+    if not source:
+        return None
+    if (
+        any(ord(character) < 32 for character in source)
+        or not re.fullmatch(
+            r'(?:\\\\[^\\/:*?"<>|\s]+\\[^\\/:*?"<>|]+(?:\\[^\\/:*?"<>|]+)*'
+            r'|[A-Za-z]:\\[^<>:"|?*]+)',
+            source.rstrip("\\"),
+        )
+        or any(part in {".", ".."} for part in source.split("\\"))
+    ):
+        raise SystemExit(
+            "ORCHESTRAI_WINDOWS_DRIVER_SOURCE must be a UNC or absolute local path"
+        )
+
+    provisioning = config.get("provisioning")
+    scripts = (
+        provisioning.get("windows_install_scripts")
+        if isinstance(provisioning, dict)
+        else None
+    )
+    if not isinstance(scripts, list) or not scripts:
+        raise SystemExit(
+            "provisioning.windows_install_scripts must be a non-empty list"
+        )
+    normalized_scripts = []
+    for item in scripts:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("script"), str)
+            or not re.fullmatch(r"InstallationScripts/[A-Za-z0-9._/-]+", item["script"])
+            or any(part in {".", ".."} for part in item["script"].split("/"))
+            or not isinstance(item.get("reboot_after"), bool)
+        ):
+            raise SystemExit("provisioning.windows_install_scripts is invalid")
+        normalized_scripts.append(
+            {"script": item["script"], "reboot_after": item["reboot_after"]}
+        )
+    if {
+        "script": "InstallationScripts/gfx/windows.ps1",
+        "reboot_after": True,
+    } not in normalized_scripts:
+        raise SystemExit(
+            "provisioning.windows_install_scripts requires the graphics installer "
+            "with reboot_after enabled"
+        )
+    return {
+        "vars": {"driver_source": source, "driver_copy": "direct"},
+        "install_scripts": normalized_scripts,
+    }
+
+
 def build_plan(args: argparse.Namespace) -> dict:
     _validate_source(args.repository, args.ref, args.sha)
     if not REF_RE.fullmatch(args.skillscope_ref) or args.skillscope_ref.startswith("-"):
@@ -228,6 +290,10 @@ def build_plan(args: argparse.Namespace) -> dict:
                 "SOURCE_SHA": args.sha.lower(),
                 "SOURCE_GITHUB_RUN_URL": args.source_run_url,
             }
+            if os_name == "Windows":
+                # The controller requires the adapter's safe readiness marker;
+                # an older Portal catalog must not silently pass this plan.
+                variables["SKILLS_WINDOWS_GPU_PREFLIGHT"] = "required"
             sessions.append(
                 {
                     "name": f"skills-{skill}-{os_name.lower()}",
@@ -261,7 +327,9 @@ def build_plan(args: argparse.Namespace) -> dict:
         "sessions": sessions,
         "run_settings": dict(run_settings),
     }
-    builds = _linux_builds(config, selected_os_names)
+    builds = _linux_builds(config, selected_os_names) or _windows_builds(
+        config, selected_os_names
+    )
     if builds:
         # This field is consumed only by orchestrai_run.py and is never included
         # in the public result artifacts or the persisted plan definition.

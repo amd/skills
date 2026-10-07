@@ -17,13 +17,24 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from orchestrai_logs import private_log_values, public_log_status, public_test_log
+from orchestrai_logs import (
+    GRADE_RE,
+    GRADER_ERROR_DIAGNOSTICS,
+    UNVERIFIED_BEHAVIORAL_DIAGNOSTIC,
+    behavioral_grading_error,
+    grader_lines,
+    private_log_values,
+    public_behavioral_summary,
+    public_log_status,
+    public_test_log,
+)
 from orchestrai_stdout import (
     MAX_STREAM_BYTES,
     public_commits,
     public_streams,
     stream_coverage,
 )
+from orchestrai_readiness import enforce_windows_readiness
 
 TERMINAL_PIPELINE_STATES = {
     "passed",
@@ -150,6 +161,37 @@ def require_linux_provisioning(plan: dict) -> None:
         )
 
 
+def require_windows_provisioning(plan: dict) -> None:
+    """Reject an unprovisioned live Windows session before any allocation."""
+    windows_requested = any(
+        str(session.get("os_image") or "").lower().startswith("windows")
+        or any(
+            isinstance(test, dict)
+            and (test.get("variables") or {}).get("SKILLS_OS") == "Windows"
+            for test in session.get("tests", [])
+        )
+        for session in plan.get("sessions", [])
+        if isinstance(session, dict)
+    )
+    if not windows_requested:
+        return
+    builds = plan.get("builds_json")
+    variables = builds.get("vars") if isinstance(builds, dict) else None
+    source = variables.get("driver_source") if isinstance(variables, dict) else None
+    if not isinstance(source, str) or not source.strip():
+        raise SystemExit("missing required secret(s): ORCHESTRAI_WINDOWS_DRIVER_SOURCE")
+    scripts = builds.get("install_scripts")
+    if (
+        variables.get("driver_copy") != "direct"
+        or not isinstance(scripts, list)
+        or {"script": "InstallationScripts/gfx/windows.ps1", "reboot_after": True}
+        not in scripts
+    ):
+        raise SystemExit(
+            "Windows graphics provisioning requires direct copy and a reboot"
+        )
+
+
 def build_run_request(plan: dict, plan_id: str) -> dict[str, Any]:
     """Return the private trigger body without logging or exporting it."""
     request: dict[str, Any] = {"plan_id": plan_id}
@@ -202,6 +244,16 @@ def classify_behavioral_test_output(test: dict[str, Any]) -> str:
     ).lower()
     if not output.strip():
         return ""
+
+    if diagnostic := behavioral_grading_error(test):
+        return diagnostic
+    for line in grader_lines(test):
+        if line == "FAIL: Windows AMD display readiness query failed":
+            return "The Windows AMD display readiness query failed."
+        if line == "FAIL: Windows AMD display adapter is missing":
+            return "The Windows AMD display adapter was missing."
+        if line == "FAIL: Windows AMD display adapter or driver is unhealthy":
+            return "The Windows AMD display adapter or driver was unhealthy."
 
     if "skillscope setup artifacts are missing" in output:
         return "Skillscope setup artifacts were missing on the test machine."
@@ -346,7 +398,19 @@ def classify_behavioral_test_output(test: dict[str, Any]) -> str:
         ):
             return "The Claude Code process crashed before returning a result."
         return "The Claude agent did not return a usable result."
-    if "[fail]" in output and " checks in " in output:
+    # Expectation failures require a verdict. A failing case footer alone
+    # cannot tell a negative verdict from a v0.1.3 judge outage.
+    evidence = public_behavioral_summary(
+        {"skill": "", "public_log": public_test_log(test, skill="")}
+    )
+    if evidence.get("ungraded") or evidence.get("grading_errors"):
+        return UNVERIFIED_BEHAVIORAL_DIAGNOSTIC
+    if evidence.get("unmet"):
+        return "One or more behavioral expectations were not met."
+    if any(
+        (grade := GRADE_RE.fullmatch(line)) and grade[1] == "FAIL"
+        for line in grader_lines(test)
+    ):
         return "One or more behavioral expectations were not met."
     return ""
 
@@ -667,7 +731,7 @@ def resolve_stock_os_images(plan: dict, client: PortalClient) -> None:
         log(f"resolved {requested} to an available stock image")
 
 
-def expected_items(plan: dict) -> list[dict[str, str]]:
+def expected_items(plan: dict) -> list[dict[str, Any]]:
     """Return the stable skill/OS identity expected from every plan session."""
     items = []
     names: set[str] = set()
@@ -697,7 +761,18 @@ def expected_items(plan: dict) -> list[dict[str, str]]:
             raise ValueError(f"plan contains duplicate skill/OS identity: {identity!r}")
         names.add(name)
         identities.add(identity)
-        items.append({"session": name, "skill": skill, "os": os_name, "path": path})
+        item: dict[str, Any] = {
+            "session": name,
+            "skill": skill,
+            "os": os_name,
+            "path": path,
+        }
+        if (
+            os_name == "Windows"
+            and variables.get("SKILLS_WINDOWS_GPU_PREFLIGHT") == "required"
+        ):
+            item["gpu_preflight_required"] = True
+        items.append(item)
     return items
 
 
@@ -850,6 +925,7 @@ def build_results_manifest(
             test, skill=expected["skill"], private_values=private_values
         )
         item["public_log_status"] = public_log_status(test, item["public_log"])
+        behavioral_diagnostic = classify_behavioral_test_output(test)
         raw_status = safe_status(test.get("status"), SAFE_TEST_STATES)
         item["duration"] = safe_duration(test.get("duration"))
         item["terminal"] = (
@@ -871,6 +947,12 @@ def build_results_manifest(
                     failure_summary[-1],
                 )
                 item["error"] += f" infrastructure: {cause}"
+        elif (
+            behavioral_diagnostic in GRADER_ERROR_DIAGNOSTICS
+            or behavioral_diagnostic == UNVERIFIED_BEHAVIORAL_DIAGNOSTIC
+        ):
+            item["status"] = "error"
+            item["error"] = behavioral_diagnostic
         elif raw_status in PASS_TEST_STATES and session_status in PASS_SESSION_STATES:
             item["status"] = "passed"
         elif raw_status in PASS_TEST_STATES:
@@ -884,9 +966,17 @@ def build_results_manifest(
             )
             item["error"] = (
                 classify_launcher_failure(session.get("error") or test.get("error"), "")
-                or classify_behavioral_test_output(test)
+                or behavioral_diagnostic
                 or "The behavioral test did not pass."
             )
+            if (
+                behavioral_diagnostic
+                and behavioral_diagnostic
+                != "One or more behavioral expectations were not met."
+            ):
+                item["status"] = "error"
+                item["error"] = behavioral_diagnostic
+        enforce_windows_readiness(item, test)
         items.append(item)
 
     return {
@@ -1375,6 +1465,7 @@ def main() -> int:
         return 0
 
     require_linux_provisioning(plan)
+    require_windows_provisioning(plan)
 
     required = (
         "ORCHESTRAI_PORTAL_URL",

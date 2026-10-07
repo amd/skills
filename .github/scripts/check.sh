@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Every check that runs no agent, clones nothing, and spends no tokens: each
-# skill's structure and eval dataset, the references our markdown makes, the
+# Local checks that run no agent and spend no inference tokens: OrchestrAI unit
+# tests, each skill's structure and eval dataset, markdown references, the
 # federation file, and the generated plugin manifests.
 #
 # The skill checks are skillscope (https://github.com/amd/skillscope), pinned
-# to the same version .github/workflows/evals.yml grades this repo with, so a
-# green run here means the same thing CI's `results` check does. The rest is
-# this repo's own.
+# to the same version .github/workflows/evals.yml grades this repo with. These
+# checks cover CI's local validation; they do not establish that routing or
+# behavioral evaluations passed on hardware.
 #
 # Usage:
 #   ./.github/scripts/check.sh              Validate every skill, dataset, and manifest.
 #   ./.github/scripts/check.sh --external   Also fetch every external URL our markdown links to.
 #   ./.github/scripts/check.sh -h|--help    Print this help.
 #
-# Requires `uv` (https://github.com/astral-sh/uv).
+# Requires Python 3.10+ and `uv` (https://github.com/astral-sh/uv).
 
 set -euo pipefail
 
@@ -56,6 +56,7 @@ case "${1:-}" in
     ;;
 esac
 
+python3 -m unittest discover -s .github/scripts -p 'test_orchestrai*.py'
 "${SKILLSCOPE[@]}" structural "${SKILLSCOPE_ARGS[@]}"
 uv run .github/scripts/federate_skills.py --check-catalog
 uv run .github/scripts/validate_marketplace.py

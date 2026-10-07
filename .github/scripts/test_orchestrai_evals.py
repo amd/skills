@@ -603,7 +603,7 @@ class TriggerTests(unittest.TestCase):
             ),
             (
                 "[FAIL] generate-cat-image: 5/7 checks in 120.0s",
-                "One or more behavioral expectations were not met.",
+                "The behavioral result could not be verified.",
             ),
         )
         for output, expected in cases:
@@ -618,8 +618,10 @@ class TriggerTests(unittest.TestCase):
         self,
     ) -> None:
         private_output = (
-            "token=super-secret private-host.example /private/workspace\\n"
-            "[FAIL] generate-cat-image: 5/7 checks in 120.0s"
+            "token=super-secret private-host.example /private/workspace\n"
+            "[PASS] (files_exist) out.png\n"
+            "[FAIL] (expected_behavior) Produce image -- llm_judge: No image was produced.\n"
+            "[FAIL] generate-cat-image: 1/2 checks in 120.0s"
         )
         live = {
             "launcher": {
@@ -902,7 +904,7 @@ class TriggerTests(unittest.TestCase):
         client.request.side_effect = [
             RuntimeError("HTTP 404 private payload"),
             "",
-            "dependency token=secret\n[FAIL] (expected_behavior) cat image was not produced\n[FAIL] generate-cat-image: 5/7 checks in 20s\n",
+            "dependency token=secret\n[FAIL] (expected_behavior) cat image was not produced -- llm_judge: No image was produced.\n[FAIL] generate-cat-image: 0/1 checks in 20s\n",
         ]
         with (
             mock.patch.object(orchestrai_run.time, "sleep") as sleep,
@@ -1501,6 +1503,15 @@ class TriggerTests(unittest.TestCase):
         self, *, cleanup_confirmed: bool, late_report: bool = False
     ) -> None:
         plan = reporting_plan()
+        plan["builds_json"] = {
+            "vars": {
+                "driver_source": "https://fixture.example/driver.zip",
+                "driver_copy": "direct",
+            },
+            "install_scripts": [
+                {"script": "InstallationScripts/gfx/windows.ps1", "reboot_after": True}
+            ],
+        }
         snapshots = []
         for windows_session, windows_test in (
             ("queued", "queued"),
@@ -1693,7 +1704,7 @@ class PublicLogTests(unittest.TestCase):
         self.assertIn("| `expected_behavior` | 21 | 20 | 1 | 95% |", rendered)
         self.assertIn("| 67% | 95% |", rendered)
 
-    def test_redacted_checks_are_excluded_from_type_rates(self) -> None:
+    def test_redacted_checks_preserve_verdict_state_in_type_rates(self) -> None:
         raw = "\n".join(
             [
                 "[behavioral] local-ai-use: 1 case(s)",
@@ -1711,14 +1722,18 @@ class PublicLogTests(unittest.TestCase):
         }
         summary = orchestrai_logs.public_behavioral_summary(item)
         self.assertEqual(
-            summary["expectation_kinds"], {"files_exist": {"graded": 1, "met": 1}}
+            summary["expectation_kinds"],
+            {
+                "files_exist": {"graded": 1, "met": 1},
+                "expected_behavior": {"graded": 0, "met": 0, "ungraded": 1},
+            },
         )
         text = orchestrai_logs.expectation_breakdown_markdown(
             [summary], heading="### Types"
         )
-        self.assertIn("Redacted, missing, or unassigned checks are excluded", text)
+        self.assertIn("Missing or unassigned checks are excluded", text)
         self.assertNotIn("private-secret", text)
-        self.assertNotIn("| `expected_behavior` |", text)
+        self.assertIn("| `expected_behavior` | 0 | 0 | 0 | 1 | Not reported |", text)
 
     def test_ambiguous_case_block_does_not_manufacture_type_rates(self) -> None:
         item = {
@@ -1929,8 +1944,9 @@ class PublicLogTests(unittest.TestCase):
         self.assertEqual(summary["passed"], 0)
         self.assertTrue(summary["complete"])
         rendered = orchestrai_logs.behavioral_summary_markdown(item)
-        self.assertIn("| `generate-image` | withheld |", rendered)
+        self.assertIn("| `generate-image` | expected_behavior |", rendered)
         self.assertIn("| `restart-server` | error |", rendered)
+        self.assertIn("Ungraded expectations / run errors", rendered)
         self.assertNotIn("private-secret", rendered)
         self.assertNotIn("private-host", rendered)
 
@@ -2051,7 +2067,7 @@ class PublicLogTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, encoded)
         self.assertIn(
-            "[REDACTED: credential-related grader output; inspect the redacted test log]",
+            "[ERROR] (expected_behavior) [details redacted] -- The behavioral result could not be verified.",
             lines,
         )
 
@@ -2649,7 +2665,8 @@ class VerdictTests(unittest.TestCase):
             summary = json.loads(
                 (output_dir / "summary.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(summary["failed"], 1)
+            self.assertEqual(summary["failed"], 0)
+            self.assertEqual(summary["errors"], 1)
             self.assertEqual(summary["status"], "error")
             self.assertNotIn(str(Path(temp) / "missing.json"), summary["error"])
 
@@ -2900,7 +2917,7 @@ class ReportTests(unittest.TestCase):
             ],
             rows=rows,
         )
-        self.assertIn("1 failed, 1 passed", rendered)
+        self.assertIn("1 error, 1 passed", rendered)
         self.assertIn("no per-skill result artifact was published", rendered)
         self.assertIn("stdout-stderr.log", rendered)
         self.assertNotIn("reports.example", rendered)
@@ -3050,6 +3067,434 @@ class ReportTests(unittest.TestCase):
         )[0]
         self.assertIn("!cancelled()", verdict)
         self.assertNotIn("needs.orchestrai-behavioral.result == 'success'", verdict)
+
+
+class GradingRegressionTests(unittest.TestCase):
+    @staticmethod
+    def output(detail: str, *, kind: str = "unexpected_behavior") -> str:
+        lines = ["[behavioral] local-ai-use: 1 case(s)"]
+        lines.extend(
+            f"[PASS] (expected_behavior) Check {index} -- llm_judge: Observed."
+            for index in range(1, 7)
+        )
+        lines.extend(
+            [
+                f"[FAIL] ({kind}) Run a prohibited benchmark -- {detail}",
+                "[FAIL] mixed-case: 6/7 checks in 12s",
+                "0/1 cases passed (6/7 individual expectations) on opus (effort high).",
+            ]
+        )
+        return "\n".join(lines)
+
+    @staticmethod
+    def manifest(output: str, *, status: str = "failed") -> dict:
+        plan = {"sessions": reporting_plan()["sessions"][:1]}
+        live = {
+            "launcher": {
+                "sessions": [
+                    {
+                        "name": "skills-local-ai-use-linux",
+                        "status": status,
+                        "tests": [
+                            {
+                                "path": "L4-sys/skills/linux/sys_func-skills_behavioral",
+                                "status": status,
+                                "stdout": output,
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+        return orchestrai_run.build_results_manifest(
+            plan, live, mode="live", pipeline_status="unstable", tests_status=status
+        )
+
+    def test_exact_grader_outages_fail_the_gate_without_behavioral_blame(self) -> None:
+        for detail, diagnostic in (
+            (
+                "llm_judge skipped: 'claude' CLI not on PATH",
+                "The behavioral grader was unavailable.",
+            ),
+            ("llm_judge timed out after 180s", "The behavioral grader timed out."),
+            (
+                "llm_judge gave no JSON verdict: 'Prompt is too long'",
+                "The behavioral grader exceeded the gateway context limit.",
+            ),
+            (
+                "llm_judge gave no JSON verdict: 'API Error: Connection dropped (ECONNRESET)'",
+                "The behavioral grader lost connectivity to the LLM gateway.",
+            ),
+            (
+                "llm_judge gave no JSON verdict: 'invalid reply'",
+                "The behavioral grader did not return a usable JSON verdict.",
+            ),
+        ):
+            for kind in ("expected_behavior", "unexpected_behavior"):
+                with self.subTest(detail=detail, kind=kind):
+                    manifest = self.manifest(self.output(detail, kind=kind))
+                    item, _, ok = orchestrai_verdict.evaluate(
+                        manifest, skill="local-ai-use", os_name="Linux"
+                    )
+                    self.assertFalse(ok)
+                    self.assertEqual(item["status"], "error")
+                    self.assertEqual(item["error"], diagnostic)
+                    evidence = orchestrai_logs.public_behavioral_summary(item)
+                    self.assertEqual(
+                        (
+                            evidence["met"],
+                            evidence["graded"],
+                            evidence["ungraded"],
+                            evidence["expectations"],
+                        ),
+                        (6, 6, 1, 7),
+                    )
+                    self.assertEqual(evidence["unmet"], [])
+                    self.assertEqual(evidence["case_results"][0]["status"], "error")
+                    self.assertTrue(evidence["complete"])
+                    self.assertNotIn("[FAIL] (", "\n".join(item["public_log"]))
+
+    def test_controller_to_verdict_command_to_aggregate_keeps_error_counts(
+        self,
+    ) -> None:
+        manifest = self.manifest(
+            self.output("llm_judge gave no JSON verdict: 'Prompt is too long'")
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            results = root / "results.json"
+            results.write_text(json.dumps(manifest), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "orchestrai_verdict.py"),
+                    "--results",
+                    str(results),
+                    "--skill",
+                    "local-ai-use",
+                    "--os",
+                    "Linux",
+                    "--output-dir",
+                    str(root / "test-results"),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=isolated_subprocess_env(GITHUB_STEP_SUMMARY=str(root / "step.md")),
+            )
+            self.assertEqual(completed.returncode, 1)
+            document = json.loads((root / "test-results" / "summary.json").read_text())
+            self.assertEqual(
+                (
+                    document["total_tests"],
+                    document["passed"],
+                    document["failed"],
+                    document["errors"],
+                ),
+                (1, 0, 0, 1),
+            )
+            self.assertEqual(document["behavioral"]["ungraded"], 1)
+            rows = orchestrai_report._load_rows(root)
+            aggregate = orchestrai_report.render(
+                expected=[("local-ai-use", "Linux")], rows=rows
+            )
+            for output in (completed.stdout, (root / "step.md").read_text(), aggregate):
+                self.assertIn("6/6 graded", output)
+                self.assertIn("1 ungraded", output)
+                self.assertIn("grader exceeded the gateway context limit", output)
+                self.assertNotIn(
+                    "One or more behavioral expectations were not met", output
+                )
+                self.assertNotIn("❌ failed |", output)
+            self.assertIn("| `error` | 1 |", aggregate)
+            self.assertIn("test failures: 0 · execution errors: 1", aggregate)
+            self.assertTrue((root / "test-results" / "stdout-stderr.log").exists())
+            self.assertTrue((root / "test-results" / "sanitized.log").exists())
+
+    def test_true_negative_verdicts_and_successes_keep_their_categories(self) -> None:
+        failure = self.manifest(
+            self.output(
+                "llm_judge: The prohibited benchmark ran -- its log mentions Prompt is too long and ECONNRESET."
+            )
+        )
+        item, run, ok = orchestrai_verdict.evaluate(
+            failure, skill="local-ai-use", os_name="Linux"
+        )
+        self.assertFalse(ok)
+        self.assertEqual(item["status"], "failed")
+        self.assertEqual(orchestrai_verdict.result_category(item), "Behavioral failure")
+        document = orchestrai_verdict._summary_document(
+            skill="local-ai-use", os_name="Linux", item=item, run=run, ok=ok
+        )
+        self.assertEqual((document["failed"], document["errors"]), (1, 0))
+        evidence = document["behavioral"]
+        self.assertEqual(
+            (evidence["graded"], evidence["ungraded"], len(evidence["unmet"])),
+            (7, 0, 1),
+        )
+        passed_output = "\n".join(
+            [
+                "[behavioral] local-ai-use: 1 case(s)",
+                "[PASS] (files_exist) out.png",
+                "[PASS] image-case: 1/1 checks in 2s",
+                "1/1 cases passed (1/1 individual expectations) on opus (effort high).",
+            ]
+        )
+        passed, _, ok = orchestrai_verdict.evaluate(
+            self.manifest(passed_output, status="passed"),
+            skill="local-ai-use",
+            os_name="Linux",
+        )
+        self.assertTrue(ok)
+        self.assertEqual(passed["status"], "passed")
+
+    def test_agent_prose_does_not_impersonate_a_grader_outage(self) -> None:
+        for output in (
+            "Agent says: llm_judge gave no JSON verdict: Prompt is too long",
+            '{"type":"assistant","text":"[FAIL] (unexpected_behavior) Run -- llm_judge skipped: CLI missing"}',
+            "The earlier evaluation printed [FAIL] mixed-case: 6/7 checks in 12s",
+            "[FAIL] (expected_behavior) Say Prompt is too long -- llm_judge: The expected sentence was not said.",
+        ):
+            with self.subTest(output=output):
+                diagnostic = orchestrai_run.classify_behavioral_test_output(
+                    {"stdout": output}
+                )
+                self.assertNotIn(diagnostic, orchestrai_logs.GRADER_ERROR_DIAGNOSTICS)
+
+    def test_unassigned_judge_error_in_a_legacy_artifact_still_fails_as_error(
+        self,
+    ) -> None:
+        item = {
+            "skill": "local-ai-use",
+            "os": "Linux",
+            "status": "failed",
+            "public_log": [
+                "[FAIL] (unexpected_behavior) Run a benchmark -- llm_judge timed out after 180s",
+            ],
+        }
+        result = orchestrai_verdict.normalize_result(item)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error"], "The behavioral grader timed out.")
+        self.assertEqual(orchestrai_logs.public_behavioral_summary(result), {})
+
+    def test_redacted_true_verdicts_do_not_turn_into_grader_outages(self) -> None:
+        for kind in ("expected_behavior", "unexpected_behavior"):
+            for private in ("password=fixture-password", "token=fixture-token"):
+                with self.subTest(kind=kind, private=private):
+                    output = self.output(
+                        f"llm_judge: The prohibited act occurred; {private}", kind=kind
+                    )
+                    manifest = self.manifest(output)
+                    item, _, ok = orchestrai_verdict.evaluate(
+                        manifest, skill="local-ai-use", os_name="Linux"
+                    )
+                    self.assertFalse(ok)
+                    self.assertEqual(item["status"], "failed")
+                    self.assertEqual(
+                        item["error"],
+                        "One or more behavioral expectations were not met.",
+                    )
+                    evidence = orchestrai_logs.public_behavioral_summary(item)
+                    self.assertEqual(
+                        (evidence["met"], evidence["graded"], evidence["ungraded"]),
+                        (6, 7, 0),
+                    )
+                    self.assertEqual(len(evidence["unmet"]), 1)
+                    self.assertEqual(
+                        orchestrai_verdict.normalize_result(item)["status"], "failed"
+                    )
+                    report = orchestrai_report.render(
+                        expected=[("local-ai-use", "Linux")],
+                        rows={("local-ai-use", "Linux"): item},
+                    )
+                    self.assertIn("| `failed` | 1 |", report)
+                    self.assertIn("Behavioral failure", report)
+                    self.assertNotIn(private, json.dumps(manifest) + report)
+
+    def test_contradicted_pass_footer_never_counts_as_a_passed_case(self) -> None:
+        output = "\n".join(
+            [
+                "[behavioral] local-ai-use: 1 case(s)",
+                "[FAIL] (unexpected_behavior) Run a benchmark -- llm_judge timed out after 180s",
+                "[PASS] mixed-case: 1/1 checks in 2s",
+                "1/1 cases passed (1/1 individual expectations) on opus (effort high).",
+            ]
+        )
+        item, _, ok = orchestrai_verdict.evaluate(
+            self.manifest(output, status="passed"),
+            skill="local-ai-use",
+            os_name="Linux",
+        )
+        self.assertFalse(ok)
+        self.assertEqual(item["status"], "error")
+        evidence = orchestrai_logs.public_behavioral_summary(item)
+        self.assertEqual(
+            (
+                evidence["passed"],
+                evidence["met"],
+                evidence["graded"],
+                evidence["ungraded"],
+            ),
+            (0, 0, 0, 1),
+        )
+        self.assertFalse(evidence["complete"])
+        self.assertEqual(evidence["case_results"][0]["status"], "error")
+
+    def test_missing_or_unparseable_verdicts_are_ungraded_in_legacy_artifacts(
+        self,
+    ) -> None:
+        for grade in (
+            "[FAIL] (unexpected_behavior) Run a benchmark",
+            "[FAIL] (unexpected_behavior) Run a benchmark -- llm_judge:",
+            "[FAIL] (unknown_kind) Run a benchmark -- private details",
+            "unparseable expectation record",
+        ):
+            with self.subTest(grade=grade):
+                item = {
+                    "skill": "local-ai-use",
+                    "os": "Linux",
+                    "status": "failed",
+                    "public_log": [
+                        "[PASS] (files_exist) out.png",
+                        grade,
+                        "[FAIL] mixed-case: 1/2 checks in 2s",
+                    ],
+                }
+                result = orchestrai_verdict.normalize_result(item)
+                self.assertEqual(result["status"], "error")
+                evidence = orchestrai_logs.public_behavioral_summary(result)
+                self.assertEqual(evidence["unmet"], [])
+                self.assertEqual(evidence["ungraded"], 1)
+                report = orchestrai_report.render(
+                    expected=[("local-ai-use", "Linux")],
+                    rows={("local-ai-use", "Linux"): item},
+                )
+                self.assertIn("| `error` | 1 |", report)
+                self.assertNotIn("Additional unmet expectations", report)
+
+    def test_malformed_manifest_types_publish_complete_error_artifacts(self) -> None:
+        good_item = {"skill": "local-ai-use", "os": "Linux", "status": "passed"}
+        malformed = [
+            [],
+            {"items": 5},
+            {"items": {}},
+            {"items": None},
+            {"items": [5]},
+            {"items": [good_item], "run": 5},
+            {"items": [good_item], "run": []},
+            {"items": [good_item], "run": None},
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for index, manifest in enumerate(malformed):
+                with self.subTest(manifest=manifest):
+                    results = root / f"results-{index}.json"
+                    results.write_text(json.dumps(manifest), encoding="utf-8")
+                    output_dir = root / f"output-{index}"
+                    step = root / f"step-{index}.md"
+                    completed = subprocess.run(
+                        [
+                            sys.executable,
+                            str(SCRIPTS / "orchestrai_verdict.py"),
+                            "--results",
+                            str(results),
+                            "--skill",
+                            "local-ai-use",
+                            "--os",
+                            "Linux",
+                            "--output-dir",
+                            str(output_dir),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        env=isolated_subprocess_env(GITHUB_STEP_SUMMARY=str(step)),
+                    )
+                    self.assertEqual(completed.returncode, 1)
+                    self.assertNotIn("Traceback", completed.stderr)
+                    summary = json.loads((output_dir / "summary.json").read_text())
+                    self.assertEqual(
+                        (summary["status"], summary["failed"], summary["errors"]),
+                        ("error", 0, 1),
+                    )
+                    self.assertTrue(step.exists())
+                    self.assertTrue((output_dir / "stdout-stderr.log").exists())
+                    self.assertTrue((output_dir / "sanitized.log").exists())
+
+    def test_every_terminal_verdict_has_one_consistent_counter(self) -> None:
+        for status, counter in (
+            ("passed", "passed"),
+            ("failed", "failed"),
+            ("error", "errors"),
+            ("skipped", "skipped"),
+            ("cancelled", "cancelled"),
+            ("aborted", "aborted"),
+            ("missing", "unverified"),
+            ("unknown", "unverified"),
+        ):
+            with self.subTest(status=status):
+                document = orchestrai_verdict._summary_document(
+                    skill="local-ai-use",
+                    os_name="Linux",
+                    item={"status": status},
+                    run={},
+                    ok=status == "passed",
+                )
+                self.assertEqual(document[counter], 1)
+                self.assertEqual(
+                    sum(
+                        document[key]
+                        for key in (
+                            "passed",
+                            "failed",
+                            "errors",
+                            "skipped",
+                            "cancelled",
+                            "aborted",
+                            "unverified",
+                        )
+                    ),
+                    document["total_tests"],
+                )
+
+    def test_structured_logs_redact_database_credentials_headers_and_hosts(
+        self,
+    ) -> None:
+        for scheme in (
+            "postgres",
+            "mysql",
+            "mongodb",
+            "redis",
+            "amqp",
+            "sftp",
+            "custom+db",
+        ):
+            line = f"[FAIL] (logs_contain) Connection -- {scheme}://admin:p4ssword@build-node-42:5432/prod"
+            public = orchestrai_logs.public_test_log(
+                {"stdout": line}, skill="local-ai-use"
+            )
+            self.assertNotIn("p4ssword", "\n".join(public))
+            self.assertNotIn("build-node-42", "\n".join(public))
+            escaped = line.replace("://", r":\/\/")
+            self.assertNotIn(
+                "p4ssword",
+                "\n".join(
+                    orchestrai_logs.public_test_log(
+                        {"stdout": escaped}, skill="local-ai-use"
+                    )
+                ),
+            )
+        line = "[FAIL] (logs_contain) Headers -- X-Amz-Security-Token: abcdefghijklmnopqrstuvwxyzabcdef"
+        self.assertNotIn(
+            "abcdefghijklmnopqrstuvwxyzabcdef",
+            "\n".join(
+                orchestrai_logs.public_test_log({"stdout": line}, skill="local-ai-use")
+            ),
+        )
+        self.assertNotIn(
+            "build-node-42",
+            orchestrai_logs.redact_grader_text("runner build-node-42 unavailable"),
+        )
 
 
 if __name__ == "__main__":

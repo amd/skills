@@ -21,6 +21,7 @@ from orchestrai_verdict import (
     _safe_error,
     _safe_status,
     log_coverage,
+    normalize_result,
     public_controller_state,
     result_category,
 )
@@ -95,12 +96,14 @@ def render(
         skill = skill if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,127}", skill) else "unknown"
         os_name = os_name if os_name in {"Linux", "Windows"} else "unknown"
         rendered_rows.append(
-            {
-                **value,
-                "skill": skill,
-                "os": os_name,
-                "status": _safe_status(value.get("status")),
-            }
+            normalize_result(
+                {
+                    **value,
+                    "skill": skill,
+                    "os": os_name,
+                    "status": _safe_status(value.get("status")),
+                }
+            )
         )
 
     passed = sum(
@@ -109,13 +112,20 @@ def render(
     mocked = sum(
         str(row.get("status") or "").lower() == "mock" for row in rendered_rows
     )
-    failed = len(rendered_rows) - passed - mocked
-    if rendered_rows and failed == 0 and mocked == 0:
+    failed = sum(row["status"] == "failed" for row in rendered_rows)
+    errors = sum(row["status"] == "error" for row in rendered_rows)
+    unverified = len(rendered_rows) - passed - mocked - failed - errors
+    if rendered_rows and failed == errors == unverified == mocked == 0:
         headline = f"✅ {passed} passed"
-    elif rendered_rows and failed == 0:
+    elif rendered_rows and failed == errors == unverified == 0:
         headline = f"🧪 {mocked} plan-only, {passed} passed"
     elif rendered_rows:
-        headline = f"❌ {failed} failed, {passed} passed"
+        counts = (
+            ([f"{failed} failed"] if failed else [])
+            + ([f"{errors} error{'s' if errors != 1 else ''}"] if errors else [])
+            + ([f"{unverified} unverified"] if unverified else [])
+        )
+        headline = "❌ " + ", ".join([*counts, f"{passed} passed"])
     else:
         headline = "ℹ️ no Strix behavioral tests selected"
 
@@ -212,10 +222,17 @@ def render(
                     summary["expectations"] for summary in skill_summaries
                 )
                 met_checks = sum(summary["met"] for summary in skill_summaries)
+                graded_checks = sum(summary["graded"] for summary in skill_summaries)
+                ungraded_checks = sum(
+                    summary["ungraded"] for summary in skill_summaries
+                )
+                error_cases = sum(summary["errors"] for summary in skill_summaries)
                 cases = f"{passed_cases}/{total_cases}"
                 checks = f"{met_checks}/{total_checks}"
-                case_rate = observed_rate(passed_cases, total_cases)
-                check_rate = observed_rate(met_checks, total_checks)
+                if ungraded_checks:
+                    checks = f"{met_checks}/{graded_checks} graded; {ungraded_checks} ungraded"
+                case_rate = observed_rate(passed_cases, total_cases - error_cases)
+                check_rate = observed_rate(met_checks, graded_checks)
             else:
                 cases = checks = case_rate = check_rate = "Not reported"
             complete_skill = sum(
@@ -235,9 +252,16 @@ def render(
             ]
         )
     if known:
+        ungraded = sum(s["ungraded"] for s in known)
+        expectation_counts = f"{sum(s['met'] for s in known)}/{sum(s['expectations'] for s in known)} met"
+        if ungraded:
+            expectation_counts = f"{sum(s['met'] for s in known)}/{sum(s['graded'] for s in known)} graded met · {ungraded} ungraded"
+        case_counts = f"**Observed graded cases:** {sum(s['passed'] for s in known)}/{sum(s['cases'] for s in known)} passed"
+        if case_errors := sum(s["errors"] for s in known):
+            case_counts = f"**Recorded cases:** {sum(s['passed'] for s in known)} passed · {sum(s['failed'] for s in known)} failed · {case_errors} errors"
         lines.extend(
             [
-                f"**Observed graded cases:** {sum(s['passed'] for s in known)}/{sum(s['cases'] for s in known)} passed · **expectations:** {sum(s['met'] for s in known)}/{sum(s['expectations'] for s in known)} met.",
+                f"{case_counts} · **expectations:** {expectation_counts}.",
                 "",
             ]
         )
@@ -347,6 +371,8 @@ def render(
                 if summary
                 else "Not reported"
             )
+            if summary.get("ungraded"):
+                checks = f"{summary['met']}/{summary['graded']} graded; {summary['ungraded']} ungraded"
             if summary and not summary["complete"]:
                 cases += " (partial)"
                 checks += " (partial)"

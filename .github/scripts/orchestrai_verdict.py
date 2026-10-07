@@ -13,10 +13,18 @@ from typing import Any
 
 from orchestrai_logs import (
     behavioral_summary_markdown,
+    GRADER_ERROR_DIAGNOSTICS,
+    UNVERIFIED_BEHAVIORAL_DIAGNOSTIC,
+    behavioral_grading_error,
     public_behavioral_summary,
     public_manifest_log,
 )
 from orchestrai_stdout import manifest_streams, stream_coverage
+from orchestrai_readiness import (
+    READINESS_DIAGNOSTICS,
+    readiness_description,
+    safe_readiness,
+)
 
 SAFE_STATUSES = {
     "passed",
@@ -30,6 +38,11 @@ SAFE_STATUSES = {
     "unknown",
 }
 SAFE_BEHAVIORAL_DIAGNOSTICS = {
+    *GRADER_ERROR_DIAGNOSTICS,
+    *READINESS_DIAGNOSTICS.values(),
+    "The Windows AMD display readiness query failed.",
+    "The Windows AMD display adapter was missing.",
+    "The Windows AMD display adapter or driver was unhealthy.",
     "Skillscope setup artifacts were missing on the test machine.",
     "The checked-out skills commit did not match the requested commit.",
     "LLM gateway configuration was unavailable on the test machine.",
@@ -108,7 +121,11 @@ def _safe_error(value: object) -> str:
             "The OrchestrAI controller did not publish a result manifest; "
             "inspect the matching operating-system controller job."
         )
-    if "invalid result manifest" in lowered or "invalid run object" in lowered:
+    if (
+        "invalid result manifest" in lowered
+        or "result manifest has an invalid" in lowered
+        or "result manifest must be a json object" in lowered
+    ):
         return "The OrchestrAI controller published an invalid result manifest."
     if ("portal" in lowered or "controller" in lowered) and (
         "timed out" in lowered
@@ -157,8 +174,15 @@ def _safe_error(value: object) -> str:
 
 def result_category(item: dict) -> str:
     status = _safe_status(item.get("status"))
+    if (
+        status == "error"
+        and isinstance(item.get("error"), str)
+        and item["error"] in GRADER_ERROR_DIAGNOSTICS
+    ):
+        return "Grading error"
     if status == "error" and (
-        "result manifest" in _safe_error(item.get("error"))
+        item.get("error") == UNVERIFIED_BEHAVIORAL_DIAGNOSTIC
+        or "result manifest" in _safe_error(item.get("error"))
         or "OrchestrAI result" in _safe_error(item.get("error"))
         or "result artifacts" in str(item.get("error") or "")
         or item.get("error") == "no per-skill result artifact was published"
@@ -185,7 +209,12 @@ def log_coverage(item: dict) -> str:
     if _safe_status(item.get("status")) == "mock":
         return "Not run (plan-only)"
     if summary := public_behavioral_summary(item):
-        return "Complete case counts" if summary["complete"] else "Partial case counts"
+        coverage = (
+            "Complete case counts" if summary["complete"] else "Partial case counts"
+        )
+        return coverage + (
+            "; grading incomplete" if summary["errors"] or summary["ungraded"] else ""
+        )
     if public_manifest_log(item):
         return "Grader lines; totals unavailable"
     if item.get("public_log_status") == "no_recognized_lines":
@@ -250,6 +279,8 @@ def _write_step_summary(item: dict, run: dict, *, ok: bool, mock: bool) -> None:
         handle.write(f"| Result | `{html.escape(status)}` |\n")
         handle.write(f"| Result type | {result_category(item)} |\n")
         handle.write(f"| Public log coverage | {log_coverage(item)} |\n")
+        if readiness := readiness_description(item):
+            handle.write(f"| Windows GPU readiness | {readiness} |\n")
         controller = public_controller_state(run)
         if not mock and controller["pipeline_status"] != "unknown":
             handle.write(
@@ -303,6 +334,9 @@ def _write_job_log(item: dict, *, ok: bool, mock: bool) -> None:
     print(f"  Skill: {skill}")
     print(f"  OS: {os_name}")
     print(f"  Result: {status}")
+    print(f"  Result type: {result_category(item)}")
+    if readiness := readiness_description(item):
+        print(f"  Windows GPU readiness: {readiness}")
     if duration := _safe_duration(item.get("duration")):
         print(f"  Duration: {duration}")
     if error := _safe_error(item.get("error")):
@@ -330,8 +364,40 @@ def _write_job_log(item: dict, *, ok: bool, mock: bool) -> None:
         print(f"  Test stdout/stderr: {_log_unavailable_reason(item)}")
 
 
+def normalize_result(item: dict) -> dict:
+    """Revalidate grader evidence from both current and legacy artifacts."""
+    status = _safe_status(item.get("status"))
+    evidence = public_behavioral_summary(item)
+    error = item.get("error")
+    reported_grader_error = behavioral_grading_error(
+        {"stdout": "\n".join(public_manifest_log(item))}
+    )
+    known_grader_error = isinstance(error, str) and error in GRADER_ERROR_DIAGNOSTICS
+    if status in {"passed", "failed"} and (
+        known_grader_error
+        or reported_grader_error
+        or evidence.get("ungraded")
+        or evidence.get("grading_errors")
+    ):
+        status = "error"
+        if not known_grader_error:
+            error = reported_grader_error or next(
+                (
+                    check["detail"]
+                    for check in evidence["grading_errors"]
+                    if check["detail"] in GRADER_ERROR_DIAGNOSTICS
+                ),
+                UNVERIFIED_BEHAVIORAL_DIAGNOSTIC,
+            )
+    return {**item, "status": status, "error": error}
+
+
 def evaluate(manifest: dict, *, skill: str, os_name: str) -> tuple[dict, dict, bool]:
-    items = manifest.get("items") or []
+    if not isinstance(manifest, dict):
+        raise ValueError("OrchestrAI result manifest must be a JSON object")
+    items = manifest.get("items", [])
+    if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+        raise ValueError("OrchestrAI result manifest has an invalid items list")
     matches = [
         item
         for item in items
@@ -344,18 +410,19 @@ def evaluate(manifest: dict, *, skill: str, os_name: str) -> tuple[dict, dict, b
             f"expected exactly one verdict for {skill} on {os_name}, found {len(matches)}"
         )
     item = matches[0]
-    run = manifest.get("run") or {}
+    run = manifest.get("run", {})
     if not isinstance(run, dict):
         raise ValueError("OrchestrAI result manifest has an invalid run object")
-    status = _safe_status(item.get("status"))
-    item = {**item, "status": status}
-    return item, run, status in {"passed", "mock"}
+    item = normalize_result(item)
+    return item, run, item["status"] in {"passed", "mock"}
 
 
 def _summary_document(
     *, skill: str, os_name: str, item: dict[str, Any], run: dict, ok: bool
 ) -> dict:
+    item = normalize_result(item)
     status = _safe_status(item.get("status"))
+    ok = status in {"passed", "mock"}
     mock = status == "mock"
     duration = _safe_duration(item.get("duration"))
     error = _safe_error(item.get("error"))
@@ -371,8 +438,12 @@ def _summary_document(
         "status": status,
         "total_tests": 0 if mock else 1,
         "passed": 1 if ok and not mock else 0,
-        "failed": 0 if ok else 1,
-        "skipped": 0,
+        "failed": int(status == "failed"),
+        "errors": int(status == "error"),
+        "skipped": int(status == "skipped"),
+        "cancelled": int(status == "cancelled"),
+        "aborted": int(status == "aborted"),
+        "unverified": int(status in {"missing", "unknown"}),
         "duration": duration,
         "error": error,
         "results": [compact_item],
@@ -381,6 +452,8 @@ def _summary_document(
     document["stream_coverage"] = stream_coverage(
         manifest_streams(item, dict(os.environ))
     )
+    if readiness := safe_readiness(item):
+        document["readiness"] = readiness
     if lines := public_manifest_log(item):
         document["public_log"] = lines
         document["public_log_status"] = "available"
@@ -420,9 +493,23 @@ def main() -> int:
             ),
             encoding="utf-8",
         )
+    else:
+        (args.output_dir / "stdout-stderr.log").write_text(
+            "Test stdout/stderr was unavailable. "
+            + (
+                _safe_error(item.get("error"))
+                or "Inspect the controller job for context."
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     if lines := public_manifest_log(item):
         (args.output_dir / "sanitized.log").write_text(
             "\n".join(lines) + "\n", encoding="utf-8"
+        )
+    else:
+        (args.output_dir / "sanitized.log").write_text(
+            "No recognized grader summary was available.\n", encoding="utf-8"
         )
     _write_job_log(
         item,

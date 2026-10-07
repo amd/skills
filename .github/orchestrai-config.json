@@ -20,6 +20,12 @@
         "script": "InstallationScripts/gfx/linux.sh",
         "reboot_after": true
       }
+    ],
+    "windows_install_scripts": [
+      {
+        "script": "InstallationScripts/gfx/windows.ps1",
+        "reboot_after": true
+      }
     ]
   },
   "device_to_tags": {},

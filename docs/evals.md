@@ -26,8 +26,10 @@ from newer upstream commits that are absent from the tested PR head.
 
 For Strix behavioral runs, each GitHub skill/OS job includes a **Test stdout/stderr
 (redacted)** log group and a downloadable `stdout-stderr.log` in its
-`test-results-SKILL-OS` artifact. Every received test-output line is retained;
-publication does not depend on recognizing Skillscope's format. Each job also shows the case/expectation totals, model and
+`test-results-SKILL-OS` artifact. Received test output is retained subject to
+redaction and the transport bounds below; sensitive values, malformed credential
+fields, and control characters can be replaced or removed. Publication does not
+depend on recognizing Skillscope's format. Each job also shows the case/expectation totals, model and
 effort, and an **Unmet expectations** table with case IDs and sanitized judge
 explanations, outside the collapsed log group. The same overview appears in the
 job summary and aggregate report. These overviews are reconstructed from
@@ -57,7 +59,10 @@ show which checks passed and failed. Missing data is labeled rather than counted
 as a pass. Controller snapshots include parent-termination status without machine
 identities; confirmation is not an independent verification of machine release.
 Case timing excludes acquisition and adapter dependency setup, but includes
-in-case setup and agent work. These reporting details do not change the final CI gate.
+in-case setup and agent work. A judge timeout, missing verdict, or API error is
+an evaluation error, not evidence that the skill violated an expectation. Such
+checks are ungraded and excluded from expectation pass/fail rates. The requested
+evaluation still fails the final CI gate until grading completes successfully.
 
 Like the routing summary, the OrchestrAI behavioral report has **Verdict / Count /
 Meaning**, **By expectation type**, and **Per skill** tables. The behavioral
@@ -85,6 +90,45 @@ These reads do not replace completed test verdicts or
 logs with cancelled launcher snapshots. Summaries distinguish the pipeline
 and test snapshots before cleanup from the final parent state read after cleanup.
 Missing final metadata is reported explicitly without changing test grades.
+
+### Windows provisioning and readiness
+
+Windows provisioning follows the Playbooks contract. Store the internal driver
+source in the Actions secret `ORCHESTRAI_WINDOWS_DRIVER_SOURCE`. The existing
+provisioner accepts a supported internal share path or locally staged driver
+package containing `setup.exe`; this is not an arbitrary HTTP download setting.
+The controller sends `driver_source` and `driver_copy: direct` in the private
+provisioning request. It runs `InstallationScripts/gfx/windows.ps1` with
+`reboot_after: true`, so provisioning installs the driver and completes the reboot
+before the test adapter starts. A live Windows run requires this source before
+it allocates a machine. The source is never a public result field.
+
+The Windows adapter checks for a present AMD display device, a matching installed
+AMD driver, and an error-free device state before invoking Skillscope. Missing or
+unhealthy graphics hardware is a setup error. The controller requires evidence
+that this preflight ran; a catalog still using an older adapter cannot silently
+claim readiness. Successful preflight establishes driver health, not that an
+evaluation executed GPU kernels. GPU execution depends on the selected skill and
+its expectations. Unsupported-runtime and approval-only cases must not be
+interpreted as GPU workload coverage.
+
+### Local validation and control runners
+
+Run `.github/scripts/check.sh` for the same OrchestrAI unit-test discovery used
+by CI, followed by structural, federation, and plugin-manifest checks. The full
+repository unit suite is `python3 -m unittest discover -s .github/scripts -p
+'test_*.py'`; the OrchestrAI subset uses `test_orchestrai*.py`. Counts differ
+because these commands select different suites. Neither command runs routing
+agents or establishes behavioral hardware results.
+
+`ORCHESTRAI_CONTROL_RUNNER` chooses the routing and controller runner; the
+default is `ubuntu-latest`. Routing retains upstream's fork-PR behavior. When
+choosing a self-hosted runner, its owner must verify job isolation, replacement
+of the runner and its writable workspace between untrusted jobs, least-privilege
+network and service-account access, and the runner group's allowed repositories
+and workflows. Withheld pull-request secrets alone do not establish isolation.
+An ARC label does not prove these policies are configured; runner administration
+is a separate operational review from the OrchestrAI behavioral changes.
 
 The rest of this document is the dataset those stages read. You write one file, `evals/evals.json`, inside your skill folder. For a federated skill that folder lives in your product repo and is imported with the rest of the skill, so edit the dataset there; an edit made in this catalog is overwritten by the next import. Run `skillscope template` for a file to start from.
 
