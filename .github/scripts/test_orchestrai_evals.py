@@ -3032,7 +3032,7 @@ class ReportTests(unittest.TestCase):
         )
         self.assertNotIn("strix_halo", routing)
 
-    def test_workflow_uses_playbooks_orchestrai_runner_variables(self) -> None:
+    def test_workflow_uses_control_runner_only_for_privileged_work(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(
             encoding="utf-8"
         )
@@ -3046,10 +3046,8 @@ class ReportTests(unittest.TestCase):
             "runs-on: ${{ vars.ORCHESTRAI_CONTROL_RUNNER || 'ubuntu-latest' }}",
             controller,
         )
-        self.assertIn(
-            "runs-on: ${{ vars.ORCHESTRAI_WAIT_RUNNER || 'ubuntu-latest' }}",
-            verdict,
-        )
+        self.assertIn("runs-on: ubuntu-latest", verdict)
+        self.assertNotIn("ORCHESTRAI_WAIT_RUNNER", verdict)
 
     def test_skillscope_pin_uses_one_release_version(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(

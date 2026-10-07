@@ -20,8 +20,6 @@ from orchestrai_logs import ANSI_RE, CASE_RE, private_log_values, redact_private
 MAX_STREAM_BYTES = 16_000_000
 UNAVAILABLE = "[Test stream unavailable: transport limit exceeded.]"
 PUBLIC_DOMAINS = (
-    "github.com",
-    "githubusercontent.com",
     "githubassets.com",
     "nodejs.org",
     "nodesource.com",
@@ -39,6 +37,18 @@ PUBLIC_DOMAINS = (
     "gpuopen.com",
 )
 PUBLIC_AMD_HOSTS = {"amd.com", "www.amd.com", "rocm.docs.amd.com", "docs.amd.com"}
+# GitHub hosts serve private repositories and release assets too. Keep only
+# explicitly reviewed public projects, never a whole organization or CDN host.
+PUBLIC_GITHUB_PATHS = {
+    "github.com": (
+        "/amd/skills/", "/amd/skillscope/", "/lemonade-sdk/lemonade/",
+        "/astral-sh/uv/", "/nodejs/node/",
+    ),
+    "raw.githubusercontent.com": (
+        "/amd/skills/", "/amd/skillscope/", "/lemonade-sdk/lemonade/",
+    ),
+    "codeload.github.com": ("/amd/skills/", "/amd/skillscope/"),
+}
 # Any RFC scheme can carry userinfo, including database and vendor schemes.
 URL = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*:(?:\\?/){2}[^\s<>\"']+")
 PRIVATE_HOST = re.compile(
@@ -130,9 +140,23 @@ def _url(match: re.Match) -> str:
     try:
         # JSON may escape each slash without changing the URL's meaning.
         parsed = urlsplit(match[0].replace("\\/", "/"))
-        if not _public_host((parsed.hostname or "").lower()) or "@" in unquote(
-            parsed.netloc
-        ):
+        host = (parsed.hostname or "").lower()
+        if "@" in unquote(parsed.netloc) or parsed.scheme.lower() not in {"http", "https"}:
+            return "[PRIVATE URL REDACTED]"
+        if host in PUBLIC_GITHUB_PATHS:
+            path = parsed.path
+            for _ in range(3):
+                path = unquote(path)
+            if (
+                parsed.scheme.lower() != "https"
+                or parsed.port not in {None, 443}
+                or "\\" in path
+                or any(ord(char) < 32 for char in path)
+                or any(part in {".", ".."} for part in path.split("/"))
+                or not any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in PUBLIC_GITHUB_PATHS[host])
+            ):
+                return "[PRIVATE URL REDACTED]"
+        elif not _public_host(host):
             return "[PRIVATE URL REDACTED]"
         # Query strings/fragments may carry signed URLs, auth or tenant IDs.
         return match[0].split("?", 1)[0].split("#", 1)[0]

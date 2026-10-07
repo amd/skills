@@ -1,5 +1,9 @@
 # Skill Evaluation
 
+> Privileged evaluations are disabled by default pending administrator
+> setup. See the [security preview and rollout checklist](orchestrai-security.md).
+> A green offline preview is not a hardware or model-evaluation result.
+
 ## Testing Pipeline Overview
 
 A skill reaches the catalog after passing three review stages: an eligibility and compliance check, structural screening, and multi-stage agentic testing.
@@ -44,7 +48,10 @@ hierarchies. Fixed public adapter test paths remain visible. Only the tested
 skills commit and the checked-out Skillscope release commit are exempted from
 opaque-value masking; the workflow supplies these verified revisions to both
 redaction passes. Actor-supplied hash labels or allowlists cannot exempt secrets.
-Public package URLs, warnings, prompts and arbitrary errors remain visible.
+Reviewed public package URLs, warnings, prompts and arbitrary errors remain
+visible. GitHub URLs are limited to explicitly listed public projects, not a
+whole host or organization. Known-value masking includes case changes, common
+percent encoding and Base64 forms; it cannot cover arbitrary encodings.
 GitHub workflow-command sequences are neutralized. This covers test stdout/stderr,
 not raw control-plane consoles, hardware inventories or agent-transcript attachments.
 ReportPortal is not needed to read the published test logs; the shared private
@@ -124,7 +131,9 @@ because these commands select different suites. Neither command runs routing
 agents or establishes behavioral hardware results.
 
 `ORCHESTRAI_CONTROL_RUNNER` chooses the routing and controller runner; the
-default is `ubuntu-latest`. Routing retains upstream's fork-PR behavior. When
+default is `ubuntu-latest`. Privileged routing,
+OrchestrAI and Instinct jobs reject fork PRs and require protected Environments.
+Verdict/report jobs use `ubuntu-latest`, without internal-network access. When
 choosing a self-hosted runner, its owner must verify job isolation, replacement
 of the runner and its writable workspace between untrusted jobs, least-privilege
 network and service-account access, and the runner group's allowed repositories

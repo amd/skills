@@ -133,7 +133,12 @@ def _linux_builds(config: dict, selected_os: set[str]) -> dict | None:
         # A repaired line break can leave indentation inside the URL.
         parsed[release] = re.sub(r"\s+", "", value)
 
-    scripts = (config.get("provisioning") or {}).get("linux_install_scripts")
+    provisioning = config.get("provisioning")
+    scripts = (
+        provisioning.get("linux_install_scripts")
+        if isinstance(provisioning, dict)
+        else None
+    )
     if not isinstance(scripts, list) or not scripts:
         raise SystemExit("provisioning.linux_install_scripts must be a non-empty list")
     normalized_scripts = []
@@ -141,12 +146,22 @@ def _linux_builds(config: dict, selected_os: set[str]) -> dict | None:
         if (
             not isinstance(item, dict)
             or not isinstance(item.get("script"), str)
-            or not item["script"].startswith("InstallationScripts/")
+            or not re.fullmatch(r"InstallationScripts/[A-Za-z0-9._/-]+", item["script"])
+            or any(part in {"", ".", ".."} for part in item["script"].split("/"))
             or not isinstance(item.get("reboot_after"), bool)
         ):
             raise SystemExit("provisioning.linux_install_scripts is invalid")
         normalized_scripts.append(
             {"script": item["script"], "reboot_after": item["reboot_after"]}
+        )
+
+    if {
+        "script": "InstallationScripts/gfx/linux.sh",
+        "reboot_after": True,
+    } not in normalized_scripts:
+        raise SystemExit(
+            "provisioning.linux_install_scripts requires the graphics installer "
+            "with reboot_after enabled"
         )
 
     return {
@@ -198,7 +213,7 @@ def _windows_builds(config: dict, selected_os: set[str]) -> dict | None:
             not isinstance(item, dict)
             or not isinstance(item.get("script"), str)
             or not re.fullmatch(r"InstallationScripts/[A-Za-z0-9._/-]+", item["script"])
-            or any(part in {".", ".."} for part in item["script"].split("/"))
+            or any(part in {"", ".", ".."} for part in item["script"].split("/"))
             or not isinstance(item.get("reboot_after"), bool)
         ):
             raise SystemExit("provisioning.windows_install_scripts is invalid")

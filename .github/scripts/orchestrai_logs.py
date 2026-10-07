@@ -8,6 +8,7 @@ grader format cannot suppress test logs.
 
 from __future__ import annotations
 
+import base64
 import html
 import json
 import re
@@ -329,20 +330,42 @@ def private_log_values(plan: dict, live: dict, environ: dict) -> list[str]:
 
 
 def redact_private_values(value: str, private_values: Iterable[str] = ()) -> str:
-    """Mask known values in raw and JSON-serialized logger representations."""
+    """Mask known values before any public-host exception is considered.
+
+    Cover raw/JSON, case changes, common Base64 forms and mixed percent escapes.
+    This is bounded defense against accidental output, not an exfiltration sandbox.
+    """
     private_values = {
         private for private in private_values
         if isinstance(private, str) and len(private) >= 4
     }
     for private in sorted(private_values, key=len, reverse=True):
-        encoded = {
-            private,
-            json.dumps(private)[1:-1],
-            json.dumps(private, ensure_ascii=False)[1:-1],
-        }
+        encoded = set()
+        for form in {private, private.lower(), private.upper(), private.casefold()}:
+            encoded.update((form, json.dumps(form)[1:-1], json.dumps(form, ensure_ascii=False)[1:-1]))
         variants = encoded | {part.replace("/", "\\/") for part in encoded}
+        for form in {private, private.lower(), private.upper()}:
+            for encoder in (base64.b64encode, base64.urlsafe_b64encode):
+                encoded_value = encoder(form.encode("utf-8")).decode("ascii")
+                variants.update((encoded_value, encoded_value.rstrip("=")))
         for part in sorted(variants, key=len, reverse=True):
-            value = value.replace(part, "[REDACTED]")
+            value = re.sub(re.escape(part), "[REDACTED]", value, flags=re.IGNORECASE)
+        if "%" in value or (" " in private and "+" in value):
+            # Do not decode the whole log: that could alter URL boundaries or
+            # turn encoded controls into real log lines. Match encoded bytes
+            # in place, including mixed raw/escaped characters and two levels
+            # of re-encoding (%2521). Unrelated text remains byte-for-byte.
+            parts = []
+            for character in private:
+                alternatives = {re.escape(character)}
+                for form in {character, character.lower(), character.upper()}:
+                    alternatives.add(
+                        "".join(r"%(?:25){0,2}" + f"{byte:02x}" for byte in form.encode("utf-8"))
+                    )
+                if character == " ":
+                    alternatives.add(r"\+")
+                parts.append("(?:" + "|".join(sorted(alternatives)) + ")")
+            value = re.sub("".join(parts), "[REDACTED]", value, flags=re.IGNORECASE)
     return value
 
 
