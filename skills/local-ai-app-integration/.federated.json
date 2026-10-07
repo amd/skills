@@ -1,0 +1,10 @@
+{
+  "source": "lemonade-sdk-skills",
+  "repo": "lemonade-sdk/skills",
+  "ref": "main",
+  "commit": "17e5fc7644bb5dd431d2b6663c9d72635a1adb59",
+  "path": "skills/local-ai-app-integration",
+  "license": "Apache-2.0",
+  "content_hash": "0fb214ca2eca1a4db3d416aac43ffb796f20207afde50d2d8dee71d1d64c4797",
+  "imported_at": "2026-10-07T00:51:44Z"
+}
