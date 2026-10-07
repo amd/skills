@@ -52,6 +52,21 @@
           "path": "skills/rocm-doctor"
         }
       ]
+    },
+    {
+      "repo": "lemonade-sdk/skills",
+      "license": "Apache-2.0",
+      "skills": [
+        {
+          "path": "skills/local-ai-use"
+        },
+        {
+          "path": "skills/local-ai-app-integration"
+        },
+        {
+          "path": "skills/lemonade-router-builder"
+        }
+      ]
     }
   ]
 }
