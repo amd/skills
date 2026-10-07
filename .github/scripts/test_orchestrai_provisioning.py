@@ -68,9 +68,13 @@ class WindowsProvisioningTests(unittest.TestCase):
                 "vars": {"driver_source": source, "driver_copy": "direct"},
                 "install_scripts": [
                     {
+                        "script": "InstallationScripts/common/enable-test-signing.ps1",
+                        "reboot_after": True,
+                    },
+                    {
                         "script": "InstallationScripts/gfx/windows.ps1",
                         "reboot_after": True,
-                    }
+                    },
                 ],
             },
         )
@@ -86,11 +90,8 @@ class WindowsProvisioningTests(unittest.TestCase):
         self.assertEqual(plan, before)
         self.assertNotIn(source, json.dumps(plan["sessions"]))
         self.assertNotIn("driver_source", json.dumps(plan["sessions"]))
-        self.assertEqual(
-            plan["sessions"][0]["tests"][0]["variables"][
-                "SKILLS_WINDOWS_GPU_PREFLIGHT"
-            ],
-            "required",
+        self.assertNotIn(
+            "SKILLS_WINDOWS_GPU_PREFLIGHT", plan["sessions"][0]["tests"][0]["variables"]
         )
 
     def test_locally_staged_source_is_supported(self):
@@ -121,11 +122,17 @@ class WindowsProvisioningTests(unittest.TestCase):
                 self.assertNotIn(source, str(raised.exception))
                 self.assertNotIn("fixture-private", str(raised.exception))
 
-    def test_config_requires_shared_graphics_installer_and_reboot(self):
+    def test_config_requires_test_signing_then_driver_with_both_reboots(self):
         config = json.loads(build_orchestrai_plan.DEFAULT_CONFIG.read_text())
         source = r"C:\Fixture\ATI"
+        valid_scripts = config["provisioning"]["windows_install_scripts"]
         invalid_scripts = (
             [],
+            valid_scripts[:1],
+            valid_scripts[1:],
+            list(reversed(valid_scripts)),
+            [dict(valid_scripts[0], reboot_after=False), valid_scripts[1]],
+            [valid_scripts[0], dict(valid_scripts[1], reboot_after=False)],
             [{"script": "InstallationScripts/gfx/windows.ps1", "reboot_after": False}],
             [
                 {
@@ -203,22 +210,68 @@ class WindowsProvisioningTests(unittest.TestCase):
                         }
                     )
 
-    def test_live_windows_requires_rebooting_installer(self):
+    def test_live_windows_requires_ordered_provisioning_and_both_reboots(self):
         with mock.patch.dict(
             os.environ, {"ORCHESTRAI_WINDOWS_DRIVER_SOURCE": r"C:\Fixture\ATI"}
         ):
             plan = build_orchestrai_plan.build_plan(plan_args())
-        for change in ("no_reboot", "no_installer", "wrong_copy"):
+        for change in (
+            "no_signing_reboot",
+            "no_driver_reboot",
+            "no_signing",
+            "no_driver",
+            "wrong_order",
+            "no_installer",
+            "wrong_copy",
+        ):
             broken = deepcopy(plan)
-            if change == "no_reboot":
+            if change == "no_signing_reboot":
                 broken["builds_json"]["install_scripts"][0]["reboot_after"] = False
+            elif change == "no_driver_reboot":
+                broken["builds_json"]["install_scripts"][1]["reboot_after"] = False
+            elif change == "no_signing":
+                broken["builds_json"]["install_scripts"].pop(0)
+            elif change == "no_driver":
+                broken["builds_json"]["install_scripts"].pop()
+            elif change == "wrong_order":
+                broken["builds_json"]["install_scripts"].reverse()
             elif change == "no_installer":
                 broken["builds_json"]["install_scripts"] = []
             else:
                 broken["builds_json"]["vars"]["driver_copy"] = "other"
             with self.subTest(change=change):
-                with self.assertRaisesRegex(SystemExit, "direct copy and a reboot"):
+                with self.assertRaisesRegex(SystemExit, "a reboot after each"):
                     orchestrai_run.require_windows_provisioning(broken)
+
+    def test_existing_windows_adapter_needs_no_readiness_marker(self):
+        plan = build_orchestrai_plan.build_plan(plan_args())
+        session = plan["sessions"][0]
+        for status in ("passed", "failed", "error"):
+            with self.subTest(status=status):
+                live = {
+                    "launcher": {
+                        "sessions": [
+                            {
+                                "name": session["name"],
+                                "status": "completed",
+                                "tests": [
+                                    {
+                                        "path": session["tests"][0]["path"],
+                                        "status": status,
+                                        "stdout": "Existing adapter: no GPU preflight marker.",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+                manifest = orchestrai_run.build_results_manifest(
+                    plan, live, mode="live"
+                )
+                item = manifest["items"][0]
+                self.assertEqual(item["status"], status)
+                self.assertNotIn("gpu_preflight_required", item)
+                self.assertNotIn("readiness", item)
 
     def test_mock_windows_needs_no_driver_or_portal_secret(self):
         plan = build_orchestrai_plan.build_plan(plan_args())

@@ -1505,11 +1505,15 @@ class TriggerTests(unittest.TestCase):
         plan = reporting_plan()
         plan["builds_json"] = {
             "vars": {
-                "driver_source": "https://fixture.example/driver.zip",
+                "driver_source": r"C:\Fixture\DriverSource\ATI",
                 "driver_copy": "direct",
             },
             "install_scripts": [
-                {"script": "InstallationScripts/gfx/windows.ps1", "reboot_after": True}
+                {
+                    "script": "InstallationScripts/common/enable-test-signing.ps1",
+                    "reboot_after": True,
+                },
+                {"script": "InstallationScripts/gfx/windows.ps1", "reboot_after": True},
             ],
         }
         snapshots = []

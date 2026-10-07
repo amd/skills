@@ -91,26 +91,28 @@ logs with cancelled launcher snapshots. Summaries distinguish the pipeline
 and test snapshots before cleanup from the final parent state read after cleanup.
 Missing final metadata is reported explicitly without changing test grades.
 
-### Windows provisioning and readiness
+### Windows provisioning
 
 Windows provisioning follows the Playbooks contract. Store the internal driver
 source in the Actions secret `ORCHESTRAI_WINDOWS_DRIVER_SOURCE`. The existing
 provisioner accepts a supported internal share path or locally staged driver
 package containing `setup.exe`; this is not an arbitrary HTTP download setting.
 The controller sends `driver_source` and `driver_copy: direct` in the private
-provisioning request. It runs `InstallationScripts/gfx/windows.ps1` with
-`reboot_after: true`, so provisioning installs the driver and completes the reboot
-before the test adapter starts. A live Windows run requires this source before
-it allocates a machine. The source is never a public result field.
+provisioning request. It runs these shared scripts in order, with
+`reboot_after: true` on both:
 
-The Windows adapter checks for a present AMD display device, a matching installed
-AMD driver, and an error-free device state before invoking Skillscope. Missing or
-unhealthy graphics hardware is a setup error. The controller requires evidence
-that this preflight ran; a catalog still using an older adapter cannot silently
-claim readiness. Successful preflight establishes driver health, not that an
-evaluation executed GPU kernels. GPU execution depends on the selected skill and
-its expectations. Unsupported-runtime and approval-only cases must not be
-interpreted as GPU workload coverage.
+1. `InstallationScripts/common/enable-test-signing.ps1`
+2. `InstallationScripts/gfx/windows.ps1`
+
+Provisioning enables test signing, reboots, installs the driver, and reboots again
+before the existing test adapter starts. A live Windows run requires this source
+before it allocates a machine. The source is never a public result field.
+
+There is no additional mandatory GPU-readiness preflight or adapter upgrade.
+Installer completion does not independently establish post-reboot device health
+or GPU kernel execution. GPU execution depends on the selected skill and its
+expectations. Unsupported-runtime and approval-only cases must not be interpreted
+as GPU workload coverage.
 
 ### Local validation and control runners
 

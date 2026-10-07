@@ -34,7 +34,6 @@ from orchestrai_stdout import (
     public_streams,
     stream_coverage,
 )
-from orchestrai_readiness import enforce_windows_readiness
 
 TERMINAL_PIPELINE_STATES = {
     "passed",
@@ -181,14 +180,21 @@ def require_windows_provisioning(plan: dict) -> None:
     if not isinstance(source, str) or not source.strip():
         raise SystemExit("missing required secret(s): ORCHESTRAI_WINDOWS_DRIVER_SOURCE")
     scripts = builds.get("install_scripts")
+    required_scripts = [
+        {
+            "script": "InstallationScripts/common/enable-test-signing.ps1",
+            "reboot_after": True,
+        },
+        {"script": "InstallationScripts/gfx/windows.ps1", "reboot_after": True},
+    ]
     if (
         variables.get("driver_copy") != "direct"
         or not isinstance(scripts, list)
-        or {"script": "InstallationScripts/gfx/windows.ps1", "reboot_after": True}
-        not in scripts
+        or scripts[:2] != required_scripts
     ):
         raise SystemExit(
-            "Windows graphics provisioning requires direct copy and a reboot"
+            "Windows graphics provisioning requires direct copy, test signing "
+            "before driver installation, and a reboot after each"
         )
 
 
@@ -247,14 +253,6 @@ def classify_behavioral_test_output(test: dict[str, Any]) -> str:
 
     if diagnostic := behavioral_grading_error(test):
         return diagnostic
-    for line in grader_lines(test):
-        if line == "FAIL: Windows AMD display readiness query failed":
-            return "The Windows AMD display readiness query failed."
-        if line == "FAIL: Windows AMD display adapter is missing":
-            return "The Windows AMD display adapter was missing."
-        if line == "FAIL: Windows AMD display adapter or driver is unhealthy":
-            return "The Windows AMD display adapter or driver was unhealthy."
-
     if "skillscope setup artifacts are missing" in output:
         return "Skillscope setup artifacts were missing on the test machine."
     if "checked-out skills commit does not match skills_sha" in output:
@@ -767,11 +765,6 @@ def expected_items(plan: dict) -> list[dict[str, Any]]:
             "os": os_name,
             "path": path,
         }
-        if (
-            os_name == "Windows"
-            and variables.get("SKILLS_WINDOWS_GPU_PREFLIGHT") == "required"
-        ):
-            item["gpu_preflight_required"] = True
         items.append(item)
     return items
 
@@ -976,7 +969,6 @@ def build_results_manifest(
             ):
                 item["status"] = "error"
                 item["error"] = behavioral_diagnostic
-        enforce_windows_readiness(item, test)
         items.append(item)
 
     return {

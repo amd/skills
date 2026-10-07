@@ -20,11 +20,6 @@ from orchestrai_logs import (
     public_manifest_log,
 )
 from orchestrai_stdout import manifest_streams, stream_coverage
-from orchestrai_readiness import (
-    READINESS_DIAGNOSTICS,
-    readiness_description,
-    safe_readiness,
-)
 
 SAFE_STATUSES = {
     "passed",
@@ -39,10 +34,6 @@ SAFE_STATUSES = {
 }
 SAFE_BEHAVIORAL_DIAGNOSTICS = {
     *GRADER_ERROR_DIAGNOSTICS,
-    *READINESS_DIAGNOSTICS.values(),
-    "The Windows AMD display readiness query failed.",
-    "The Windows AMD display adapter was missing.",
-    "The Windows AMD display adapter or driver was unhealthy.",
     "Skillscope setup artifacts were missing on the test machine.",
     "The checked-out skills commit did not match the requested commit.",
     "LLM gateway configuration was unavailable on the test machine.",
@@ -279,8 +270,6 @@ def _write_step_summary(item: dict, run: dict, *, ok: bool, mock: bool) -> None:
         handle.write(f"| Result | `{html.escape(status)}` |\n")
         handle.write(f"| Result type | {result_category(item)} |\n")
         handle.write(f"| Public log coverage | {log_coverage(item)} |\n")
-        if readiness := readiness_description(item):
-            handle.write(f"| Windows GPU readiness | {readiness} |\n")
         controller = public_controller_state(run)
         if not mock and controller["pipeline_status"] != "unknown":
             handle.write(
@@ -335,8 +324,6 @@ def _write_job_log(item: dict, *, ok: bool, mock: bool) -> None:
     print(f"  OS: {os_name}")
     print(f"  Result: {status}")
     print(f"  Result type: {result_category(item)}")
-    if readiness := readiness_description(item):
-        print(f"  Windows GPU readiness: {readiness}")
     if duration := _safe_duration(item.get("duration")):
         print(f"  Duration: {duration}")
     if error := _safe_error(item.get("error")):
@@ -452,8 +439,6 @@ def _summary_document(
     document["stream_coverage"] = stream_coverage(
         manifest_streams(item, dict(os.environ))
     )
-    if readiness := safe_readiness(item):
-        document["readiness"] = readiness
     if lines := public_manifest_log(item):
         document["public_log"] = lines
         document["public_log_status"] = "available"

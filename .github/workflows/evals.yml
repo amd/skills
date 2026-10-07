@@ -17,7 +17,6 @@ on:
       - ".github/scripts/orchestrai_run.py"
       - ".github/scripts/orchestrai_logs.py"
       - ".github/scripts/orchestrai_stdout.py"
-      - ".github/scripts/orchestrai_readiness.py"
       - ".github/scripts/orchestrai_verdict.py"
       - ".github/scripts/test_orchestrai*.py"
       - "**/*.md"

@@ -23,6 +23,10 @@
     ],
     "windows_install_scripts": [
       {
+        "script": "InstallationScripts/common/enable-test-signing.ps1",
+        "reboot_after": true
+      },
+      {
         "script": "InstallationScripts/gfx/windows.ps1",
         "reboot_after": true
       }

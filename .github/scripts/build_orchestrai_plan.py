@@ -205,13 +205,17 @@ def _windows_builds(config: dict, selected_os: set[str]) -> dict | None:
         normalized_scripts.append(
             {"script": item["script"], "reboot_after": item["reboot_after"]}
         )
-    if {
-        "script": "InstallationScripts/gfx/windows.ps1",
-        "reboot_after": True,
-    } not in normalized_scripts:
+    required_scripts = [
+        {
+            "script": "InstallationScripts/common/enable-test-signing.ps1",
+            "reboot_after": True,
+        },
+        {"script": "InstallationScripts/gfx/windows.ps1", "reboot_after": True},
+    ]
+    if normalized_scripts[:2] != required_scripts:
         raise SystemExit(
-            "provisioning.windows_install_scripts requires the graphics installer "
-            "with reboot_after enabled"
+            "provisioning.windows_install_scripts requires test signing before "
+            "the graphics installer, with a reboot after each"
         )
     return {
         "vars": {"driver_source": source, "driver_copy": "direct"},
@@ -290,10 +294,6 @@ def build_plan(args: argparse.Namespace) -> dict:
                 "SOURCE_SHA": args.sha.lower(),
                 "SOURCE_GITHUB_RUN_URL": args.source_run_url,
             }
-            if os_name == "Windows":
-                # The controller requires the adapter's safe readiness marker;
-                # an older Portal catalog must not silently pass this plan.
-                variables["SKILLS_WINDOWS_GPU_PREFLIGHT"] = "required"
             sessions.append(
                 {
                     "name": f"skills-{skill}-{os_name.lower()}",
