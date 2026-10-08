@@ -1,2 +1,8 @@
 **/analysis_output/
 results/
+
+# partial_tests: expanded fixtures (regenerated from fixtures/*.tar.gz by
+# run_partial_tests.sh; only the tarballs under fixtures/ are committed) +
+# gold-ref run scratch
+partial_tests/semantic_purity_*/
+partial_tests/_gold_scratch_*/

@@ -128,7 +128,7 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 
 ### Embedding and index operations
 - **Symptoms:** `embedding`, `index_select`, `gather`, `scatter_` operations.
-- **Reasoning:** Memory-bound; should approach peak HBM BW.
+- **Reasoning:** Memory-bound; should approach peak memory BW.
 - **Algorithmic:** Fusion opportunities → defer to kernel fusion analysis.
 - **Kernel:** Optimize memory access patterns if below expected bandwidth.
 
