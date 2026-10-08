@@ -39,7 +39,7 @@ Use vendor-agnostic terminology throughout such as GPU kernels, collective commu
     optionally invoke agent_extension.py (when present), then embed the PNG into the report.
 ```
 
-**Subagent usage:** Only invoke Task subagents in steps that explicitly say "subagent" (Steps 7, 8, 10). All other steps (including Step 8.5) must be performed directly by the orchestrator using the command prefix.
+**Subagent usage:** Only invoke Task subagents in steps that explicitly say "subagent" (Step 1.5 semantic diff, Steps 7, 8, 10). All other steps (including Step 8.5) must be performed directly by the orchestrator using the command prefix.
 
 ---
 
@@ -81,9 +81,16 @@ Use vendor-agnostic terminology throughout such as GPU kernels, collective commu
    - If **Inference (vLLM/SGLang/ATOM)** is selected, ask **Execution Mode** → `<inference_exec_mode>`:
      1. **Eager mode** (`<inference_exec_mode>` = `eager`) — only the trace file is needed
      2. **Graph replay + capture** (`<inference_exec_mode>` = `graph_capture`) — also requires a capture folder path
-   - If **Graph replay + capture**, ask for **Capture Folder Path** → `<capture_folder_path_1>`:
-     - Ask: "Please provide the full path to the graph capture traces folder"
-   - If **Graph replay + capture** and **comparative**, ask for **Trace2 Capture Folder Path** → `<capture_folder_path_2>`
+     
+      Ask for the **Capture Folder Path(s)**:
+      - `standalone`: one folder → `<capture_folder_path_1>`. Ask: "Please provide the full path to the graph capture traces folder"
+      - `comparative`: one folder per trace → `<capture_folder_path_1>` (primary/trace1) and `<capture_folder_path_2>` (comparison/trace2). Ask: "Please provide the graph capture traces folder for the primary trace and for the comparison trace."
+
+     3. **Graph replay only** (`<inference_exec_mode>` = `graph_replay_only`) — graph replay with no capture folder available:
+     - `standalone`: abort.
+     - `comparative`: set `<comparison_method>` = `semantic`.
+
+   - For `comparative`, `<comparison_method>` = `tracediff` unless already set to `semantic`.
 
 5. **Environment Setup**
    - Ask: "Are you running locally or on a cluster?"
@@ -163,7 +170,7 @@ Do NOT proceed to Step 1 until validation passes.
 
 ## Step 1: Generate Performance Report
 
-Use **`<analysis_mode>`** to determine which CLI tool to run and then **`<comparison_scope>`** to determine arguments.
+Use **`<analysis_mode>`** to determine which CLI tool to run and then **`<comparison_scope>`** (and, for comparative, **`<comparison_method>`**) to determine arguments.
 
 For all of these scripts below, look at the environment variable TL_EXTENSION to recursively search for a file called <platform>.json. Do not look for <platform2>.json; it is not needed.
 If it is not found also look in TraceLens/Agent/Analysis/utils/arch/<platform>.json.
@@ -223,7 +230,7 @@ All commands below append `<suffix_1>` and `<suffix_2>`, resolved by `<compariso
   <suffix_ext>
 ```
 
-**Inference eager mode** (`<analysis_mode>` = `inference`, `<inference_exec_mode>` = `eager`):
+**Inference eager / graph-replay-only mode** (`<analysis_mode>` = `inference`, `<inference_exec_mode>` = `eager` or `graph_replay_only`):
 
 ```bash
 <prefix> TraceLens_generate_perf_report_pytorch_inference \
@@ -256,6 +263,37 @@ All commands below append `<suffix_1>` and `<suffix_2>`, resolved by `<compariso
 
 ---
 
+## Step 1.5: Semantic Comparative Ordering (`<inference_exec_mode>` = `graph_replay_only`, `<comparison_scope>` = `comparative`)
+
+Run Step 1 in this order:
+
+1. **Trace2 report** — run the analysis-mode CLI above for trace2 using the `comparative` trace2 `<suffix_1>` and empty `<suffix_2>` (identical to the TraceDiff path).
+
+2. **Semantic diff (subagent)** — launch a Task subagent that reads and follows the FULL instructions in `TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/semantic-comparison-agent.md`. Prompt context:
+
+```
+Read and follow the FULL instructions in:
+  TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/semantic-comparison-agent.md
+
+**Execution Context:**
+- Trace A (primary/trace1): <trace_path>   (platform <platform>)
+- Trace B (comparison/trace2): <trace2_path>   (platform <platform2>)
+- Labels: name-a trace1, name-b trace2
+- Output directory: <output_dir>/semantic/
+- Command prefix: read <output_dir>/cache/cmd_prefix.txt — substitute {CMD}
+
+Run the full semantic comparison through "Generate TraceDiff Output" so that
+<output_dir>/semantic/tracediff_output/diff_stats.csv is produced. Return "DONE".
+```
+
+   Verify `<output_dir>/semantic/tracediff_output/diff_stats.csv` exists before continuing. If it is missing, retry the subagent once; if it still fails, stop and report.
+
+3. **Trace1 report** — run the analysis-mode CLI for trace1 with the `comparative` trace1 `<suffix_1>` and `<suffix_2>` = `--precomputed_diff_stats <output_dir>/semantic/tracediff_output/diff_stats.csv`.
+
+4. **Confirm** `<output_dir>/perf_report_trace1_csvs/diff_stats.csv` exists (written by the report script). If absent, copy `<output_dir>/semantic/tracediff_output/diff_stats.csv` to that path so the comparative fusion step (Steps 3-6) can read it.
+
+---
+
 ## Step 2: Trace-Quality Gate
 
 
@@ -274,6 +312,10 @@ print(f'GRAPH_REPLAY_FRACTION={coverage.graph_replay_fraction}')
 
 **`STATUS=OK`:** Proceed
 **`STATUS=GRAPH_UNDER_RECORDED`:**
+If <inference_exec_mode> = graph_replay_only and <comparison_scope> = comparative, i.e. <comparison_method> = semantic, skip the rest of this step and proceed with Steps 3-6.
+
+Otherwise,
+
 1. Emit `[DIAG:trace_quality:GRAPH_UNDER_RECORDED]`: Deterministic fallback report
 2. Run the deterministic fallback writer on `<unified_perf_csv>`:
    ```bash
@@ -572,7 +614,7 @@ If the plot fails (extension-absent branch), retry once. If still failing, proce
 
 **Write order (one heredoc per step):**
 
-   a. **Initialize** — truncate and write the title line + `## Executive Summary` (metrics table, `{{PERF_PLOT}}` placeholder). Use `<prefix> tee <output_dir>/analysis.md << 'SECTION_EOF'` (truncating `tee`, not append) for this first write only.
+   a. **Initialize** — truncate and write the title line, the `report_mode` + any `kind=warning` markers (see the template title block and the Warnings rule below), then `## Executive Summary` (metrics table, `{{PERF_PLOT}}` placeholder). Use `<prefix> tee <output_dir>/analysis.md << 'SECTION_EOF'` (truncating `tee`, not append) for this first write only.
       - Data sources: `category_data/category_manifest.json` (`gpu_utilization` keys), `priority_data.json` (top bottleneck).
 
    b. **Compute Kernel Optimizations** — append `## Compute Kernel Optimizations` with `### Top Operations` table and P-item cards. Use `<prefix> tee -a <output_dir>/analysis.md << 'SECTION_EOF'`.
@@ -592,9 +634,9 @@ If the plot fails (extension-absent branch), retry once. If still failing, proce
 
    f. **Appendix** — append `## Appendix` with `### Model Architecture` and `### Hardware Reference`. Use `<prefix> tee -a <output_dir>/analysis.md << 'SECTION_EOF'`.
       - `metadata/model_info.json` — substitute `<model>`, `<architecture>`, `<scale>`, `<precision>` with the four field values.
-      - Platform arch file — read `platform` from `category_manifest.json`, then read `TraceLens/Agent/Analysis/utils/arch/<platform>.json`. For `### Hardware Reference`: substitute `<platform>`, Peak HBM BW = `mem_bw_gbps / 1000` TB/s, Peak MAF (BF16) = `max_achievable_tflops.matrix_bf16` TFLOPS, Peak MAF (FP8) = `max_achievable_tflops.matrix_fp8` TFLOPS if present.
+      - Platform arch file — read `platform` from `category_manifest.json`, then read `TraceLens/Agent/Analysis/utils/arch/<platform>.json`. For `### Hardware Reference`: substitute `<platform>`, Peak Memory BW = `mem_bw_gbps / 1000` TB/s, Peak MAF (BF16) = `max_achievable_tflops.matrix_bf16` TFLOPS, Peak MAF (FP8) = `max_achievable_tflops.matrix_fp8` TFLOPS if present.
 
-**Failure exclusion:** Skip any category listed in `load_findings()` output as `failed_system` or `failed_compute`. Include a `## Warnings` section (between Executive Summary and Compute Kernel Optimizations) only if failures exist.
+**Failure exclusion:** Skip any category listed in `load_findings()` output as `failed_system` or `failed_compute`; emit one top `kind=warning` marker per failure and per `high_variance` operation (CoV > 1.0 in `*_metrics.json`) instead. No mid-document `## Warnings` section — validation rejects it.
 
 The report at `<output_dir>/analysis.md` must use these exact `##` headers — do NOT rename them:
 1. `## Executive Summary`
@@ -603,7 +645,6 @@ The report at `<output_dir>/analysis.md` must use these exact `##` headers — d
 4. `## System-Level Optimizations`
 5. `## Detailed Analysis`
 6. `## Appendix`
-
 
 ### 12.1 Validate Report Structure (Retry up to 2x)
 
