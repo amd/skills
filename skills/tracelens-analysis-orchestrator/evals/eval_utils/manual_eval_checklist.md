@@ -34,7 +34,7 @@ Run these against every generated `analysis.md` after the programmatic validator
 
 ## Field Name Placement
 
-- [ ] JSON keys, dotted field paths, internal CSV column names, and internal variable names (e.g. `matrix_bf16`, `peak_hbm_bw`) appear **only** in the **Identification** `(source: ...)` parenthetical
+- [ ] JSON keys, dotted field paths, internal CSV column names, and internal variable names (e.g. `matrix_bf16`, `peak_mem_bw`) appear **only** in the **Identification** `(source: ...)` parenthetical
 - [ ] **Data**, **Reasoning for Slowdown**, **Resolution**, and **Impact estimate** use plain-language display headers and narrative only
 
 ## Metadata Integrity

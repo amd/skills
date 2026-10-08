@@ -8,7 +8,7 @@ See LICENSE for license information.
 name: workflow-llm-eval
 description: >-
   Runs LLM-based workflow eval 12 only: checks the analysis.md Appendix for plausible
-  hardware reference values (platform, HBM BW, MAF) and writes a one-row results CSV.
+  hardware reference values (platform, memory BW, MAF) and writes a one-row results CSV.
   Use when the user asks for a workflow LLM eval, eval 12, or Appendix hardware
   reference scoring. Scripted evals 9–11, 13–14 live in workflow_scripted_evals.py.
 ---

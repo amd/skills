@@ -73,13 +73,13 @@ Use vendor-agnostic terminology:
 cat <output_dir>/category_data/elementwise_metrics.json
 ```
 
-`category_specific.peak_hbm_bw_tbs` is the HBM BW reference for elementwise efficiency expectations.
+`category_specific.peak_mem_bw_tbs` is the memory BW reference for elementwise efficiency expectations.
 
 ### Step 3: Classify members by name
 
 Each `category_findings[i].members[j].operation` carries a torch op name (e.g. `aten::add_`, `aten::sigmoid`, `aten::gelu`). Classify each member semantically when describing the finding:
 
-- **Baseline ops** (simple memory-bound; expect >70% HBM BW): `add`, `mul`, `copy`, `fill`.
+- **Baseline ops** (simple memory-bound; expect >70% memory BW): `add`, `mul`, `copy`, `fill`.
 - **Arithmetic**: `sub`, `div`, `remainder`, `fmod`, `neg`, `abs`, `clamp`.
 - **Activation**: `sigmoid`, `relu`, `gelu`, `silu`, `swish`, `tanh`, `mish`, `hardswish`, `leaky_relu`.
 - **Cast / Convert**: `to`, `_to_copy`, `type_as`, `float`, `half`, `bfloat16`.
@@ -117,8 +117,8 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 ## Common Patterns
 
 ### Low baseline efficiency
-- **Symptoms:** Simple ops (`add_`, `mul`, `copy_`) at <50% of peak HBM BW.
-- **Reasoning:** Baseline elementwise should approach peak HBM BW; well below indicates kernel-level memory-access or launch-overhead issues.
+- **Symptoms:** Simple ops (`add_`, `mul`, `copy_`) at <50% of peak memory BW.
+- **Reasoning:** Baseline elementwise should approach peak memory BW; well below indicates kernel-level memory-access or launch-overhead issues.
 - **Kernel:** Investigate memory access patterns and per-launch overhead.
 
 ### High invocation count
