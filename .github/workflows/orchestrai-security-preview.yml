@@ -1,0 +1,39 @@
+name: OrchestrAI security preview
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/evals.yml'
+      - '.github/workflows/orchestrai-security-preview.yml'
+      - '.github/scripts/*orchestrai*.py'
+      - '.github/orchestrai-config.json'
+      - 'docs/orchestrai-security.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: none
+
+jobs:
+  preview:
+    name: Offline security checks and mock report
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+      - name: Run security and OrchestrAI regression tests
+        run: python3 -m unittest discover -s .github/scripts -p 'test_orchestrai*.py'
+      - name: Generate a synthetic preview without credentials or machines
+        run: python3 .github/scripts/orchestrai_security_preview.py --output security-preview
+      - name: Upload synthetic preview
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: orchestrai-security-preview
+          path: security-preview/
+          if-no-files-found: error
