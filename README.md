@@ -77,7 +77,7 @@ Cross-stack skills, from client to cloud.
 
 | Skill | What it does | Source |
 | --- | --- | --- |
-| [`rocm-doctor`](https://github.com/amd/skills/blob/main/skills/rocm-doctor/SKILL.md) | Diagnose ROCm, HIP, PyTorch, or llama.cpp failures on AMD GPUs (Linux, Windows, and WSL2) against a closed list of known misconfigurations, then fix with consent or route upstream. Thin driver over the `rocm` CLI (`examine`, `diagnose`, or `fix`). | [rocm-cli](https://github.com/ROCm/rocm-cli) |
+| [`rocm-doctor`](https://github.com/amd/skills/blob/main/skills/rocm-doctor/SKILL.md) | Diagnose and fix common ROCm, HIP, PyTorch, and llama.cpp failures and misconfigurations on AMD GPUs. | [rocm-cli](https://github.com/ROCm/rocm-cli) |
 | [`lemonade-router-builder`](https://github.com/amd/skills/blob/main/skills/lemonade-router-builder/SKILL.md) | Set up a Lemonade model router that handles requests based on content, sensitivity, or required capabilities. | [Lemonade](https://github.com/lemonade-sdk/skills) |
 | [`quark-install`](https://github.com/amd/skills/blob/main/skills/quark-install/SKILL.md) | Install or verify AMD Quark with an accelerator-matched PyTorch, from PyPI, a native-wheel index, a local wheel, or source, then verify imports, kernels, and `quark-cli`. | [Quark](https://github.com/amd/Quark) |
 | [`quark-torch-llm-ptq`](https://github.com/amd/skills/blob/main/skills/quark-torch-llm-ptq/SKILL.md) | Quantize PyTorch / Hugging Face LLMs with AMD Quark post-training quantization: inspect the model, pick a scheme (FP8, INT4, and more), and produce a verified quantized model. | [Quark](https://github.com/amd/Quark) |
