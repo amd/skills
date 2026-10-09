@@ -203,8 +203,8 @@ def main():
         # Cannot read the config (gated/offline) -- do not positively block; the
         # gating check and launch will catch real problems.
         print(json.dumps({"model_id": a.model_id, "supported": None, "kind": "undetermined",
-                           "message": f"Could not read architectures ({aerr or 'none declared'}); support unverified. "
-                                      "If gated, set HF_TOKEN. This does not bypass the gating/launch checks."}, indent=2))
+                          "message": f"Could not read architectures ({aerr or 'none declared'}); support unverified. "
+                                     "If gated, set HF_TOKEN. This does not bypass the gating/launch checks."}, indent=2))
         sys.exit(0)
 
     reg, source = registry_from_github(a.vllm_version)
@@ -212,9 +212,9 @@ def main():
         reg, source = registry_from_local()
     if reg is None:
         print(json.dumps({"model_id": a.model_id, "architectures": archs, "supported": None,
-                           "kind": "undetermined",
-                           "message": "Could not load vLLM's model registry (no network and no importable vllm); "
-                                      "support unverified. vLLM confirms support at load (no-retry rule applies)."}, indent=2))
+                          "kind": "undetermined",
+                          "message": "Could not load vLLM's model registry (no network and no importable vllm); "
+                                     "support unverified. vLLM confirms support at load (no-retry rule applies)."}, indent=2))
         sys.exit(0)
 
     kinds = [reg.get(arch) for arch in archs]
