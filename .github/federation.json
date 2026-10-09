@@ -45,6 +45,15 @@
       ]
     },
     {
+      "repo": "ROCm/rocm-cli",
+      "license": "MIT",
+      "skills": [
+        {
+          "path": "skills/rocm-doctor"
+        }
+      ]
+    },
+    {
       "repo": "lemonade-sdk/skills",
       "license": "Apache-2.0",
       "skills": [
