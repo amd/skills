@@ -2,8 +2,8 @@
 
 Privileged evaluation jobs require reviewed controller code, protected GitHub
 Environments and administrator setup. The offline security preview is usable
-before privileged CI is enabled. It does not allocate a machine, call a model,
-or prove that a skill passes.
+before administrator setup is complete. It does not allocate a machine, call a
+model, or prove that a skill passes.
 
 ## What changed
 
@@ -48,26 +48,29 @@ candidate and use a same-repository branch for privileged testing.
 
 ## Administrator setup before live CI
 
-1. Keep `ORCHESTRAI_PRIVILEGED_CI_ENABLED` unset or `false` during review. Live
-   privileged jobs are skipped, and the final evaluation gate fails explicitly
-   when graded work was requested. Structural/reference checks and the offline
-   preview remain available. This switch prevents accidental activation; it is
-   not an access-control boundary against modified workflow YAML.
-2. Establish a trusted controller revision. By default, a PR uses its exact base
+Eligible graded runs automatically check the Environment protections and trusted
+controller; no repository enable variable is required. Missing or unverifiable
+protections fail the policy check, skip dependent privileged jobs, and fail the
+final evaluation gate. Structural/reference checks and the offline preview remain
+available. Manual runs must use the default branch; PR runs must come from a
+same-repository branch and target the default branch. PR Strix behavioral tests
+also require the existing `run_behavioral` label.
+
+1. Establish a trusted controller revision. By default, a PR uses its exact base
    SHA and a default-branch dispatch uses its triggering SHA. If that revision
    lacks the controller, the run fails rather than executing PR controller code.
    For bootstrap, an administrator may set `ORCHESTRAI_TRUSTED_CONTROLLER_SHA`
    to a **fully reviewed 40-character commit SHA** containing these changes.
    Clear the override after the reviewed controller is on the protected default
    branch. Do not set it automatically to an incoming PR head.
-3. Configure **`skills-ci`** and **`behavioral-instinct`** Environments with named
+2. Configure **`skills-ci`** and **`behavioral-instinct`** Environments with named
    required reviewers, prevention of self-review, administrator bypass disabled,
    and restricted deployment branches. Choose reviewer identities deliberately.
    Confirm that the policy permits intended default-branch and same-repository
    PR deployment refs without allowing arbitrary branches. The hosted policy job
    reads these settings and fails closed if it cannot verify them. GitHub plan
    and repository visibility can affect which protection features are available.
-4. Re-enter the relevant credential values in `skills-ci` Environment secrets:
+3. Re-enter the relevant credential values in `skills-ci` Environment secrets:
    `ORCHESTRAI_PORTAL_URL`, `ORCHESTRAI_USER`, `ORCHESTRAI_PASSWORD`,
    `ORCHESTRAI_SPACE`, `ORCHESTRAI_DEVICE_TAGS`,
    `ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON`, `ORCHESTRAI_WINDOWS_DRIVER_SOURCE`,
@@ -76,15 +79,15 @@ candidate and use a same-repository branch for privileged testing.
    let automation read existing secret values back for migration. Do not paste
    credential values into PRs, workflow inputs or logs. Node-side LLM credential
    binding remains in the shared pipeline; this change does not modify it.
-5. Have runner administrators verify isolation, ephemeral replacement/cleaning,
+4. Have runner administrators verify isolation, ephemeral replacement/cleaning,
    network reachability and runner-group repository/workflow restrictions for
    control and Instinct pools. Restrict Instinct federation to the intended
    repository, protected Environment and approved workflow claims. A label or
    an Environment gate alone does not secure a self-hosted machine. Record this
    operational review separately from the workflow's unit-test results.
-6. After those controls are verified, explicitly
-   set `ORCHESTRAI_PRIVILEGED_CI_ENABLED=true` and approve a narrowly scoped live
-   smoke. Do not treat the offline preview as a substitute for this review.
+5. After those controls are verified, trigger an eligible run and approve a
+   narrowly scoped live smoke through the protected Environment. Do not treat
+   the offline preview as a substitute for this review.
 
 No Environment, approver, secret value, federation rule or runner-group setting
 is created or migrated by this implementation. GitHub's server-side protections,

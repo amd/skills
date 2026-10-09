@@ -309,7 +309,6 @@ jobs:
     name: Verify privileged CI configuration
     needs: discover
     if: >-
-      vars.ORCHESTRAI_PRIVILEGED_CI_ENABLED == 'true' &&
       (needs.discover.outputs.routing == 'true' || needs.discover.outputs.default_any == 'true' || needs.discover.outputs.scoped_any == 'true') &&
       ((github.event_name == 'pull_request' &&
         github.event.pull_request.head.repo.full_name == github.repository &&
@@ -742,7 +741,6 @@ jobs:
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           REPOSITORY: ${{ github.repository }}
           DISCOVER: ${{ needs.discover.result }}
-          PRIVILEGED_CI_ENABLED: ${{ vars.ORCHESTRAI_PRIVILEGED_CI_ENABLED }}
           SECURITY_POLICY: ${{ needs.security-policy.result }}
           ROUTING: ${{ needs.routing.result }}
           ORCHESTRAI: ${{ needs.orchestrai-behavioral.result }}
@@ -777,10 +775,8 @@ jobs:
               sys.exit(f"The discover job did not succeed ({value('DISCOVER')}).")
 
           graded_requested = any(value(key) == "true" for key in ("ROUTING_WANTED", "BEHAVIOR_WANTED", "SCOPED_WANTED"))
-          if graded_requested and value("PRIVILEGED_CI_ENABLED") != "true":
-              sys.exit("Privileged CI is disabled pending protected Environments, secret migration, and trusted-controller bootstrap. Use the secret-free security preview meanwhile.")
           if graded_requested and value("SECURITY_POLICY") != "success":
-              sys.exit("Privileged CI policy was not satisfied; fork or non-default-branch runs cannot access internal runners.")
+              sys.exit("Privileged CI policy did not pass. Check 'Verify privileged CI configuration' for Environment or trusted-controller errors. Only same-repository PRs targeting the default branch or runs on the default branch are eligible.")
 
           skipped = value("SKIPPED").strip()
           if skipped and skipped != "[]":

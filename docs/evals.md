@@ -1,7 +1,7 @@
 # Skill Evaluation
 
-> Privileged evaluations are disabled by default pending administrator
-> setup. See the [security preview and rollout checklist](orchestrai-security.md).
+> Privileged evaluations require protected Environments and reviewed controller
+> code. See the [security preview and rollout checklist](orchestrai-security.md).
 > A green offline preview is not a hardware or model-evaluation result.
 
 ## Testing Pipeline Overview

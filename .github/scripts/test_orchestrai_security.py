@@ -220,8 +220,22 @@ class EnvironmentPolicyTests(unittest.TestCase):
 
         self.assertEqual(WORKFLOW.count("id-token: write"), 1)
         self.assertIn("id-token: write", job("behavior-scoped"))
+        self.assertNotIn("PRIVILEGED_CI_ENABLED", WORKFLOW)
+        policy = job("security-policy")
+        self.assertIn("needs.discover.outputs.routing == 'true'", policy)
+        self.assertIn("needs.discover.outputs.default_any == 'true'", policy)
+        self.assertIn("needs.discover.outputs.scoped_any == 'true'", policy)
         self.assertIn(
-            "vars.ORCHESTRAI_PRIVILEGED_CI_ENABLED == 'true'", job("security-policy")
+            "github.event.pull_request.head.repo.full_name == github.repository",
+            policy,
+        )
+        self.assertIn(
+            "github.event.pull_request.base.ref == github.event.repository.default_branch",
+            policy,
+        )
+        self.assertIn(
+            "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)",
+            policy,
         )
         self.assertIn("no PR-code fallback", job("security-policy"))
         for name in ["routing", "orchestrai-behavioral", "behavior-scoped"]:
@@ -235,6 +249,11 @@ class EnvironmentPolicyTests(unittest.TestCase):
                 "ref: ${{ needs.security-policy.outputs.controller_sha }}", section
             )
             self.assertNotIn("environment: ${{", section)
+        self.assertIn("environment: skills-ci", job("routing"))
+        self.assertIn("environment: skills-ci", job("orchestrai-behavioral"))
+        self.assertIn(
+            "environment:\n      name: behavioral-instinct", job("behavior-scoped")
+        )
         for name in ["routing", "behavior-scoped"]:
             self.assertIn("path: candidate", job(name))
             self.assertIn("python -I -m skillscope --repo candidate", job(name))
@@ -243,6 +262,76 @@ class EnvironmentPolicyTests(unittest.TestCase):
         self.assertIn('--skill "$SKILL"', verdict)
         self.assertIn('--os "$SKILL_OS"', verdict)
         self.assertNotIn('--skill "${{', verdict)
+
+
+class ResultsPolicyTests(unittest.TestCase):
+    def run_results(self, **env):
+        output = io.StringIO()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "DISCOVER": "success",
+                    "EVENT": "pull_request",
+                    "HEAD_REPOSITORY": "fixture/skills",
+                    "REPOSITORY": "fixture/skills",
+                    "LABELS": "run_behavioral",
+                    "ORCHESTRAI_MODE": "live",
+                    "ORCHESTRAI_OS": "both",
+                    **env,
+                },
+                clear=True,
+            ),
+            contextlib.redirect_stdout(output),
+        ):
+            exec(
+                compile(
+                    inline_step("Verify eval results"), "Verify eval results", "exec"
+                ),
+                {},
+            )  # noqa: S102 - execute the workflow fixture being tested
+        return output.getvalue()
+
+    def test_successful_evals_need_no_enable_variable(self):
+        output = self.run_results(
+            SECURITY_POLICY="success",
+            ROUTING_WANTED="true",
+            ROUTING="success",
+            BEHAVIOR_WANTED="true",
+            ORCHESTRAI="success",
+            ORCHESTRAI_VERDICTS="success",
+            SCOPED_WANTED="true",
+            SCOPED="success",
+        )
+        self.assertIn("All requested and authorized evals passed.", output)
+
+    def test_requested_grading_still_requires_successful_policy(self):
+        for requested in ["ROUTING_WANTED", "BEHAVIOR_WANTED", "SCOPED_WANTED"]:
+            for policy in ["", "failure", "skipped", "cancelled"]:
+                with (
+                    self.subTest(requested=requested, policy=policy),
+                    self.assertRaisesRegex(
+                        SystemExit, "Privileged CI policy did not pass"
+                    ),
+                ):
+                    self.run_results(**{requested: "true", "SECURITY_POLICY": policy})
+
+    def test_references_only_needs_no_privileged_policy(self):
+        output = self.run_results(SECURITY_POLICY="skipped")
+        self.assertIn("All requested and authorized evals passed.", output)
+
+    def test_successful_policy_does_not_hide_failed_or_skipped_verdicts(self):
+        for verdict in ["failure", "skipped", "cancelled"]:
+            with (
+                self.subTest(verdict=verdict),
+                self.assertRaisesRegex(SystemExit, "skill verdicts did not pass"),
+            ):
+                self.run_results(
+                    SECURITY_POLICY="success",
+                    BEHAVIOR_WANTED="true",
+                    ORCHESTRAI="success",
+                    ORCHESTRAI_VERDICTS=verdict,
+                )
 
 
 class ProvisioningSecurityTests(unittest.TestCase):
