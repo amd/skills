@@ -109,7 +109,7 @@ def _probe_stack(run_prefix, source):
     labels which path was probed. Returns the parsed stack dict (with `source`)
     or (None, message) if the probe could not run or produced no JSON.
     """
-    cmd = f'{run_prefix}python -c "{PROBE}"'
+    cmd = f"{run_prefix}python -c {shlex.quote(PROBE)}"
     rc, out, err = _sh(cmd, timeout=120)
     if rc != 0 or not out:
         return None, (err or "probe failed")[:200]
@@ -288,8 +288,10 @@ def main():
         missing = [lib for lib in ("libtcmalloc", "libiomp") if lib not in ld]
         if missing:
             issues.append({"check": "perf_libs", "severity": "advisory",
-                           "message": f"LD_PRELOAD is missing {', '.join(missing)}; vLLM CPU warns about this and throughput suffers without them (host/conda path).",
-                           "fix": "export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4:$CONDA_PREFIX/lib/libiomp5.so:$LD_PRELOAD"})
+                           "message": f"LD_PRELOAD is missing {', '.join(missing)}; vLLM CPU warns about this and "
+                                      "throughput suffers without them (host/conda path).",
+                           "fix": "export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4:"
+                                  "$CONDA_PREFIX/lib/libiomp5.so:$LD_PRELOAD"})
 
     # 8. HF cache mount (container path). The default bind-mounts the HF cache into
     #    the container; on NFS homes / symlinked caches / root-squash that fails at
