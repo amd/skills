@@ -114,7 +114,7 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 ## Common Patterns
 
 ### Low-efficiency fused kernels (<30% roofline)
-- **Symptoms:** Fused kernels with norm or reduction ops at <30% of peak HBM BW.
+- **Symptoms:** Fused kernels with norm or reduction ops at <30% of peak memory BW.
 - **Reasoning:** Fused norm+backward or small-reduction kernels can have suboptimal memory access patterns.
 - **Kernel:** Profile the fused kernel; consider dedicated kernel libraries for the dominant op.
 

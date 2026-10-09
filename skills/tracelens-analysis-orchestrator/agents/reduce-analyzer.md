@@ -115,7 +115,7 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 
 ### Standalone reductions
 - **Symptoms:** `sum`, `mean`, `max` operations in isolation (no fusion candidate above).
-- **Reasoning:** Memory-bound reductions should approach peak HBM BW for simple cases.
+- **Reasoning:** Memory-bound reductions should approach peak memory BW for simple cases.
 - **Kernel:** Investigate kernel-level memory access patterns if well below the band.
 
 ---

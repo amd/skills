@@ -107,10 +107,10 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 ## Common Patterns
 
 ### Memory-bound MoE (FP4/FP8 weights, low token count)
-- **Symptoms:** Low FLOPS/Byte; low TB/s vs. peak HBM BW.
+- **Symptoms:** Low FLOPS/Byte; low TB/s vs. peak memory BW.
 - **Reasoning:** Weight reads dominate memory traffic; narrow-precision weights reduce bytes but FLOPs stay the same per token, so few tokens means low arithmetic intensity.
 - **Algorithmic:** Batch more tokens to raise arithmetic intensity.
-- **Kernel:** If well below peak HBM BW, kernel has room for memory-access optimization.
+- **Kernel:** If well below peak memory BW, kernel has room for memory-access optimization.
 
 ### Compute-bound MoE (BF16 weights or high token count)
 - **Symptoms:** High FLOPS/Byte; low TFLOPS/s vs. peak MAF.
@@ -120,7 +120,7 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 
 ### Unfused multi-stage MoE GEMMs (`moe_unfused` only)
 - **Symptoms:** Multiple sequential expert-GEMM kernel launches per token group (e.g. `*_gemm1_*` followed by `*_gemm2_*`).
-- **Reasoning:** Each launch pays kernel-launch overhead and cannot share on-chip memory across the FC1 -> activation -> FC2 chain; intermediate activations must round-trip through HBM.
+- **Reasoning:** Each launch pays kernel-launch overhead and cannot share on-chip memory across the FC1 -> activation -> FC2 chain; intermediate activations must round-trip through global memory.
 - **Algorithmic:** Switch to a fused MoE expert kernel that combines the per-stage GEMMs (and ideally activation) in a single launch.
 - **Kernel:** If a fused variant is unavailable, apply the standard per-bound-type tuning from the table above to each stage independently.
 

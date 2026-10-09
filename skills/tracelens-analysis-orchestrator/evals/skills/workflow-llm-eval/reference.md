@@ -32,7 +32,7 @@ Eval 12 uses **multi-dimensional weighted scoring** (adopted from the Gaia eval 
 | Dimension | Weight | Description |
 |-----------|--------|-------------|
 | **correctness** | 50% | Are the hardware values present and plausible? 10=all correct, 7=minor issue, 0=wrong/missing |
-| **completeness** | 50% | Are all three items (platform, HBM BW, MAF) present? 10=all three, 7=two of three, 4=one, 0=none |
+| **completeness** | 50% | Are all three items (platform, memory BW, MAF) present? 10=all three, 7=two of three, 4=one, 0=none |
 
 ### Pass/Fail
 
@@ -51,7 +51,7 @@ Eval 12 uses **multi-dimensional weighted scoring** (adopted from the Gaia eval 
 In `analysis.md`, find the `## Appendix` section. Verify it contains:
 
 - Platform name
-- Peak HBM BW value
+- Peak memory BW value
 - At least one Peak MAF value
 
 **Scoring guide (multi-dimensional):**

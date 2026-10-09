@@ -254,7 +254,7 @@ The remaining two skills define the per-case eval logic:
 | 9 | Scripted | Report template rendering — all required `##` headers present. Per-header sub-indices (`_executive_summary`, `_compute`, `_system`, `_detailed`, `_appendix`, `_metrics_table`) |
 | 10 | Scripted | Executive Summary metrics — values match `gpu_timeline.csv` within 1%. Per-metric sub-indices (`_compute_pct`, `_idle_pct`, `_comm_pct`, `_total_time`, `_bottleneck`) |
 | 11 | Scripted | Issue template rendering — each P-item has Insight/Action/Impact fields. Per-P-item sub-indices (`_compute_P1`, `_system_P2`, etc.) |
-| 12 | LLM | Hardware Reference in Appendix — platform, HBM BW, MAF values. Multi-dimensional weighted scoring: correctness (50%) + completeness (50%), pass threshold ≥ 7.0 |
+| 12 | LLM | Hardware Reference in Appendix — platform, memory BW, MAF values. Multi-dimensional weighted scoring: correctness (50%) + completeness (50%), pass threshold ≥ 7.0 |
 | 13 | Scripted | Model identification in Appendix — all 4 `model_info.json` fields present. Per-field sub-indices (`_model`, `_architecture`, `_scale`, `_precision`) |
 
 Scripted evals (1–11, 13–14) run via `eval_utils/workflow_scripted_evals.py`. LLM eval (12) runs via `skills/workflow-llm-eval/` (`SKILL.md` + `reference.md`).

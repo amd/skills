@@ -107,7 +107,7 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 - **Kernel:** Tile-size tuning, better wave occupancy.
 
 ### Memory-bound GEMMs
-- **Symptoms:** Low FLOPS/Byte (<100), low TB/s vs. peak HBM BW.
+- **Symptoms:** Low FLOPS/Byte (<100), low TB/s vs. peak memory BW.
 - **Algorithmic:** GEMM-epilogue fusion opportunities → defer to kernel fusion analysis.
 - **Kernel:** If not reaching expected BW, kernel optimization opportunity.
 

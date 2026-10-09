@@ -120,7 +120,7 @@ of speculating.
 | Kernel names | `trunc_kernel_details` column |
 | Kernel durations | Trace events |
 | Achieved TFLOPS/s or TB/s | Calculated from duration + FLOPs/bytes |
-| Efficiency % vs roofline | Achieved / resolved peak (MAF or HBM BW) |
+| Efficiency % vs roofline | Achieved / resolved peak (MAF or memory BW) |
 | Invocation counts | Number of trace events per signature |
 | Library / backend | `library` column / kernel-name heuristics |
 | Bound type | `efficiency.bound_type` (compute / memory) |
@@ -161,6 +161,15 @@ inside `## Detailed Analysis` blocks.
 
 **All ten columns above are mandatory.** Never drop a column because some or all of its values are missing — render `—` in any cell whose value is null/absent and keep the column. The header row of every `**Data:**` table must contain exactly these ten column names in this order. (Agents may append extra columns at the end when needed, e.g. `Sub-Category` in the generic-op analyzer, but must not remove or reorder the ten standard columns.)
 
+**Per-row impact marker (REQUIRED).** Immediately after the last row of each compute-tier `**Data:**` table, emit one paired marker carrying the per-row impact scores as a CSV, in table order:
+
+```markdown
+<!-- impact-begin kind=op_row rank=<N> impacts=<v0>,<v1>,... -->
+<!-- impact-end -->
+```
+
+`<N>` is this candidate's `rank`; `impacts` is one value per data row in table order (see § Impact markers, `op_row` row, for the attr contract).
+
 **Column mappings** (source: `metrics['operations']`):
 - **Operation**: `operations[i].name`. Bare op name only — shape/dtype go in Args. Allowed suffix: `(decode)`/`(prefill)` to disambiguate the same op at multiple shapes.
 - **Args**: `operations[i].args`. Pre-rendered shape/dtype string, already joined with `<br>` — paste verbatim, do not reformat or re-join. `—` when absent.
@@ -172,7 +181,7 @@ inside `## Detailed Analysis` blocks.
 - **FLOPS/Byte**: `operations[i].efficiency.flops_per_byte` — note the nested path under `efficiency`, NOT a top-level field. `—` when null.
 - **Efficiency**: `operations[i].efficiency.efficiency_percent`, formatted by `bound_type`:
   - `compute-bound`: `X.XX% of Y TFLOPS` (Y = `resolved_peak_maf`)
-  - `memory-bound`: `X.XX% of Y TB/s` (Y = `resolved_peak_hbm_bw`)
+  - `memory-bound`: `X.XX% of Y TB/s` (Y = `resolved_peak_mem_bw`)
 - **Bound**: `operations[i].efficiency.bound_type` + `-bound` suffix (e.g., `memory-bound`). Must reflect compute/memory bound type — never use `classification.gemm_type` or similar.
 
 ### Comparative (`comparison_scope` = `comparative`)
@@ -220,7 +229,7 @@ When citing peak performance for a bottleneck, select the correct peak based on
 `operations[i].efficiency.bound_type`:
 - **compute-bound**: Use `operations[i].efficiency.resolved_peak_maf` (TFLOPS).
   Report achieved TFLOPS/s vs peak TFLOPS.
-- **memory-bound**: Use `operations[i].efficiency.resolved_peak_hbm_bw` (TB/s).
+- **memory-bound**: Use `operations[i].efficiency.resolved_peak_mem_bw` (TB/s).
   Report achieved TB/s vs peak TB/s.
 
 Do not look up peaks independently from the metadata dict.
@@ -302,6 +311,7 @@ The block between them is exactly the `impact_score`-based markdown you would ot
 |--------|-------|--------------------|---------------------|
 | `p_item` | Around every P-item `**Impact**` line in `## Recommendations`. | `low`, `mid`, `high` (all three; use `null` only for system-tier non-quantifiable). | `category` is reserved for the orchestrator template; sub-agents do **not** emit it. |
 | `detail_estimate` | Around the two-bullet `Low end ... / High end ...` block under `**Impact estimate:**` in each `## Detailed Analysis` candidate. Skip only for system-tier non-quantifiable estimates. | `low`, `high` (impact_score values, % of E2E). | none |
+| `op_row` | After the last row of each compute-tier `**Data:**` table (see § Operations Table Schema → Per-row impact marker). | `rank`, `impacts` (CSV of per-row `impact_score`, one per data row in table order; `—` for null). | none |
 
 ### Value-source rule
 
