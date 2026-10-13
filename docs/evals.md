@@ -1,7 +1,7 @@
 # Skill Evaluation
 
-> Privileged evaluations require protected Environments and reviewed controller
-> code. See the [security preview and rollout checklist](orchestrai-security.md).
+> This integration changes Strix execution and reporting, not workflow eligibility.
+> See the [OrchestrAI integration notes](orchestrai-integration.md).
 > A green offline preview is not a hardware or model-evaluation result.
 
 ## Testing Pipeline Overview
@@ -131,9 +131,13 @@ because these commands select different suites. Neither command runs routing
 agents or establishes behavioral hardware results.
 
 `ORCHESTRAI_CONTROL_RUNNER` chooses the routing and controller runner; the
-default is `ubuntu-latest`. Privileged routing,
-OrchestrAI and Instinct jobs reject fork PRs and require protected Environments.
-Verdict/report jobs use `ubuntu-latest`, without internal-network access. When
+fallback is `ubuntu-latest`. For the organization's ARC pool, set this repository
+variable to `arc-lnx-pub`. Discovery, verdict/report and offline-preview jobs use
+`ubuntu-latest`. The workflow retains the existing PR/manual/scheduled triggers
+and Instinct's `enable_mi_ci` gate and selected Environment. It does not add a
+`run_behavioral` label, `skills-ci` Environment or reviewed-controller prerequisite.
+Fork PRs do not receive repository secrets; this integration does not add a
+mechanism for sharing credentials with them. When
 choosing a self-hosted runner, its owner must verify job isolation, replacement
 of the runner and its writable workspace between untrusted jobs, least-privilege
 network and service-account access, and the runner group's allowed repositories

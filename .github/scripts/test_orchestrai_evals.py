@@ -2963,14 +2963,11 @@ class ReportTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("run: exec python3 .github/scripts/orchestrai_run.py", workflow)
-        self.assertIn("'evals / results'", workflow)
+        self.assertIn("name: evals / results", workflow)
         self.assertIn("!cancelled()", workflow)
-        # Both gate labels must start a run: enable_mi_ci is the Instinct gate.
-        self.assertIn(
-            """contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name)""",
-            workflow,
-        )
-        self.assertNotIn("github.event.label.name == 'run_behavioral'", workflow)
+        self.assertIn("types: [opened, synchronize, reopened, labeled]", workflow)
+        self.assertNotIn("github.event.label.name", workflow)
+        self.assertNotIn("run_behavioral", workflow)
 
     def test_workflow_tests_the_pr_head_and_fails_closed_without_hardware(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(
@@ -2981,10 +2978,8 @@ class ReportTests(unittest.TestCase):
             workflow,
         )
         self.assertNotIn("git ls-remote", workflow)
-        self.assertIn(
-            "Strix behavioral cases require the run_behavioral label.",
-            workflow,
-        )
+        self.assertIn("One or more OrchestrAI skill verdicts did not pass", workflow)
+        self.assertIn("OrchestrAI infrastructure did not complete", workflow)
 
     def test_discovery_and_orchestrai_use_the_same_commit(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "evals.yml").read_text(

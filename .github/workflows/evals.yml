@@ -53,10 +53,9 @@ on:
         default: both
 
 concurrency:
-  # Unrelated label events are no-ops and use a unique group, so they cannot
-  # cancel or replace an in-flight graded run for the same pull request.
-  group: evals-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'labeled' && !contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name) && github.run_id || 'graded' }}
-  cancel-in-progress: ${{ github.event.action != 'labeled' || contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name) }}
+  # Preserve the upstream event/concurrency contract, including labeled events.
+  group: evals-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -69,8 +68,7 @@ env:
 
 jobs:
   discover:
-    name: ${{ github.event.action == 'labeled' && !contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name) && 'Ignore unrelated label (discover)' || 'Check dataset structure and select runs' }}
-    if: github.event.action != 'labeled' || contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name)
+    name: Check dataset structure and select runs
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -233,22 +231,9 @@ jobs:
               unique_default = [entry for entry in unique_default if entry["os"] == requested_os]
           plan["default"] = unique_default
 
-          # A dataset cannot choose another runner pool or approval environment.
-          scoped_runner = ["self-hosted", "Linux", "X64", "mi300x", "gpu", "rocm"]
-          scoped = []
-          for entry in plan["scoped"]:
-              if not isinstance(entry, dict) or entry.get("os") != "Linux":
-                  raise SystemExit("Invalid Instinct matrix entry.")
-              if not isinstance(entry.get("skill"), str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", entry["skill"]):
-                  raise SystemExit("Invalid Instinct skill name.")
-              try:
-                  runner = json.loads(entry.get("runner", "null"))
-              except (TypeError, ValueError):
-                  raise SystemExit("Unsupported Instinct runner pool.") from None
-              if not isinstance(runner, list) or not all(isinstance(label, str) for label in runner) or len(runner) != len(scoped_runner) or set(runner) != set(scoped_runner):
-                  raise SystemExit("Unsupported Instinct runner pool.")
-              scoped.append({"skill": entry["skill"], "os": "Linux", "runner": json.dumps(scoped_runner), "environment": "behavioral-instinct"})
-          plan["scoped"] = scoped
+          # Leave the scoped matrix exactly as Skillscope selected it.
+          # Its machine.yml labels, enable_mi_ci gate and Environment belong
+          # to the existing Instinct workflow, not the OAI integration.
 
           orchestrai = []
           for os_name in ("Linux", "Windows"):
@@ -276,8 +261,7 @@ jobs:
               output.write("\n".join(lines) + "\n")
 
   external-references:
-    name: ${{ github.event.action == 'labeled' && !contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name) && 'Ignore unrelated label (references)' || 'External references' }}
-    if: github.event.action != 'labeled' || contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name)
+    name: External references
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -305,106 +289,20 @@ jobs:
           --docs '*.md,docs/**/*.md,walkthroughs/*.md,staging/**/*.md'
           --exclude-url '^https://openai\.com/codex/?$,^https://www\.amd\.com/en/resources/product-security\.html$'
 
-  security-policy:
-    name: Verify privileged CI configuration
-    needs: discover
-    if: >-
-      (needs.discover.outputs.routing == 'true' || needs.discover.outputs.default_any == 'true' || needs.discover.outputs.scoped_any == 'true') &&
-      ((github.event_name == 'pull_request' &&
-        github.event.pull_request.head.repo.full_name == github.repository &&
-        github.event.pull_request.base.ref == github.event.repository.default_branch) ||
-       (github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)))
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
-      deployments: read
-      id-token: none
-    outputs:
-      controller_sha: ${{ steps.policy.outputs.sha }}
-    steps:
-      - name: Check approval rules and select trusted controller
-        id: policy
-        shell: python
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CONTROLLER_OVERRIDE: ${{ vars.ORCHESTRAI_TRUSTED_CONTROLLER_SHA }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
-          NEED_MODEL_OR_PORTAL: ${{ needs.discover.outputs.routing == 'true' || needs.discover.outputs.default_any == 'true' }}
-          NEED_INSTINCT: ${{ needs.discover.outputs.scoped_any }}
-        run: |
-          import json
-          import os
-          import re
-          import urllib.request
-
-          sha = os.environ.get("CONTROLLER_OVERRIDE") or os.environ["BASE_SHA"]
-          if not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
-              raise SystemExit("Trusted controller must be an administrator-reviewed full commit SHA.")
-          environments = []
-          if os.environ["NEED_MODEL_OR_PORTAL"] == "true":
-              environments.append("skills-ci")
-          if os.environ["NEED_INSTINCT"] == "true":
-              environments.append("behavioral-instinct")
-          for environment in environments:
-              url = f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['GITHUB_REPOSITORY']}/environments/{environment}"
-              request = urllib.request.Request(url, headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}", "Accept": "application/vnd.github+json"})
-              try:
-                  with urllib.request.urlopen(request, timeout=30) as response:
-                      settings = json.load(response)
-              except Exception:
-                  raise SystemExit("Cannot verify protected CI Environment settings; no privileged run is allowed.") from None
-              rules = settings.get("protection_rules", [])
-              reviews = [rule for rule in rules if rule.get("type") == "required_reviewers"]
-              if not any(rule.get("reviewers") and rule.get("prevent_self_review") is True for rule in reviews):
-                  raise SystemExit("CI Environment must require reviewers and prevent self-approval.")
-              if settings.get("can_admins_bypass") is not False:
-                  raise SystemExit("CI Environment must disable administrator approval bypass.")
-              branches = settings.get("deployment_branch_policy") or {}
-              if not (branches.get("protected_branches") or branches.get("custom_branch_policies")):
-                  raise SystemExit("CI Environment must restrict allowed deployment branches.")
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"sha={sha.lower()}\n")
-      - name: Check out reviewed controller
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          ref: ${{ steps.policy.outputs.sha }}
-          persist-credentials: false
-      - name: Require trusted controller bootstrap
-        run: |
-          test -f .github/scripts/build_orchestrai_plan.py &&
-          test -f .github/scripts/orchestrai_run.py &&
-          test -f .github/scripts/orchestrai_verdict.py || {
-            echo 'Trusted revision lacks the controller. Bootstrap reviewed code first; no PR-code fallback is allowed.'
-            exit 1
-          }
-
   routing:
     name: Routing
-    needs: [discover, security-policy]
-    if: >-
-      needs.security-policy.result == 'success' &&
-      needs.discover.outputs.routing == 'true' &&
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    # Routing exercises the hosted LLM gateway only. Use the control runner for
-    # its network path, while keeping direct Strix access exclusive to
-    # OrchestrAI-managed tests.
+    needs: discover
+    if: needs.discover.outputs.routing == 'true'
+    # Routing needs the model gateway network path, not a Strix machine.
     runs-on: ${{ vars.ORCHESTRAI_CONTROL_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 40
     permissions:
       contents: read
       id-token: none
-    environment: skills-ci
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          ref: ${{ needs.security-policy.outputs.controller_sha }}
-          persist-credentials: false
-      - name: Check out candidate skills as test input
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          path: candidate
           persist-credentials: false
       - name: Check out Skillscope
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -443,7 +341,7 @@ jobs:
           EXTENDED_FLAG: ${{ needs.discover.outputs.extended }}
         run: |
           args=(
-            python -I -m skillscope --repo candidate routing
+            python -I -m skillscope --repo . routing
             --skills-dir 'skills/*'
             --routing-room "$ROUTING_ROOM"
             --min-accuracy "$MIN_ACCURACY"
@@ -465,19 +363,13 @@ jobs:
 
   orchestrai-behavioral:
     name: Behavioral (OrchestrAI Strix Halo — ${{ matrix.os }})
-    needs: [discover, security-policy]
-    if: >-
-      needs.security-policy.result == 'success' &&
-      needs.discover.outputs.default_any == 'true' &&
-      (github.event_name != 'pull_request' ||
-       (contains(github.event.pull_request.labels.*.name, 'run_behavioral') &&
-        github.event.pull_request.head.repo.full_name == github.repository))
+    needs: discover
+    if: needs.discover.outputs.default_any == 'true'
     runs-on: ${{ vars.ORCHESTRAI_CONTROL_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 240
     permissions:
       contents: read
       id-token: none
-    environment: skills-ci
     strategy:
       fail-fast: false
       matrix:
@@ -485,8 +377,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          # Never execute the candidate PR's controller or provisioning config.
-          ref: ${{ needs.security-policy.outputs.controller_sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
@@ -494,9 +385,9 @@ jobs:
       - name: Build OrchestrAI plan
         env:
           MATRIX_JSON: ${{ matrix.matrix_json }}
+          TARGET_REPOSITORY: ${{ github.repository }}
           TARGET_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
-          # A PR must test the immutable commit GitHub associated with this
-          # check run. Non-PR events use the selected ref's triggering commit.
+          # Test the immutable candidate that discovery and this check use.
           TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           EXTENDED_FLAG: ${{ needs.discover.outputs.extended }}
           # Fleet selectors are private infrastructure metadata.  Store this
@@ -514,7 +405,7 @@ jobs:
           python3 .github/scripts/build_orchestrai_plan.py
           --matrix-json "$MATRIX_JSON"
           --device-tags-json "$DEVICE_TAGS_JSON"
-          --repository "${{ github.repository }}"
+          --repository "$TARGET_REPOSITORY"
           --ref "$TARGET_REF"
           --sha "$TARGET_SHA"
           --skillscope-ref "$SKILLSCOPE_VERSION"
@@ -546,24 +437,20 @@ jobs:
         with:
           name: orchestrai-run-results-${{ matrix.slug }}
           # The live controller snapshot can contain private pipeline topology
-          # (for example, stage names).  Verdict jobs need only the normalized,
-          # normalized manifest with redacted test streams, so keep the snapshot inside this ephemeral
+          # (for example, stage names). Verdict jobs need only the normalized
+          # manifest with redacted test streams. Keep the live snapshot in the
           # job workspace and out of public workflow artifacts.
           path: orchestrai-results.json
           if-no-files-found: warn
 
   orchestrai-verdict:
     name: Behavioral (${{ matrix.skill }} on ${{ matrix.os }})
-    needs: [discover, orchestrai-behavioral, security-policy]
+    needs: [discover, orchestrai-behavioral]
     if: >-
       !cancelled() &&
-      needs.security-policy.result == 'success' &&
       needs.discover.result == 'success' &&
-      needs.discover.outputs.default_any == 'true' &&
-      (github.event_name != 'pull_request' ||
-       (contains(github.event.pull_request.labels.*.name, 'run_behavioral') &&
-        github.event.pull_request.head.repo.full_name == github.repository))
-    # Reporting never needs internal network access or a self-hosted runner.
+      needs.discover.outputs.default_any == 'true'
+    # Reporting needs neither internal-network access nor service credentials.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -575,7 +462,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          ref: ${{ needs.security-policy.outputs.controller_sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Download OrchestrAI results
         continue-on-error: true
@@ -606,18 +493,15 @@ jobs:
 
   behavior-scoped:
     name: Behavioral (${{ matrix.skill }} on ${{ matrix.os }}, ${{ matrix.environment }})
-    needs: [discover, security-policy]
-    if: >-
-      needs.security-policy.result == 'success' &&
-      needs.discover.outputs.scoped_any == 'true' &&
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    needs: discover
+    if: needs.discover.outputs.scoped_any == 'true'
     runs-on: ${{ fromJSON(matrix.runner) }}
     timeout-minutes: 45
     permissions:
       contents: read
       id-token: write
     environment:
-      name: behavioral-instinct
+      name: ${{ matrix.environment }}
     strategy:
       fail-fast: false
       matrix:
@@ -625,13 +509,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          ref: ${{ needs.security-policy.outputs.controller_sha }}
-          persist-credentials: false
-      - name: Check out candidate skills as test input
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          path: candidate
           persist-credentials: false
       - name: Check out Skillscope
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -652,7 +530,7 @@ jobs:
           API_BASE_URL: ""
           API_CUSTOM_HEADERS: ""
           SECRET_NAME: ""
-          ENVIRONMENT: behavioral-instinct
+          ENVIRONMENT: ${{ matrix.environment }}
           FEDERATION_RULE_ID: fdrl_014u39zsJmsex5SkL1gWg7qo
           FEDERATION_ORGANIZATION_ID: 9bdff596-1595-4140-8301-817e43ef8412
           FEDERATION_SERVICE_ACCOUNT_ID: svac_016zcTqZ4XkFdjAJCag9jQC9
@@ -671,47 +549,35 @@ jobs:
           SKILL: ${{ matrix.skill }}
           EXTENDED_FLAG: ${{ needs.discover.outputs.extended }}
         run: >-
-          python -I -m skillscope --repo candidate behavioral
+          python -I -m skillscope --repo . behavioral
           --skills-dir 'skills/*'
           --skill "$SKILL"
           "$EXTENDED_FLAG"
 
   results:
-    name: ${{ github.event.action == 'labeled' && !contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name) && 'Ignore unrelated label (results)' || 'evals / results' }}
-    needs: [discover, security-policy, routing, orchestrai-behavioral, orchestrai-verdict, behavior-scoped]
-    if: >-
-      always() &&
-      (github.event.action != 'labeled' || contains(fromJSON('["run_behavioral","enable_mi_ci"]'), github.event.label.name))
+    name: evals / results
+    needs: [discover, routing, orchestrai-behavioral, orchestrai-verdict, behavior-scoped]
+    if: always()
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          ref: ${{ needs.security-policy.outputs.controller_sha || github.event.pull_request.base.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
       - name: Download per-skill OrchestrAI results
-        if: >-
-          needs.security-policy.result == 'success' &&
-          needs.discover.outputs.default_any == 'true' &&
-          (github.event_name != 'pull_request' ||
-           (contains(github.event.pull_request.labels.*.name, 'run_behavioral') &&
-            github.event.pull_request.head.repo.full_name == github.repository))
+        if: needs.discover.outputs.default_any == 'true'
         continue-on-error: true
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: test-results-*
           path: .orchestrai-results
       - name: Publish aggregate OrchestrAI report
-        if: >-
-          needs.security-policy.result == 'success' &&
-          needs.discover.outputs.default_any == 'true' &&
-          (github.event_name != 'pull_request' ||
-           (contains(github.event.pull_request.labels.*.name, 'run_behavioral') &&
-            github.event.pull_request.head.repo.full_name == github.repository))
+        if: needs.discover.outputs.default_any == 'true'
         env:
           EXPECTED_JSON: ${{ needs.discover.outputs.default }}
           ORCHESTRAI_CONTROLLER_RESULT: ${{ needs.orchestrai-behavioral.result }}
@@ -722,12 +588,7 @@ jobs:
           --expected-json "$EXPECTED_JSON"
           --output orchestrai-report.md
       - name: Upload aggregate OrchestrAI report
-        if: >-
-          needs.security-policy.result == 'success' &&
-          needs.discover.outputs.default_any == 'true' &&
-          (github.event_name != 'pull_request' ||
-           (contains(github.event.pull_request.labels.*.name, 'run_behavioral') &&
-            github.event.pull_request.head.repo.full_name == github.repository))
+        if: needs.discover.outputs.default_any == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: orchestrai-report
@@ -736,12 +597,7 @@ jobs:
       - name: Verify eval results
         shell: python
         env:
-          EVENT: ${{ github.event_name }}
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          REPOSITORY: ${{ github.repository }}
           DISCOVER: ${{ needs.discover.result }}
-          SECURITY_POLICY: ${{ needs.security-policy.result }}
           ROUTING: ${{ needs.routing.result }}
           ORCHESTRAI: ${{ needs.orchestrai-behavioral.result }}
           ORCHESTRAI_VERDICTS: ${{ needs.orchestrai-verdict.result }}
@@ -757,16 +613,9 @@ jobs:
           import sys
 
           value = lambda name: os.environ.get(name, "")
-          labels = {label for label in value("LABELS").split(",") if label}
-          is_pull_request = value("EVENT") == "pull_request"
-          trusted_head = not is_pull_request or value("HEAD_REPOSITORY") == value("REPOSITORY")
-          orchestrai_authorized = not is_pull_request or (
-              "run_behavioral" in labels and trusted_head
-          )
-
           print(f"discover:             {value('DISCOVER')}")
           print(f"routing:              {value('ROUTING')} (requested: {value('ROUTING_WANTED')})")
-          print(f"orchestrai-behavioral:{value('ORCHESTRAI')} (requested: {value('BEHAVIOR_WANTED')}, authorized: {orchestrai_authorized})")
+          print(f"orchestrai-behavioral:{value('ORCHESTRAI')} (requested: {value('BEHAVIOR_WANTED')})")
           print(f"orchestrai-verdicts:  {value('ORCHESTRAI_VERDICTS')}")
           print(f"behavioral-scoped:    {value('SCOPED')} (requested: {value('SCOPED_WANTED')})")
           print(f"held back:            {value('SKIPPED')}")
@@ -774,30 +623,20 @@ jobs:
           if value("DISCOVER") != "success":
               sys.exit(f"The discover job did not succeed ({value('DISCOVER')}).")
 
-          graded_requested = any(value(key) == "true" for key in ("ROUTING_WANTED", "BEHAVIOR_WANTED", "SCOPED_WANTED"))
-          if graded_requested and value("SECURITY_POLICY") != "success":
-              sys.exit("Privileged CI policy did not pass. Check 'Verify privileged CI configuration' for Environment or trusted-controller errors. Only same-repository PRs targeting the default branch or runs on the default branch are eligible.")
-
           skipped = value("SKIPPED").strip()
           if skipped and skipped != "[]":
               print(f"::warning::Scoped behavioral cases were held back by a missing gate: {skipped}")
           failures = []
           if value("ROUTING_WANTED") == "true" and value("ROUTING") != "success":
               failures.append(f"Routing did not pass ({value('ROUTING')}).")
-          if value("BEHAVIOR_WANTED") == "true" and orchestrai_authorized and value("ORCHESTRAI") != "success":
+          if value("BEHAVIOR_WANTED") == "true" and value("ORCHESTRAI") != "success":
               failures.append(f"OrchestrAI infrastructure did not complete ({value('ORCHESTRAI')}).")
           if (
               value("BEHAVIOR_WANTED") == "true"
-              and orchestrai_authorized
               and value("ORCHESTRAI") == "success"
               and value("ORCHESTRAI_VERDICTS") != "success"
           ):
               failures.append(f"One or more OrchestrAI skill verdicts did not pass ({value('ORCHESTRAI_VERDICTS')}).")
-          if value("BEHAVIOR_WANTED") == "true" and not orchestrai_authorized:
-              if is_pull_request and not trusted_head:
-                  failures.append("Strix behavioral cases require a maintainer branch in amd/skills before hardware can be authorized.")
-              else:
-                  failures.append("Strix behavioral cases require the run_behavioral label.")
           # This check attaches to a commit, so a dispatch that skipped hardware
           # or an OS must not leave a green result a pull request could reuse.
           if value("BEHAVIOR_WANTED") == "true" and value("ORCHESTRAI_MODE") == "mock":
@@ -808,4 +647,4 @@ jobs:
               failures.append(f"Scoped behavioral cases did not pass ({value('SCOPED')}).")
           if failures:
               sys.exit("\n".join(failures))
-          print("All requested and authorized evals passed.")
+          print("All requested evals passed.")

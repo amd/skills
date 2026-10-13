@@ -16,14 +16,8 @@ from orchestrai_stdout import sanitize_stream
 SCRIPTS = Path(__file__).resolve().parent
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--output", required=True, type=Path)
-    args = parser.parse_args()
-    output = args.output.resolve()
-    output.mkdir(parents=True, exist_ok=True)
-    # Do not inherit any service inputs even if someone runs this locally from
-    # a credentialed shell. The preview needs only Python and a minimal PATH.
+def child_environment() -> dict[str, str]:
+    """Keep only runtime requirements and synthetic inputs, never service keys."""
     env = {
         "PATH": os.environ.get("PATH", ""),
         "PYTHONUTF8": "1",
@@ -33,6 +27,20 @@ def main() -> int:
         "ORCHESTRAI_WINDOWS_DRIVER_SOURCE": r"C:\Fixture\DriverSource\ATI",
         "ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON": '{"ubuntu:24.04":"https://drivers.example/fixture.deb"}',
     }
+    # setup-python's Linux toolcache interpreter can require this to locate
+    # libpython. Do not copy the whole environment, PYTHONPATH or LD_PRELOAD.
+    if library_path := os.environ.get("LD_LIBRARY_PATH"):
+        env["LD_LIBRARY_PATH"] = library_path
+    return env
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args()
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    env = child_environment()
     matrix = [{"skill": "local-ai-use", "os": name} for name in ("Linux", "Windows")]
 
     def run(script: str, *arguments: str, extra: dict | None = None) -> None:
@@ -44,11 +52,21 @@ def main() -> int:
             check=False,
         )
         if completed.returncode:
+            # Classify the loader failure without printing captured stderr,
+            # which could contain local paths or inherited private metadata.
+            detail = (
+                " Python runtime library could not be loaded; check LD_LIBRARY_PATH."
+                if completed.returncode == 127
+                and "libpython" in completed.stderr
+                and "shared libraries" in completed.stderr
+                else ""
+            )
             raise SystemExit(
                 f"Synthetic preview failed in {script} (exit {completed.returncode})."
+                + detail
             )
 
-    with tempfile.TemporaryDirectory(prefix="skills-security-preview-") as temp:
+    with tempfile.TemporaryDirectory(prefix="skills-integration-preview-") as temp:
         for entry in matrix:
             os_name = entry["os"]
             plan = Path(temp) / f"plan-{os_name}.json"
@@ -116,7 +134,7 @@ def main() -> int:
         },
     )
     overview = (
-        "## OrchestrAI security preview — no hardware\n\n"
+        "## OrchestrAI integration preview — no hardware\n\n"
         "This is a synthetic test, not a skill-quality or GPU verdict. No Portal "
         "credentials, acquired machines, model calls, or private source checkout were used.\n\n"
         "- Linux and Windows plan-only controller/verdict/report flow: passed.\n"
