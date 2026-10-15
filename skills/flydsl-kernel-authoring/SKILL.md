@@ -10,7 +10,7 @@ description: >-
 
 # FlyDSL Kernel Authoring
 
-Use FlyDSL's [existing kernel authoring skill](https://github.com/ROCm/FlyDSL/blob/fa7925e69e0abc313aa483084c2c8a3a58adba0d/.claude/skills/flydsl-kernel-authoring/SKILL.md)
+Use FlyDSL's [existing kernel authoring skill](https://github.com/ROCm/FlyDSL/blob/99f77c35ad3f0b783eb3c89e9cdf87d534c57e81/.claude/skills/flydsl-kernel-authoring/SKILL.md)
 to write or review kernels. This catalog entry locates that skill and loads it;
 the API reference, examples, and compiler guidance are maintained in FlyDSL.
 

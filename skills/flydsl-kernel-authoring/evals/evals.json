@@ -20,14 +20,15 @@
     {
       "id": "flydsl-authoring-pipeline-state",
       "skill_should_trigger": true,
-      "prompt": "Review a FlyDSL software pipeline that uses for iv, state in range(0, 15, 1, init=init_state), creates an LDS view inside the loop, then uses that view in the epilogue. No GPU is available. Write review.md with the minimal structural fixes and why they matter.",
+      "prompt": "Review a FlyDSL software pipeline that uses for iv, state in range(0, 15, 1, init=init_state), creates an LDS view inside the loop, then uses that view in the epilogue. Check the checked-out frontend when determining how init is lowered. No GPU is available. Write review.md with the minimal structural fixes and why they matter.",
       "expected_behavior": [
         "Reads the existing .claude/skills/flydsl-kernel-authoring/SKILL.md from a FlyDSL checkout before carrying out the task.",
-        "Uses typed FlyDSL integer bounds so the loop lowers to runtime scf.for with loop-carried state.",
+        "Checks the FlyDSL frontend and explains that explicit init selects runtime loop-carried state even with Python integer bounds.",
+        "Preserves explicit init and yields updated loop-carried state in the proposed loop structure.",
         "Moves LDS allocation/view creation before the loop so it dominates the epilogue."
       ],
       "unexpected_behavior": [
-        "Treats the plain integer bounds as sufficient to preserve init state."
+        "Claims the current frontend discards init solely because the bounds are Python integers."
       ],
       "files_exist": [
         "review.md"
