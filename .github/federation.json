@@ -77,6 +77,17 @@
           "as": "serving-llms-on-epyc"
         }
       ]
+    },
+    {
+      "repo": "ROCm/FlyDSL",
+      "license": "Apache-2.0",
+      "branch": "skills/catalog-kernel-trace-analysis",
+      "skills": [
+        {
+          "path": ".claude/skills/kernel-trace-analysis",
+          "as": "flydsl-kernel-trace-analysis"
+        }
+      ]
     }
   ]
 }
