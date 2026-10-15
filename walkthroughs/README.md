@@ -16,3 +16,4 @@ Choose a skill to get started.
 * [serving-llms-on-instinct](./serving-llms-on-instinct.md): Bring up a vLLM OpenAI-compatible LLM endpoint on an AMD Instinct GPU.
 * [serving-llms-on-epyc](./serving-llms-on-epyc.md): Bring up a vLLM + zentorch LLM endpoint on an AMD EPYC CPU.
 * [tracelens-analysis-orchestrator](./tracelens-analysis-orchestrator.md): Run agentic PyTorch profiler trace analysis and produce a prioritized performance report.
+* [flydsl-kernel-trace-analysis](./flydsl-kernel-trace-analysis.md): Analyze AMD GPU instruction stalls and PMC counters with FlyDSL’s existing trace analyzers.

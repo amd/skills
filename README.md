@@ -94,6 +94,7 @@ Run and optimize on AMD Instinct.
 | [`hyperloom-workload-optimizer`](https://github.com/amd/skills/blob/main/skills/hyperloom-workload-optimizer/SKILL.md) | Set up Hyperloom and autonomously optimize end-to-end LLM inference throughput on AMD Instinct GPUs, reporting a validated gain. | [Hyperloom](https://github.com/AMD-AGI/Hyperloom) |
 | [`magpie-kernel-evaluator`](https://github.com/amd/skills/blob/main/skills/magpie-kernel-evaluator/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM or SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
 | [`tracelens-analysis-orchestrator`](https://github.com/amd/skills/blob/main/skills/tracelens-analysis-orchestrator/SKILL.md) | Orchestrate modular PyTorch profiler trace analysis with TraceLens: generate perf reports, run system-level and compute-kernel subagents in parallel, and write a prioritized stakeholder report. | [TraceLens](https://github.com/AMD-AGI/TraceLens) |
+| [`flydsl-kernel-trace-analysis`](skills/flydsl-kernel-trace-analysis/SKILL.md) | Analyze AMD GPU instruction stalls and PMC counters with FlyDSL’s existing trace analyzers. | [FlyDSL](https://github.com/ROCm/FlyDSL) |
 
 ## What is a skill?
 

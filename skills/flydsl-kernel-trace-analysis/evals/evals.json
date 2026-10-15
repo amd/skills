@@ -1,0 +1,58 @@
+{
+  "evaluations": [
+    {
+      "id": "flydsl-trace-offline-hotspots",
+      "skill_should_trigger": true,
+      "prompt": "Analyze the synthetic gfx942 ATT fixture ui_output_agent_0_dispatch_3 for sample_kernel. Use the matching resource CSV in this workspace and source context. Write analysis.md ranking source hotspots and giving a measured optimization hypothesis. Do not collect a new GPU trace.",
+      "expected_behavior": [
+        "Reads the existing .claude/skills/kernel-trace-analysis/SKILL.md from a FlyDSL checkout before carrying out the task.",
+        "Runs the existing upstream hotspot_analyzer.py with --kernel sample_kernel and source detail.",
+        "Identifies kernel.py:4 as the largest source hotspot with 800 stall cycles and VMEM-load as the largest stall type.",
+        "Selects dispatch 3 resource metadata and reports a combined 280 VGPR allocation with estimated occupancy of 1 wave/SIMD.",
+        "Qualifies optimization gains as hypotheses needing correctness and timing validation."
+      ],
+      "unexpected_behavior": [
+        "Installs ROCm or runs GPU profiling for the supplied offline fixture.",
+        "Claims ATT provides measured L2 cache hit rate."
+      ],
+      "files_exist": [
+        "analysis.md"
+      ],
+      "workspace": "evals/fixtures/offline"
+    },
+    {
+      "id": "flydsl-trace-offline-pmc",
+      "skill_should_trigger": true,
+      "prompt": "For the synthetic gfx942 sample_kernel PMC data in l2.csv and ea.csv, analyze L2 hit rate, partial reads and over-fetch. The files are complementary counter groups for the same dispatch. Ideal HBM reads are 0.000128 GB per dispatch and EA0 scaling is two channels. Write memory.md with the numbers and limits of what they prove.",
+      "expected_behavior": [
+        "Reads the existing .claude/skills/kernel-trace-analysis/SKILL.md from a FlyDSL checkout before carrying out the task.",
+        "Runs the existing upstream pmc_l2_analyzer.py on both CSV files with --kernel sample_kernel, --ideal-gb 0.000128, and --ea-channels 2.",
+        "Reports 2% L2 hit rate, 0% partial reads, and 1.00x estimated over-fetch.",
+        "Explains that low hit rate may be expected for streaming access and these counters do not rule out every kernel optimization."
+      ],
+      "unexpected_behavior": [
+        "Includes unrelated_kernel in the metrics.",
+        "Claims a speedup was measured."
+      ],
+      "files_exist": [
+        "memory.md"
+      ],
+      "workspace": "evals/fixtures/offline"
+    },
+    {
+      "id": "flydsl-trace-collect-att",
+      "skill_should_trigger": true,
+      "prompt": "Profile my FlyDSL benchmark with rocprofv3 on MI300X, collect ATT with Python source mappings, and identify the top instruction stalls."
+    },
+    {
+      "id": "flydsl-trace-negative-triton-kernel",
+      "skill_should_trigger": false,
+      "prompt": "Write a Triton vector-add kernel using tl.load and tl.store for NVIDIA A100. I have no performance trace."
+    },
+    {
+      "id": "flydsl-trace-negative-application-timeline",
+      "skill_should_trigger": false,
+      "prompt": "Analyze this PyTorch Chrome trace JSON for CPU launch gaps and end-to-end model throughput using TraceLens."
+    }
+  ]
+}
