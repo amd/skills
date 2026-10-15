@@ -190,6 +190,7 @@ def _accumulate_usage(usage, totals):
     )
     totals["cache_read"] += (
         usage.get("cacheReadTokens")
+        or usage.get("cached_input_tokens")
         or usage.get("cache_read_input_tokens")
         or usage.get("cacheRead")
         or usage.get("cache_read")
@@ -362,6 +363,7 @@ def parse_ndjson_stream(ndjson_path):
             diag["cache_read_tokens"] = (
                 usage.get("cacheReadTokens")
                 or usage.get("cacheReadInputTokens")
+                or usage.get("cached_input_tokens")
                 or usage.get("cache_read_input_tokens")
                 or usage.get("cacheRead")
                 or usage.get("cache_read")

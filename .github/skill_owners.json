@@ -6,6 +6,11 @@
       "product_release_owner": "thiagocrepaldi"
     },
     {
+      "repo": "ROCm/rocm-cli",
+      "engineering_owner": "juhovainio",
+      "product_release_owner": "amd-mkarvir"
+    },
+    {
       "repo": "ROCm/rocm-systems",
       "path": "projects/rocprofiler-sdk",
       "engineering_owner": "sadikarmagan",

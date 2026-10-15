@@ -115,7 +115,7 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 ## Common Patterns
 
 ### Low efficiency vs. baseline
-- **Symptoms:** Normalization at <20% of peak HBM BW while simple elementwise hits >70%.
+- **Symptoms:** Normalization at <20% of peak memory BW while simple elementwise hits >70%.
 - **Reasoning:** Norm kernel may be suboptimal; the elementwise baseline shows the hardware is healthy.
 - **Algorithmic:** LayerNorm or GroupNorm alternatives may have better kernels.
 - **Kernel:** Profile the norm kernel.

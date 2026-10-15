@@ -40,9 +40,9 @@ Usage:
 import argparse
 import json
 import re
+import shlex
 import shutil
 import subprocess
-import sys
 import time
 
 OS_HEADROOM_GB = 16
@@ -111,14 +111,17 @@ def socket_busy_pct(cpus, interval=0.5):
     """Mean CPU-busy% across `cpus` over `interval` seconds, from /proc/stat."""
     def snap():
         d = {}
-        for ln in open("/proc/stat"):
-            if ln.startswith("cpu") and len(ln) > 3 and ln[3].isdigit():
-                p = ln.split()
-                vals = list(map(int, p[1:]))
-                idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
-                d[int(p[0][3:])] = (idle, sum(vals))
+        with open("/proc/stat") as f:
+            for ln in f:
+                if ln.startswith("cpu") and len(ln) > 3 and ln[3].isdigit():
+                    p = ln.split()
+                    vals = list(map(int, p[1:]))
+                    idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+                    d[int(p[0][3:])] = (idle, sum(vals))
         return d
-    a = snap(); time.sleep(interval); b = snap()
+    a = snap()
+    time.sleep(interval)
+    b = snap()
     di = sum(b[c][0] - a[c][0] for c in cpus if c in a and c in b)
     dt = sum(b[c][1] - a[c][1] for c in cpus if c in a and c in b)
     return round(100 * (1 - di / dt), 1) if dt else 0.0
@@ -157,8 +160,10 @@ def main():
         else:
             chosen = min(sids, key=lambda s: busy[s])
             reason = f"all sockets busy (>={args.busy_threshold}%) -> least-busy"
+            # Dict is built outside the f-string: "{ {...} }" needs spaces that flake8 rejects (E201/E202).
+            busy_map = {s: busy[s] for s in sids}
             warn = (f"all {len(sids)} sockets are busy (>= {args.busy_threshold}%): "
-                    f"{ {s: busy[s] for s in sids} }. Proceeding on the least-busy socket "
+                    f"{busy_map}. Proceeding on the least-busy socket "
                     f"{chosen}; performance may suffer. Pass --socket N to override.")
 
     sock = socks[chosen]
@@ -213,7 +218,7 @@ def main():
         print(json.dumps(result, indent=2))
         return
 
-    print(f'export VLLM_CPU_OMP_THREADS_BIND="{bind}"')
+    print(f"export VLLM_CPU_OMP_THREADS_BIND={shlex.quote(bind)}")
     print(f"export VLLM_CPU_KVCACHE_SPACE={kv}")
     print(f"# socket {chosen} ({reason}); per-socket busy%: {busy}")
     print(f"#   container: {container_cpuset}")

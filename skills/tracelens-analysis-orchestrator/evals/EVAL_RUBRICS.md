@@ -141,7 +141,7 @@ Finds every priority item (`### ...P{N}:` headers) and checks for required bold 
 
 Checks the `## Appendix` section for hardware reference values (only for trace1 if in comparative mode):
 - Platform name (e.g., MI300X)
-- Peak HBM BW value (e.g., 5.3 TB/s)
+- Peak memory BW value (e.g., 5.3 TB/s)
 - At least one Peak MAF value (e.g., 708 TFLOPS)
 
 ### Scoring Dimensions

@@ -15,7 +15,7 @@
 ## Hardware support
 
 This recipe supports the **AMD EPYC 9000 server series** for now: Genoa (9004),
-Turin (9005), and 6th Gen [Venice (9006)](https://ir.amd.com/news-events/press-releases/detail/1294/aai-2026-amd-delivers-full-stack-compute-for-the-agentic-ai-era)
+Turin (9005), and 6th Gen Venice (9006)
 (launched at Advancing AI 2026). `scripts/detect.py` reports only these three
 generations as `is_supported_epyc: true`.
 

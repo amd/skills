@@ -22,7 +22,7 @@ section that has STANDALONE / COMPARATIVE variants. Delete the unused variant.
     Standalone efficiency semantics: % of roofline (unchanged).
 
 === GENERAL RULES ===
-1. Warnings section: Only include if there were errors or high-variance operations; omit entirely if all succeeded and no variance flags.
+1. Report markers: emit the `report_mode` marker + one `kind=warning` marker per subagent failure and per `high_variance: true` operation at the top
 2. Executive Summary: Max ~20 lines.
 3. Performance plot: The {{PERF_PLOT}} placeholder is replaced by Step 12.3 with a base64-embedded
    PNG data URI (![Performance Breakdown](data:image/png;base64,...)) of a single horizontal stacked
@@ -67,9 +67,25 @@ section that has STANDALONE / COMPARATIVE variants. Delete the unused variant.
 
 <!-- === STANDALONE title === -->
 # <Model> - <Platform> Standalone Analysis
+<!-- report-begin kind=report_mode mode=agentic -->
+<!-- report-end -->
 
 <!-- === COMPARATIVE title === -->
 # <Model> - Comparative Analysis: <Platform1> vs <Platform2>
+<!-- report-begin kind=report_mode mode=comparative -->
+<!-- report-end -->
+
+<!-- Warning markers (one per flagged item). Omit entirely if nothing flagged. -->
+
+<!-- report-begin kind=warning -->
+> **⚠ Analysis incomplete.** Excluded from recommendations (script failures):
+> - <name> (<tier>) — <brief error>
+<!-- report-end -->
+
+<!-- report-begin kind=warning -->
+> **⚠ Data Quality.** Unreliable kernel-time (CoV > 1.0, extreme variance across instances):
+> - <name> (<category>) — CoV X.X
+<!-- report-end -->
 
 ## Executive Summary
 
@@ -102,28 +118,6 @@ section that has STANDALONE / COMPARATIVE variants. Delete the unused variant.
 | Top Bottleneck Category | Category (X%) | Category (Y%) | — |
 
 {{PERF_PLOT}}
-
-## Warnings
-
-**Include this section ONLY if any subagent failed OR any operation has high_variance: true in *_metrics.json:**
-
-<!-- Subagent failures (if any): -->
-The following analyses could not be completed due to script failures:
-
-| Analysis | Tier | Error Summary |
-|----------|------|---------------|
-| <name> | System / Compute Kernel | <brief error description> |
-
-These are excluded from the recommendations below.
-
-<!-- Data quality warnings (if any operation has high_variance: true in *_metrics.json): -->
-**Data Quality:** The following operations have unreliable kernel time measurements (CoV > 1.0, indicating extreme variance across instances — likely a profiler timing artifact):
-
-| Operation | Category | CoV | Reported Time (ms) |
-|-----------|----------|-----|-------------------|
-| <name> | <category> | X.X | Y.Y |
-
----
 
 ## Compute Kernel Optimizations
 
@@ -495,7 +489,7 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 ### Hardware Reference
 - **Platform**: <platform>
-- **Peak HBM BW**: X TB/s
+- **Peak Memory BW**: X TB/s
 - **Peak MAF (BF16)**: Y TFLOPS
 - **Peak MAF (FP8)**: Z TFLOPS (if supported)
 - **Peak MAF (FP4)**: W TFLOPS (if supported)

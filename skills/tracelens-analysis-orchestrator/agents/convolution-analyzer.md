@@ -121,7 +121,7 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 |------------------|---------------------|------------|
 | Large kernels (5×5+) | >70% of peak TFLOPS | compute-bound |
 | Standard 3×3 | >70% of peak TFLOPS | compute-bound |
-| 1×1 (pointwise) | >60% of peak HBM BW | memory-bound |
+| 1×1 (pointwise) | >60% of peak memory BW | memory-bound |
 | Depthwise | >50% (low parallelism) | varies |
 
 **Transpose overhead bands:**

@@ -1,0 +1,10 @@
+{
+  "source": "amd-zendnn-pytorch-plugin",
+  "repo": "amd/ZenDNN-pytorch-plugin",
+  "ref": "main",
+  "commit": "6b2db6f2a47cc9b603570f6b4a93c37e5d04dba7",
+  "path": "skills/serving-llms-on-epyc",
+  "license": "Apache-2.0",
+  "content_hash": "eaa5899ac5e840f765fb855097d86ba9748f6dc6d0892a55e2394aaf37599733",
+  "imported_at": "2026-10-09T10:09:25Z"
+}
