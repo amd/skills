@@ -77,6 +77,17 @@
           "as": "serving-llms-on-epyc"
         }
       ]
+    },
+    {
+      "repo": "ROCm/rocm-systems",
+      "branch": "develop",
+      "license": "MIT",
+      "skills": [
+        {
+          "path": "projects/rocprofiler-sdk/skills/pc-sampling",
+          "as": "rocprofiler-pc-sampling"
+        }
+      ]
     }
   ]
 }
