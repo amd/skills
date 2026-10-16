@@ -6,6 +6,11 @@
       "product_release_owner": "thiagocrepaldi"
     },
     {
+      "repo": "ROCm/FlyDSL",
+      "engineering_owner": "coderfeli",
+      "product_release_owner": "coderfeli"
+    },
+    {
       "repo": "ROCm/rocm-cli",
       "engineering_owner": "juhovainio",
       "product_release_owner": "amd-mkarvir"
