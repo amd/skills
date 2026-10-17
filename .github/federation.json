@@ -77,6 +77,16 @@
           "as": "serving-llms-on-epyc"
         }
       ]
+    },
+    {
+      "repo": "ROCm/FlyDSL",
+      "license": "Apache-2.0",
+      "branch": "skills/catalog-kernel-authoring",
+      "skills": [
+        {
+          "path": "skills/flydsl-kernel-authoring"
+        }
+      ]
     }
   ]
 }

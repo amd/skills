@@ -1,0 +1,53 @@
+{
+  "evaluations": [
+    {
+      "id": "flydsl-authoring-runtime-branch",
+      "skill_should_trigger": true,
+      "prompt": "Review this FlyDSL fragment without running a GPU: lane = gpu.thread_id(\"x\") % fx.Int64(64); then if const_expr(lane == fx.Int64(0)): store_result(). The kernel has known_block_size=(256,1,1). Write review.md explaining the problem and corrected condition.",
+      "expected_behavior": [
+        "Reads the existing .claude/skills/flydsl-kernel-authoring/SKILL.md from a FlyDSL checkout before carrying out the task.",
+        "Explains that lane is a runtime SSA value despite known_block_size.",
+        "Uses a runtime if condition instead of wrapping the lane comparison in const_expr."
+      ],
+      "unexpected_behavior": [
+        "Claims known_block_size makes the current lane a compile-time constant.",
+        "Claims GPU validation was performed."
+      ],
+      "files_exist": [
+        "review.md"
+      ]
+    },
+    {
+      "id": "flydsl-authoring-pipeline-state",
+      "skill_should_trigger": true,
+      "prompt": "Review a FlyDSL software pipeline that uses for iv, state in range(0, 15, 1, init=init_state), creates an LDS view inside the loop, then uses that view in the epilogue. Check the checked-out frontend when determining how init is lowered. No GPU is available. Write review.md with the minimal structural fixes and why they matter.",
+      "expected_behavior": [
+        "Reads the existing .claude/skills/flydsl-kernel-authoring/SKILL.md from a FlyDSL checkout before carrying out the task.",
+        "Checks the FlyDSL frontend and explains that explicit init selects runtime loop-carried state even with Python integer bounds.",
+        "Preserves explicit init and yields updated loop-carried state in the proposed loop structure.",
+        "Moves LDS allocation/view creation before the loop so it dominates the epilogue."
+      ],
+      "unexpected_behavior": [
+        "Claims the current frontend discards init solely because the bounds are Python integers."
+      ],
+      "files_exist": [
+        "review.md"
+      ]
+    },
+    {
+      "id": "flydsl-authoring-tiled-copy",
+      "skill_should_trigger": true,
+      "prompt": "Show how to use FlyDSL make_layout_tv, make_tiled_copy and copy atoms to partition a 2D tensor across threads on MI300X."
+    },
+    {
+      "id": "flydsl-authoring-negative-nvidia-profile",
+      "skill_should_trigger": false,
+      "prompt": "Analyze an NVIDIA Nsight Compute .ncu-rep report for a CUDA kernel on an H100 and explain its warp stalls."
+    },
+    {
+      "id": "flydsl-authoring-negative-cuda",
+      "skill_should_trigger": false,
+      "prompt": "Convert a CUDA C++ vector-add kernel to HIP using hipify; keep the code in C++."
+    }
+  ]
+}
