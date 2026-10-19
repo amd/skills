@@ -114,12 +114,20 @@ passes — the GPU is AMD. Linux, Windows and WSL2 all run the same workflow.
      open with a nonzero base score for a merely *potentially* relevant
      situation (a container, an APU beside a discrete GPU), so a healthy host
      still returns a non-empty `matched` of sub-threshold entries. Gating on
-     emptiness proposes a fix for a machine with nothing wrong.
+     emptiness proposes a fix for a machine with nothing wrong. True is not
+     automatically the end of the question, either: a `diagnose-only` top
+     match can clear the gate from host state alone, independent of whatever
+     symptom was pasted — see the refinement in step 2.
    - `matched[]` — ranked causes, each with `id`, `title`, `score` (0–100),
      `evidence[]`, and a `fix` (with `fix_id`, `summary`, `commands`, `verify`,
      `notes`, and the `needs_sudo` / `needs_reboot` / `needs_relogin` /
      `auto_applicable` flags). `score >= 75` = high confidence; `50–74` = likely
      (confirm one more piece of evidence with the user first).
+     **Read `fix.class` before you propose anything.** `diagnose-only` means
+     the cause is real and explained but has no remedy — currently only
+     `info-20-gpu-no-rocm-support`, which carries an `info-` id rather than a
+     `fix-N` / `fix-wsl-N` one for that reason. `rocm fix` still takes that id
+     and answers for it, by naming the problem and changing nothing.
    - `out_of_scope` — set only when the host's platform family has no catalog
      entries at all. Linux, Windows and WSL2 are all covered, so this does
      **not** fire for WSL2. When it is set, nothing was checked — say so rather
@@ -137,6 +145,25 @@ passes — the GPU is AMD. Linux, Windows and WSL2 all run the same workflow.
 2. **Propose the fix.** Show the top match's `title`, `evidence`, plan, and
    `verify` command. Only propose applying it when the user is on board.
 
+   If the top match's `fix.class` is `diagnose-only`, there is no fix to
+   propose: relay its `title` and `evidence` as an explanation of the host and
+   **stop there** — *provided the user pasted no symptom, or the evidence
+   plausibly accounts for the one they did.* A `diagnose-only` cause like
+   `info-20-gpu-no-rocm-support` scores from host state alone (the GPU
+   architecture), not from the symptom, so it can be the top match even when
+   the pasted text describes something the evidence never mentions — a crash
+   in the engine actually running on this host, say, rather than anything
+   about ROCm/HIP support. Relaying host-state evidence that does not address
+   what the user pasted and stopping there would silently drop their actual
+   complaint. If a symptom was pasted and this cause's evidence does not
+   plausibly explain it, treat this cause as not having answered the
+   question: say what it does establish about the host, then route upstream
+   per `route_when_no_match` for the pasted symptom itself, exactly as you
+   would if `has_match` were false. You may mention a lower cause only if it
+   *also* clears `min_score_for_match` — below that threshold nothing was
+   established, which is the same bar the `has_match` paragraph above sets,
+   and a `diagnose-only` top match does not lower it.
+
 3. **Apply with consent.** For an auto-applicable fix:
 
    ```
@@ -145,10 +172,14 @@ passes — the GPU is AMD. Linux, Windows and WSL2 all run the same workflow.
    rocm fix <fix-id> --yes      # required to apply in a non-interactive shell
    ```
 
-   Only the four auto-applicable fixes are ones the CLI runs itself. The other 22
+   Only the four auto-applicable fixes are ones the CLI runs itself. The other 23
    are **print-only** (bootloader, kernel, reinstall, Windows driver, …): `rocm
    fix <id>` just prints the plan for the user to run themselves — no prompt, and
    the CLI never performs those.
+
+   One entry is in neither group. `info-20-gpu-no-rocm-support` is
+   **diagnose-only**: `rocm fix` takes the id, names the problem, says there is
+   no reliable fix, and exits 0 having changed nothing.
 
    Of the four, two do not always mutate:
 
