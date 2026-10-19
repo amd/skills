@@ -50,6 +50,10 @@
       "skills": [
         {
           "path": ".claude/skills/flydsl-kernel-authoring"
+        },
+        {
+          "path": ".claude/skills/kernel-trace-analysis",
+          "as": "flydsl-kernel-trace-analysis"
         }
       ]
     },

@@ -1,0 +1,10 @@
+{
+  "source": "rocm-flydsl",
+  "repo": "ROCm/FlyDSL",
+  "ref": "main",
+  "commit": "6245f9b57f2eff82b6dd0c611e33cf765079ffc1",
+  "path": ".claude/skills/kernel-trace-analysis",
+  "license": "Apache-2.0",
+  "content_hash": "07eb3a7803b5db64d93c4774d3213d5ba49ecf5070d2066fe2a8ad4d16852708",
+  "imported_at": "2026-10-19T08:39:35Z"
+}
