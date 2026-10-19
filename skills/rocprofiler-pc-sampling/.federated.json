@@ -1,0 +1,10 @@
+{
+  "source": "rocm-rocm-systems",
+  "repo": "ROCm/rocm-systems",
+  "ref": "develop",
+  "commit": "62872f06058460d0a7fc2a1c629bc182550f8427",
+  "path": "projects/rocprofiler-sdk/skills/pc-sampling",
+  "license": "MIT",
+  "content_hash": "8d2eee99e01b1aa20d257c17249990d01417b3998e8821688857529830ccb6b6",
+  "imported_at": "2026-10-16T19:55:17Z"
+}
