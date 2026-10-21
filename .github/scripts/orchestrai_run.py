@@ -15,8 +15,8 @@ from urllib.parse import urlsplit
 from orchestrai_control_plane import (
     ControlPlaneClient,
     ControlPlaneError,
-    PipelineResults,
     inline_request,
+    require_result_identity,
 )
 from orchestrai_logs import (
     GRADE_RE,
@@ -1030,8 +1030,7 @@ def main() -> int:
     require_windows_provisioning(plan)
     required = (
         "ORCHESTRAI_V2_CI_API_URL", "ORCHESTRAI_V2_OIDC_AUDIENCE",
-        "ORCHESTRAI_V2_WORKSPACE", "ORCHESTRAI_PIPELINE_URL",
-        "ORCHESTRAI_PIPELINE_USER", "ORCHESTRAI_PIPELINE_TOKEN",
+        "ORCHESTRAI_V2_WORKSPACE",
         "ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
     )
     missing = [name for name in required if not env(name)]
@@ -1039,7 +1038,6 @@ def main() -> int:
         raise SystemExit("missing required V2 configuration: " + ", ".join(missing))
 
     client = ControlPlaneClient()
-    evidence = PipelineResults()
     state_path = Path(env("CONTROL_STATE_FILE", ".orchestrai-control-state.json"))
     run_id = ""
     submitted = False
@@ -1061,6 +1059,9 @@ def main() -> int:
         sig: signal.signal(sig, stop) for sig in (signal.SIGINT, signal.SIGTERM)
     }
     try:
+        # Do not reserve hardware for a selection the current CI result API
+        # cannot attribute. Missing OAI capabilities are not an executor bypass.
+        require_result_identity(plan)
         timeout_seconds = int(env("POLL_TIMEOUT_SEC", "13800"))
         outage_seconds = int(env("POLL_ERROR_TIMEOUT_SEC", "300"))
         if min(timeout_seconds, outage_seconds) <= 0:
@@ -1096,21 +1097,15 @@ def main() -> int:
             raise RuntimeError(f"run timed out after {timeout_seconds} seconds")
 
         # Wait for the CP parent, not just its test counter: reporting and
-        # cleanup must be allowed to finish before reading archived evidence.
-        build_url = str(state.get("pipeline_url") or "")
+        # cleanup must be allowed to finish before reading the CI result view.
         result_deadline = time.monotonic() + int(env("RESULT_TIMEOUT_SEC", "90"))
         while True:
-            if build_url and "/queue/" not in build_url:
-                try:
-                    latest_live = evidence.snapshot(build_url)
-                except ControlPlaneError as exc:
-                    retryable = (
-                        "artifacts were unreadable" in str(exc)
-                        or re.search(r"artifact request failed with HTTP (?:408|429|5\d\d)", str(exc))
-                    )
-                    if not retryable or time.monotonic() >= result_deadline:
-                        raise
-                    log("result artifacts temporarily unavailable; retrying")
+            try:
+                latest_live = client.snapshot(run_id, plan)
+            except ControlPlaneError as exc:
+                if "unavailable after bounded retries" not in str(exc) or time.monotonic() >= result_deadline:
+                    raise
+                log("Control Plane test results temporarily unavailable; retrying")
             results = build_results_manifest(
                 plan, latest_live, mode=mode,
                 pipeline_status=pipeline_status, tests_status=tests_status,
@@ -1118,8 +1113,6 @@ def main() -> int:
             if results["ready"] or time.monotonic() >= result_deadline:
                 break
             time.sleep(5)
-            state = client.status(run_id)
-            build_url = str(state.get("pipeline_url") or build_url)
 
         results["run"]["final_pipeline_status"] = pipeline_status
         results["run"]["cleanup_status"] = "not_needed"
@@ -1138,7 +1131,7 @@ def main() -> int:
             log("Control Plane parent did not complete cleanly")
             return 1
         if any(not any(item.get("public_streams", {}).values()) for item in results["items"]):
-            log("some test streams were not present in result artifacts; log coverage is reported separately")
+            log("the CI result API does not provide test streams; detailed log coverage is unavailable")
         failed = sum(item["status"] != "passed" for item in results["items"])
         log(f"captured {len(results['items'])} skill/OS verdict(s), {failed} non-passing; matrix jobs enforce them")
         return 0

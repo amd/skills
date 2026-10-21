@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from orchestrai_control_plane import RESULT_IDENTITY_GAP
 from orchestrai_logs import (
     behavioral_summary_markdown,
     GRADER_ERROR_DIAGNOSTICS,
@@ -34,6 +35,7 @@ SAFE_STATUSES = {
 }
 SAFE_BEHAVIORAL_DIAGNOSTICS = {
     *GRADER_ERROR_DIAGNOSTICS,
+    RESULT_IDENTITY_GAP,
     "Skillscope setup artifacts were missing on the test machine.",
     "The checked-out skills commit did not match the requested commit.",
     "LLM gateway configuration was unavailable on the test machine.",
@@ -173,6 +175,7 @@ def result_category(item: dict) -> str:
         return "Grading error"
     if status == "error" and (
         item.get("error") == UNVERIFIED_BEHAVIORAL_DIAGNOSTIC
+        or item.get("error") == RESULT_IDENTITY_GAP
         or "result manifest" in _safe_error(item.get("error"))
         or "OrchestrAI result" in _safe_error(item.get("error"))
         or "result artifacts" in str(item.get("error") or "")

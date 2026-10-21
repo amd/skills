@@ -189,7 +189,7 @@ class UpstreamPolicyParityTests(unittest.TestCase):
         self.assertIn("id-token: none", job("orchestrai-verdict"))
         self.assertNotIn("secrets.ORCHESTRAI_PASSWORD", WORKFLOW)
         self.assertIn("secrets.ORCHESTRAI_V2_CI_API_URL", WORKFLOW)
-        self.assertIn("secrets.ORCHESTRAI_PIPELINE_TOKEN", WORKFLOW)
+        self.assertNotIn("secrets.ORCHESTRAI_PIPELINE_", WORKFLOW)
         self.assertIn("needs: discover", job("orchestrai-behavioral"))
         self.assertIn(
             "if: needs.discover.outputs.default_any == 'true'",

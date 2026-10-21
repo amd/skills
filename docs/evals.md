@@ -28,7 +28,15 @@ commit: the PR head for pull requests, or the triggering commit for other events
 Discovery does not use GitHub's synthetic PR merge, which could contain skills
 from newer upstream commits that are absent from the tested PR head.
 
-For Strix behavioral runs, each GitHub skill/OS job includes a **Test stdout/stderr
+**V2 rollout status:** the current Control Plane CI API supplies status-only test
+results. It does not supply the session identity needed when multiple skills
+share an adapter, or authenticated test-stream access. Those multi-skill selections
+fail before acquiring machines; they are not silently skipped or split into extra
+allocations. Single-skill selections can use the compatibility result endpoint,
+but do not have full log/grader-detail parity. OAI's detailed Results access
+contract is a rollout dependency, not a reason to add executor credentials.
+
+When test streams are available, each GitHub skill/OS report includes a **Test stdout/stderr
 (redacted)** log group and a downloadable `stdout-stderr.log` in its
 `test-results-SKILL-OS` artifact. Received test output is retained subject to
 redaction and the transport bounds below; sensitive values, malformed credential
@@ -79,28 +87,29 @@ the routing room. Expectation-type counts include only retained grader lines
 associated with a recorded case. Missing/redacted lines are excluded and all
 rates are labeled observed; zero denominators are shown as **Not reported**.
 
-The V2 controller reads archived per-session result JSON from the private
-pipeline build selected by the Control Plane, like Playbooks. It matches both
-the session and test path; an overall green pipeline cannot substitute for a
-missing skill/OS result. Raw result data stays in memory; only normalized results
-and redacted test streams enter GitHub artifacts. It does not fetch or publish
-the pipeline console, dependency/provisioning console, or agent attachments.
+The V2 controller reads `GET /ci/v1/runs/{id}/tests` using the same GitHub OIDC
+identity as submission. It validates the run identity, API version, list shape,
+count and execution identities. A planned adapter path must identify exactly one
+skill and one returned execution; row order and a green parent never substitute
+for that identity. Repeated adapter paths are refused before submission. Duplicate,
+unknown, contradictory or incomplete results fail closed. No executor URLs,
+artifact APIs, consoles, Portal login or additional service credentials are used.
 
 **V2 log coverage limitation:** the CI API exposes test outcomes, not stdout and
-stderr. Streams embedded in session result JSON are retained and redacted, but
-separately sealed/encrypted test-evidence artifacts cannot be read with this CI
-identity. Those streams are reported as unavailable, not empty/successful or
-complete. Case/expectation detail and judge-error reclassification depend on
-the available evidence; a status-only result cannot reconstruct these details.
-Full-log parity requires a supported authenticated V2 evidence-download API;
-this workflow does not bypass that boundary with a Portal login.
+stderr. Streams and grader details are reported as unavailable, not empty or
+complete. A status-only result cannot reconstruct case counts, expectation detail
+or judge-error reclassification. OAI owns the missing authenticated execution and
+evidence-access contract; this workflow does not invent endpoints, consume raw
+document fields, or distribute broad Results/object-store credentials to CI.
+The existing redaction/reporting code remains for evidence integration and offline
+regression coverage; it is not evidence of live stream availability.
 Each stream has a 16 MB transport bound. Oversized responses are rejected rather
 than silently tail-truncated; unavailable/partial streams are labeled, never
 described as full output. Full received streams are printed in the job console
 and saved in the artifact, not embedded in the size-limited Markdown summary.
 Timestamp wrappers are removed only for reconstructing grader summaries.
 The controller waits for the Control Plane parent to become terminal so reporting
-and cleanup can finish, then allows up to 90 seconds for result artifacts.
+and cleanup can finish, then allows up to 90 seconds for test-result publication.
 On timeout, interruption or a controller failure while the parent is active,
 it requests cancellation through V2 and checks for a terminal state for up to
 one minute. Submission retries reuse an idempotency key unique to this GitHub
@@ -122,21 +131,19 @@ masked in the public step preamble:
 | `ORCHESTRAI_V2_CI_API_URL` | HTTPS Control Plane CI API ending in `/ci/v1`, or Portal passthrough ending in `/api/ci/v1`. |
 | `ORCHESTRAI_V2_OIDC_AUDIENCE` | Exact HTTPS audience configured by the Control Plane workspace owner. |
 | `ORCHESTRAI_V2_WORKSPACE` | Workspace slug, not the old Portal space display name. |
-| `ORCHESTRAI_PIPELINE_URL` | Trusted HTTPS pipeline service base (optionally its context path), used to confine result-read credentials. |
-| `ORCHESTRAI_PIPELINE_USER` | Read-only account for that pipeline's build artifacts. |
-| `ORCHESTRAI_PIPELINE_TOKEN` | That account's token; never used to submit/cancel work. |
 
 Keep `ORCHESTRAI_DEVICE_TAGS`, `ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON` and
 `ORCHESTRAI_WINDOWS_DRIVER_SOURCE` unchanged. The routing job still uses
 `ORCHESTR_API_KEY`. The V2 controller no longer consumes `ORCHESTRAI_PORTAL_URL`,
-`ORCHESTRAI_USER`, `ORCHESTRAI_PASSWORD` or `ORCHESTRAI_SPACE`; do not remove shared
+`ORCHESTRAI_USER`, `ORCHESTRAI_PASSWORD`, `ORCHESTRAI_SPACE`, or any
+`ORCHESTRAI_PIPELINE_*` settings. No Jenkins token is needed; do not remove shared
 secrets used by other workflows. Optional Actions **variables**
 `ORCHESTRAI_V2_LINUX_IMAGE` and `ORCHESTRAI_V2_WINDOWS_IMAGE` override the existing
 `ubuntu` / `windows` aliases, which are resolved by the Control Plane.
 
 The workspace owner must authorize the intended repository, workflow ref and
 events in **CI access**, with scopes `plans:write`, `plans:publish`, `runs:start`,
-`runs:read`, and `runs:cancel`. OIDC permission is granted only to the controller
+`runs:read`, `runs:cancel`, and `results:read`. OIDC permission is granted only to the controller
 job (in addition to Instinct's existing federation permission). A 403 means the
 CI access policy must be checked; adding a Portal password will not resolve it.
 No repository settings or workspace trust rules are changed by this PR.

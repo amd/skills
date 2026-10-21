@@ -1,7 +1,7 @@
-"""OrchestrAI V2 CI API and read-only result transport (Playbooks #1120).
+"""OrchestrAI V2 CI API transport using the GitHub job's OIDC identity.
 
-Only the Control Plane starts/cancels runs. Pipeline access reads archived
-session results; it never schedules work or controls machine allocation.
+All service requests use the Control Plane CI API; no executor credentials
+or executor URLs are consumed. Detailed evidence access is an OAI API gap.
 Remote response bodies, URLs, IDs and credentials must not reach public logs.
 """
 
@@ -24,6 +24,11 @@ from pathlib import Path
 TERMINAL = {"passed", "failed", "unstable", "error", "cancelled"}
 MAX_JSON = 32 * 1024 * 1024
 ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}\Z")
+RESULT_IDENTITY_GAP = (
+    "OrchestrAI CI results cannot distinguish multiple skills using the same "
+    "test adapter. No machines were requested. OAI must provide authenticated "
+    "per-session results before this selection can run."
+)
 
 
 class ControlPlaneError(RuntimeError):
@@ -54,7 +59,7 @@ def https_url(value: str) -> str:
 
 
 def read_response(request, *, limit=MAX_JSON, timeout=30):
-    # Explicitly prohibit redirects so neither OIDC nor Basic auth can be sent
+    # Explicitly prohibit redirects so OIDC authentication cannot be sent
     # to a different service. No exception from urllib is printed to the log.
     with urllib.request.build_opener(NoRedirect()).open(
         request, timeout=timeout
@@ -70,7 +75,7 @@ def read_response(request, *, limit=MAX_JSON, timeout=30):
 def inline_request(plan: dict) -> dict:
     document = {
         "sessions": deepcopy(plan["sessions"]),
-        "run_settings": {**plan.get("run_settings", {}), "executor": "jenkins"},
+        "run_settings": deepcopy(plan.get("run_settings", {})),
     }
     # Generic ubuntu/windows aliases are resolved by the Control Plane. Do not
     # call the retired Portal boot-resources API or choose an arbitrary image.
@@ -98,6 +103,18 @@ def inline_request(plan: dict) -> dict:
             "OrchestrAI V2 inline plan exceeds the CI API size limit."
         )
     return payload
+
+
+def require_result_identity(plan: dict) -> None:
+    """The current /tests compatibility API identifies tests, not sessions.
+
+    Never fan out one adapter outcome to several skills or zip rows to the
+    plan order. Stop before admission when that public contract is ambiguous.
+    OAI's detailed execution/read-access contract must replace this restriction.
+    """
+    paths = [test["path"] for session in plan["sessions"] for test in session["tests"]]
+    if len(paths) != len(set(paths)):
+        raise ControlPlaneError(RESULT_IDENTITY_GAP)
 
 
 def idempotency_key(plan: dict) -> str:
@@ -266,6 +283,94 @@ class ControlPlaneClient:
             raise ControlPlaneError("OrchestrAI V2 returned a mismatched run identity.")
         return run
 
+    def snapshot(self, run_id, plan):
+        """Read the existing CI API's status-only results without inferring IDs.
+
+        A unique planned test path can be attributed to its one skill. Multiple
+        executions of that path (including ambiguous retries) are refused. The
+        legacy normalizer envelope here is not a launcher response or proof of
+        session/cleanup completion; the controller separately waits for the run.
+        Unknown fields, raw documents and storage locations are not consumed.
+        """
+        require_result_identity(plan)
+        if not isinstance(run_id, str) or not ID.fullmatch(run_id):
+            raise ControlPlaneError("OrchestrAI V2 returned an invalid run identity.")
+        response = self.request("GET", f"/runs/{run_id}/tests")
+        tests = response.get("tests")
+        if (
+            response.get("api_version") != "ci/v1"
+            or response.get("run_id") != run_id
+            or not isinstance(tests, list)
+            or not all(isinstance(test, dict) for test in tests)
+            or type(response.get("total")) is not int
+            or response["total"] != len(tests)
+            or response.get("next_cursor")
+            or len(tests) > 1000
+        ):
+            raise ControlPlaneError(
+                "OrchestrAI V2 returned invalid or incomplete test results."
+            )
+        seen = set()
+        for test in tests:
+            execution_id = test.get("execution_id")
+            if (
+                not isinstance(execution_id, str)
+                or not 1 <= len(execution_id) <= 512
+                or any(c.isspace() or ord(c) < 32 for c in execution_id)
+                or execution_id in seen
+            ):
+                raise ControlPlaneError(
+                    "OrchestrAI V2 returned missing or duplicate execution identities."
+                )
+            seen.add(execution_id)
+        sessions = []
+        for session in plan["sessions"]:
+            path = session["tests"][0]["path"]
+            matches = [
+                test for test in tests if (test.get("path") or test.get("name")) == path
+            ]
+            if not matches:
+                continue  # Publication can lag run completion; the caller retries.
+            if len(matches) != 1:
+                raise ControlPlaneError(
+                    "OrchestrAI V2 returned ambiguous results for a test adapter."
+                )
+            test = matches[0]
+            outcome = test.get("outcome")
+            # The compatibility API does not expose attempt/superseded metadata.
+            # Never select the last row or use the parent's green status.
+            status = (
+                outcome
+                if isinstance(outcome, str)
+                and outcome
+                in {"passed", "failed", "error", "skipped", "cancelled", "aborted"}
+                else "error"
+            )
+            error = test.get("error")
+            if error is not None and not isinstance(error, str):
+                raise ControlPlaneError("OrchestrAI V2 returned an invalid test error.")
+            error = error or ""
+            if status != outcome:
+                error = "OrchestrAI did not publish a recognized terminal test outcome."
+            exit_code = test.get("exit_code")
+            if exit_code is not None and type(exit_code) is not int:
+                raise ControlPlaneError(
+                    "OrchestrAI V2 returned an invalid test exit code."
+                )
+            if status == "passed" and (exit_code not in (None, 0) or error):
+                status, error = (
+                    "error",
+                    "OrchestrAI published a passing outcome with failure evidence.",
+                )
+            sessions.append(
+                {
+                    "name": session["name"],
+                    "status": "completed",
+                    "tests": [{"path": path, "status": status, "error": error}],
+                }
+            )
+        return {"launcher": {"sessions": sessions}}
+
     def cancel_and_wait(self, run_id, *, timeout=60):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -287,104 +392,3 @@ class ControlPlaneClient:
                 pass
             time.sleep(3)
         return False
-
-
-class PipelineResults:
-    """Read session evidence from the single CP-selected build, never consoleText.
-
-    The configured base confines Basic auth to the intended pipeline service
-    AND folder. Artifact paths come from a narrow allowlist, not arbitrary URLs
-    supplied by test output. Encrypted evidence is not decoded or published.
-    """
-
-    def __init__(self):
-        self.base = https_url(os.environ["ORCHESTRAI_PIPELINE_URL"]) + "/"
-        raw = (
-            os.environ["ORCHESTRAI_PIPELINE_USER"]
-            + ":"
-            + os.environ["ORCHESTRAI_PIPELINE_TOKEN"]
-        )
-        self.auth = "Basic " + base64.b64encode(raw.encode()).decode()
-
-    def read(self, build_url, path):
-        build = https_url(build_url) + "/"
-        if not build.startswith(self.base) or not re.fullmatch(
-            r"(?:job/[A-Za-z0-9_.-]+/)+[0-9]+/", build[len(self.base) :]
-        ):
-            raise ControlPlaneError(
-                "OrchestrAI V2 returned an untrusted pipeline build URL."
-            )
-        try:
-            return read_response(
-                urllib.request.Request(
-                    build + path,
-                    headers={
-                        "Authorization": self.auth,
-                        "Accept": "application/json",
-                    },
-                )
-            )
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                return None
-            raise ControlPlaneError(
-                f"OrchestrAI V2 result artifact request failed with HTTP {exc.code}."
-            ) from None
-        except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError):
-            raise ControlPlaneError(
-                "OrchestrAI V2 result artifacts were unreadable."
-            ) from None
-
-    def snapshot(self, build_url):
-        listing = self.read(build_url, "api/json?tree=artifacts[relativePath]")
-        if listing is None:
-            return {"launcher": {"sessions": []}}
-        if not isinstance(listing, dict) or not isinstance(
-            listing.get("artifacts"), list
-        ):
-            raise ControlPlaneError("OrchestrAI V2 result artifact index was invalid.")
-        paths = [
-            a.get("relativePath", "")
-            for a in listing["artifacts"]
-            if isinstance(a, dict)
-        ]
-        paths = [
-            p
-            for p in paths
-            if isinstance(p, str)
-            and re.fullmatch(r"\.pipeline/results/[A-Za-z0-9_-]+_results\.json", p)
-        ]
-        if len(paths) > 256 or len(paths) != len(set(paths)):
-            raise ControlPlaneError("OrchestrAI V2 result artifact index was invalid.")
-        sessions = []
-        total_bytes = 0
-        for path in paths:
-            session = self.read(build_url, "artifact/" + path)
-            if not isinstance(session, dict):
-                raise ControlPlaneError(
-                    "OrchestrAI V2 session result artifact was invalid."
-                )
-            total_bytes += len(json.dumps(session).encode())
-            if total_bytes > 64 * 1024 * 1024:
-                raise ControlPlaneError(
-                    "OrchestrAI V2 result artifacts exceeded the transport limit."
-                )
-            tests = session.get("tests") or session.get("jobs") or []
-            if not isinstance(tests, list) or not all(
-                isinstance(t, dict) for t in tests
-            ):
-                raise ControlPlaneError(
-                    "OrchestrAI V2 session test results were invalid."
-                )
-            normalized = []
-            for test in tests:
-                test = dict(test)
-                test["path"] = (
-                    test.get("path") or test.get("test_path") or test.get("name")
-                )
-                test["job_id"] = test.get("job_id") or test.get("id")
-                if isinstance(test.get("duration_ms"), (int, float)):
-                    test["duration"] = f"{max(0, test['duration_ms']) / 1000:g}s"
-                normalized.append(test)
-            sessions.append({**session, "tests": normalized})
-        return {"launcher": {"sessions": sessions}}

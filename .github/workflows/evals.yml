@@ -434,10 +434,6 @@ jobs:
           ORCHESTRAI_V2_WORKSPACE: ${{ secrets.ORCHESTRAI_V2_WORKSPACE }}
           ORCHESTRAI_V2_LINUX_IMAGE: ${{ vars.ORCHESTRAI_V2_LINUX_IMAGE }}
           ORCHESTRAI_V2_WINDOWS_IMAGE: ${{ vars.ORCHESTRAI_V2_WINDOWS_IMAGE }}
-          # Read-only result access, not a second pipeline trigger.
-          ORCHESTRAI_PIPELINE_URL: ${{ secrets.ORCHESTRAI_PIPELINE_URL }}
-          ORCHESTRAI_PIPELINE_USER: ${{ secrets.ORCHESTRAI_PIPELINE_USER }}
-          ORCHESTRAI_PIPELINE_TOKEN: ${{ secrets.ORCHESTRAI_PIPELINE_TOKEN }}
         run: exec python3 .github/scripts/orchestrai_run.py
       - name: Upload OrchestrAI result manifest
         if: always()

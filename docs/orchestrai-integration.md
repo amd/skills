@@ -51,7 +51,7 @@ GPU-readiness check remains deferred; coverage depends on each skill's case.
 ## Configuration and scope
 
 Keep `ORCHESTRAI_CONTROL_RUNNER` set to the runner pool with access to the Control
-Plane CI API, private pipeline artifacts and model gateway, such as `arc-lnx-pub`. Discovery and reporting use
+Plane CI API and model gateway, such as `arc-lnx-pub`. Discovery and reporting use
 GitHub-hosted runners. No separate wait-runner setting is used.
 
 Routing keeps its existing model credential. The V2 controller uses GitHub OIDC
@@ -59,21 +59,34 @@ to submit an inline plan with `require_capacity: queue`, poll it and cancel on
 interruption. It no longer logs into the Portal or queries its stock-image catalog;
 the Control Plane resolves OS aliases and owns machine acquisition. See the
 [V2 configuration](evals.md#control-plane-v2-configuration) for the required
-endpoint/workspace settings, workspace CI access scopes and read-only pipeline
-artifact credentials. Those new settings must be configured before a live run.
+endpoint/workspace settings and workspace CI access scopes (including
+`results:read`). No executor credentials are required. The Control Plane chooses
+the execution backend; the Skills workflow does not force one.
 
 The jobs do not declare a new `skills-ci` Environment. Secrets stored
 only in that Environment will not be available. This change does not move
 credentials or modify repository settings, runner groups, branch rules or
 federation rules. Instinct retains its selected Environment.
 
-Like Playbooks V2, result reading is separate from submission. Skills reads the
-CP-selected build's per-session result artifacts, not just an overall success
-flag. Missing or ambiguous skill/OS evidence fails closed. Embedded stdout/stderr
-is redacted as before. The CI API does not expose full test logs, and encrypted
-evidence artifacts are not readable by this workflow: absent streams and grader
-details are marked unavailable. Full-log parity remains a V2 evidence-API gap,
-not a reason to expose raw pipeline consoles or bypass authentication.
+### Pending OAI reporting capability
+
+Skills reads status-only results from the existing CI API, not the execution
+backend. This is deliberately different from Playbooks' direct artifact reader.
+The API currently omits plan-session correlation, counting-attempt metadata and
+test streams. A single planned adapter path with one execution can be attributed
+to its skill; multi-skill selections reusing that path stop before any machines
+are requested. Duplicate executions, absent results and unknown outcomes cannot
+pass. The workflow does not guess by row order, copy a parent verdict to every
+skill, or silently change how many machines are requested.
+
+Full multi-skill and log parity is **blocked on OAI's authenticated detailed
+Results/evidence read contract**. OAI keeps canonical evidence in Results/object
+storage, not bulk data in the Control Plane. The read contract must provide
+run-scoped CI authorization, stable plan-session/execution and retry identity,
+publication completeness and bounded authenticated stream access. Neither a
+Portal login nor a broad Results service key is a substitute. The existing
+redaction code remains but unavailable streams/grader details are reported as
+unavailable. A mock pass or a status-only smoke is not full rollout validation.
 
 Additional authorization hardening is a separate change: reviewed-controller
 checkout, new Environment approval checks and additional PR/branch restrictions
