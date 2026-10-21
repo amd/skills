@@ -3,20 +3,21 @@
 
 from __future__ import annotations
 
-import http.client
 import json
 import os
 import re
 import signal
-import ssl
 import time
-import urllib.error
-import urllib.request
-from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from orchestrai_control_plane import (
+    ControlPlaneClient,
+    ControlPlaneError,
+    PipelineResults,
+    inline_request,
+)
 from orchestrai_logs import (
     GRADE_RE,
     GRADER_ERROR_DIAGNOSTICS,
@@ -196,14 +197,6 @@ def require_windows_provisioning(plan: dict) -> None:
             "Windows graphics provisioning requires direct copy, test signing "
             "before driver installation, and a reboot after each"
         )
-
-
-def build_run_request(plan: dict, plan_id: str) -> dict[str, Any]:
-    """Return the private trigger body without logging or exporting it."""
-    request: dict[str, Any] = {"plan_id": plan_id}
-    if isinstance(plan.get("builds_json"), dict):
-        request["builds_json"] = plan["builds_json"]
-    return request
 
 
 def safe_status(value: object, allowed: set[str]) -> str:
@@ -415,10 +408,22 @@ def classify_behavioral_test_output(test: dict[str, Any]) -> str:
 
 def classify_controller_exception(value: BaseException) -> str:
     """Return a useful fixed error without exporting a remote response body."""
+    if isinstance(value, ControlPlaneError):
+        return str(value)
     message = str(value)
     if isinstance(value, json.JSONDecodeError):
-        return "The OrchestrAI Portal returned an invalid response."
+        return "The OrchestrAI Control Plane returned an invalid response."
     safe_patterns = (
+        r"^OrchestrAI V2 denied this workflow\. Check workspace CI access "
+        r"rules, audience, repository, workflow ref, event and scopes\.$",
+        r"^OrchestrAI V2 CI API was unavailable after bounded retries\.$",
+        r"^OrchestrAI V2 CI request failed with HTTP \d{3}; "
+        r"inspect the private Control Plane diagnostics\.$",
+        r"^OrchestrAI V2 result artifact request failed with HTTP \d{3}\.$",
+        r"^OrchestrAI V2 result artifacts were unreadable\.$",
+        r"^The OrchestrAI Control Plane returned an invalid response\.$",
+        r"^OrchestrAI run was interrupted\.$",
+        # Accept old fixed diagnostics when re-reading historical artifacts.
         r"^OrchestrAI Portal request failed with HTTP \d{3}; "
         r"inspect the Portal logs for details$",
         r"^OrchestrAI Portal was unreachable$",
@@ -439,7 +444,7 @@ def classify_controller_exception(value: BaseException) -> str:
         return (
             "The configured OrchestrAI space was not available to the service account."
         )
-    return "The OrchestrAI controller failed; inspect the Portal logs for details."
+    return "The OrchestrAI controller failed; inspect the private Control Plane diagnostics."
 
 
 def poll_outage_exhausted(
@@ -520,123 +525,6 @@ def safe_failure_message(value: object) -> str:
     return classify_failure_line(line)
 
 
-class PortalClient:
-    def __init__(self, base_url: str) -> None:
-        self.base_url = base_url.rstrip("/")
-        self.token = ""
-        self.space_id = ""
-
-    def request(
-        self,
-        method: str,
-        path: str,
-        payload: dict | None = None,
-        *,
-        timeout_seconds: int = 30,
-        text_response: bool = False,
-    ) -> Any:
-        data = None if payload is None else json.dumps(payload).encode("utf-8")
-        headers = {"Accept": "text/plain" if text_response else "application/json"}
-        if data is not None:
-            headers["Content-Type"] = "application/json"
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
-        if self.space_id:
-            headers["X-Space-Id"] = self.space_id
-        request = urllib.request.Request(
-            f"{self.base_url}{path}", data=data, headers=headers, method=method
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-                if text_response:
-                    raw = response.read(MAX_TEST_LOG_BYTES + 1)
-                    if len(raw) > MAX_TEST_LOG_BYTES:
-                        raise RuntimeError(
-                            "The OrchestrAI test log exceeded its size limit."
-                        )
-                    return raw.decode("utf-8", errors="replace")
-                body = response.read().decode("utf-8")
-            return json.loads(body) if body else {}
-        except urllib.error.HTTPError as exc:
-            # Consume the response so the connection can be reused, but never
-            # copy a server-owned body into public GitHub logs or artifacts.
-            try:
-                exc.read(2000)
-            except (OSError, http.client.HTTPException):
-                pass
-            raise RuntimeError(
-                f"OrchestrAI Portal request failed with HTTP {exc.code}; "
-                "inspect the Portal logs for details"
-            ) from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError("OrchestrAI Portal was unreachable") from exc
-        except TimeoutError as exc:
-            raise RuntimeError("OrchestrAI Portal request timed out") from exc
-        except (OSError, http.client.HTTPException, ssl.SSLError) as exc:
-            raise RuntimeError("OrchestrAI Portal response could not be read") from exc
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RuntimeError(
-                "The OrchestrAI Portal returned an invalid response."
-            ) from exc
-
-    def cancel(self, run_id: str) -> None:
-        try:
-            # GitHub gives a cancelled step only a short grace period before
-            # killing the process tree. Keep cleanup inside that window.
-            self.request("POST", f"/api/runs/{run_id}/cancel", {}, timeout_seconds=5)
-            log("cancellation requested for the active run")
-        except Exception:  # best effort while the process is being interrupted
-            log("warning: could not cancel the active run")
-
-    def cancel_and_wait(self, run_id: str, *, timeout_seconds: int = 60) -> bool:
-        """Retry idempotent cleanup and require a terminal parent state.
-
-        A timed-out POST may already have been accepted. Read the run before
-        retrying; neither an acknowledgement nor 'cancelling' confirms cleanup.
-        Signal handlers still use cancel() within GitHub's short grace period.
-        """
-        deadline = time.monotonic() + max(timeout_seconds, 0)
-        next_cancel = 0.0
-        while time.monotonic() < deadline:
-            try:
-                state = self.request(
-                    "GET",
-                    f"/api/runs/{run_id}",
-                    timeout_seconds=max(1, min(10, int(deadline - time.monotonic()))),
-                )
-                if (
-                    isinstance(state, dict)
-                    and safe_status(
-                        state.get("pipeline_status") or state.get("status"),
-                        SAFE_PIPELINE_STATES,
-                    )
-                    in TERMINAL_PIPELINE_STATES
-                ):
-                    log("parent run reached a terminal state; cleanup confirmed")
-                    return True
-            except RuntimeError:
-                pass
-            now = time.monotonic()
-            if now >= deadline:
-                break
-            if now >= next_cancel:
-                try:
-                    self.request(
-                        "POST",
-                        f"/api/runs/{run_id}/cancel",
-                        {},
-                        timeout_seconds=max(1, min(10, int(deadline - now))),
-                    )
-                except RuntimeError:
-                    pass  # Includes a terminal-state race (HTTP 409).
-                next_cancel = time.monotonic() + 15
-            remaining = deadline - time.monotonic()
-            if remaining > 0:
-                time.sleep(min(3, remaining))
-        log("error: parent run cleanup could not be confirmed; inspect OrchestrAI")
-        return False
-
-
 def validate_plan(path: Path) -> dict:
     try:
         plan = json.loads(path.read_text(encoding="utf-8"))
@@ -648,85 +536,6 @@ def validate_plan(path: Path) -> dict:
     if not all(isinstance(s, dict) and s.get("tests") for s in sessions):
         raise SystemExit("every plan session must contain at least one test")
     return plan
-
-
-def _is_windows_client_image(image: str) -> bool:
-    version = image[len("windows") : len("windows") + 1]
-    return "/" not in image and image.startswith("windows") and version.isdigit()
-
-
-def resolve_stock_os_images(plan: dict, client: PortalClient) -> None:
-    """Replace generic OS selectors with exact broker-allowlisted images."""
-    generic_sessions = [
-        session
-        for session in plan.get("sessions", [])
-        if str(session.get("os_image") or "") in {"ubuntu", "windows"}
-    ]
-    if not generic_sessions:
-        return
-
-    # Boot-resource discovery is an idempotent read. The Portal can briefly
-    # return an empty catalog while its broker inventory is refreshing, so do
-    # not turn one transient response into a failure for every selected skill.
-    resources: object = []
-    last_error: RuntimeError | None = None
-    attempts = 5
-    for attempt in range(1, attempts + 1):
-        try:
-            resources = client.request("GET", "/api/playground/boot-resources")
-            last_error = None
-        except RuntimeError as exc:
-            last_error = exc
-            resources = []
-
-        if isinstance(resources, list) and resources:
-            break
-        if attempt < attempts:
-            log(
-                "warning: stock OS image catalog was unavailable; "
-                f"retrying discovery ({attempt}/{attempts})"
-            )
-            time.sleep(5 * attempt)
-    else:
-        if last_error is not None:
-            raise RuntimeError(
-                f"could not resolve exact stock OS images: {last_error}"
-            ) from last_error
-        raise RuntimeError("could not resolve stock OS images: no images were returned")
-
-    available_images = [
-        (str(item.get("os")), str(item.get("type") or ""))
-        for item in resources
-        if isinstance(item, dict) and item.get("os")
-    ]
-    for session in generic_sessions:
-        requested = str(session.get("os_image") or "")
-        if requested == "windows":
-            # A generic Windows behavioral run needs a normal client image.
-            # Broker client images are named windows11-* at the top level;
-            # windows/azure-host-* and windows/vhlk-controller-* are
-            # specialized images and must not be selected.
-            candidates = [
-                (image, image_type)
-                for image, image_type in available_images
-                if _is_windows_client_image(image)
-            ]
-        else:
-            candidates = [
-                (image, image_type)
-                for image, image_type in available_images
-                if image.startswith("ubuntu/")
-            ]
-        if not candidates:
-            raise RuntimeError(
-                f"could not resolve generic {requested!r} to a compatible image"
-            )
-
-        # Prefer a warm ratio image. Fall back to a broker-allowlisted
-        # on-demand image when the requested OS has no ratio entry.
-        candidates.sort(key=lambda item: (item[1] != "ratio", item[0]))
-        session["os_image"] = candidates[0][0]
-        log(f"resolved {requested} to an available stock image")
 
 
 def expected_items(plan: dict) -> list[dict[str, Any]]:
@@ -809,31 +618,6 @@ def jenkins_failure_summary(live: dict, *, limit: int = 20) -> list[str]:
     return sanitized[-max(limit, 1) :]
 
 
-def merge_live_snapshot(previous: dict, current: dict) -> dict:
-    """Keep the latest live state while retaining only safe failure context.
-
-    The Portal live endpoint advances its Jenkins log cursor. A later response can
-    therefore omit the failure line returned by an earlier response. Persist the
-    redacted summary, never the full console, across those polls.
-    """
-    merged = deepcopy(current)
-    # Metadata can disappear from a later cached snapshot. Keep a validated
-    # report link, never the rest of the previous response or its raw logs.
-    if url := snapshot_report_url(current) or snapshot_report_url(previous):
-        merged["rp_url"] = url
-    failure_lines = jenkins_failure_summary(previous) + jenkins_failure_summary(current)
-    deduplicated: list[str] = []
-    for line in failure_lines:
-        if line not in deduplicated:
-            deduplicated.append(line)
-    if deduplicated:
-        jenkins = merged.setdefault("jenkins", {})
-        if isinstance(jenkins, dict):
-            jenkins["safe_failure_summary"] = deduplicated[-MAX_FAILURE_LINES:]
-            jenkins.pop("log_text", None)
-    return merged
-
-
 def build_results_manifest(
     plan: dict,
     live: dict,
@@ -842,7 +626,7 @@ def build_results_manifest(
     pipeline_status: str = "",
     tests_status: str = "",
 ) -> dict:
-    """Normalize the Portal live snapshot into one verdict per skill and OS."""
+    """Normalize session evidence into one verdict per skill and OS."""
     launcher = (live.get("launcher") if isinstance(live, dict) else {}) or {}
     if not isinstance(launcher, dict):
         launcher = {}
@@ -1145,213 +929,6 @@ def sanitized_live_snapshot(live: dict) -> dict:
     return clean
 
 
-def collect_test_logs(
-    client: PortalClient,
-    plan: dict,
-    live: dict,
-    *,
-    run_id: str,
-    timeout_seconds: int = 120,
-    poll_seconds: int = 5,
-) -> dict:
-    """Fetch requested test streams privately after parent completion/cleanup.
-
-    /live can contain only progress metadata, and persisted logs can lag the
-    terminal state. Use the authenticated, same-Portal log endpoint with one
-    shared retry budget. Never follow launcher URLs or export raw streams.
-    """
-    enriched = deepcopy(live)
-    launcher = enriched.get("launcher")
-    sessions = launcher.get("sessions") if isinstance(launcher, dict) else []
-    if not isinstance(sessions, list):
-        sessions = []
-    pending: list[tuple[dict, str]] = []
-    for expected in expected_items(plan):
-        matches = [
-            session
-            for session in sessions
-            if isinstance(session, dict)
-            and _matches_session(str(session.get("name") or ""), expected["session"])
-        ]
-        if len(matches) != 1:
-            continue
-        session_tests = matches[0].get("tests")
-        if not isinstance(session_tests, list):
-            continue
-        tests = [
-            test
-            for test in session_tests
-            if isinstance(test, dict)
-            and expected["path"]
-            in {str(test.get("path") or ""), str(test.get("name") or "")}
-        ]
-        if len(tests) != 1:
-            continue
-        test = tests[0]
-        if (
-            safe_status(test.get("status"), SAFE_TEST_STATES)
-            not in TERMINAL_TEST_STATES
-        ):
-            continue
-        # IDs are opaque routing data, never URLs or paths supplied by an actor.
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", str(test.get("job_id") or "")):
-            continue
-        for stream in ("stdout", "stderr"):
-            if not isinstance(test.get(stream), str) or not test[stream]:
-                pending.append((test, stream))
-    total = len(pending)
-    if not pending:
-        return enriched
-    deadline = time.monotonic() + max(timeout_seconds, 0)
-    while pending and time.monotonic() < deadline:
-        retry: list[tuple[dict, str]] = []
-        for test, stream in pending:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                retry.append((test, stream))
-                continue
-            try:
-                text = client.request(
-                    "GET",
-                    f"/api/runs/{run_id}/logs/{test['job_id']}?stream={stream}",
-                    timeout_seconds=max(1, min(10, int(remaining))),
-                    text_response=True,
-                )
-                if not isinstance(text, str):
-                    raise RuntimeError("Invalid test log response")
-                test[stream] = text
-            except RuntimeError:
-                retry.append((test, stream))
-        pending = retry
-        remaining = deadline - time.monotonic()
-        if pending and remaining > 0:
-            time.sleep(min(max(poll_seconds, 1), remaining))
-    log(
-        f"retrieved {total - len(pending)}/{total} requested test log streams; complete received streams will be redacted before publication"
-    )
-    if pending:
-        log(
-            "warning: some test streams were unavailable; public log coverage is incomplete"
-        )
-    return enriched
-
-
-def collect_report_metadata(
-    client: PortalClient,
-    *,
-    run_id: str,
-    initial_live: dict,
-    initial_pipeline_status: str = "",
-    timeout_seconds: int = 60,
-    poll_seconds: int = 5,
-) -> dict[str, str]:
-    """Read final parent state without replacing pre-cleanup test evidence.
-
-    Do not wait for report registration or read cached report links. The direct
-    run record is authoritative for termination, and metadata is advisory.
-    """
-    final_status = (
-        initial_pipeline_status
-        if initial_pipeline_status in TERMINAL_PIPELINE_STATES
-        else "unknown"
-    )
-    deadline = time.monotonic() + max(0, min(timeout_seconds, 120))
-    while time.monotonic() < deadline:
-        for endpoint in (f"/api/runs/{run_id}",):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            try:
-                snapshot = client.request(
-                    "GET",
-                    endpoint,
-                    timeout_seconds=max(1, min(10, int(remaining))),
-                )
-                if not isinstance(snapshot, dict):
-                    continue
-                # /live is cached. The direct run record is authoritative for
-                # termination; do not replace it with a stale live status.
-                if endpoint == f"/api/runs/{run_id}":
-                    status = safe_status(
-                        snapshot.get("pipeline_status") or snapshot.get("status"),
-                        SAFE_PIPELINE_STATES,
-                    )
-                    if status in TERMINAL_PIPELINE_STATES:
-                        final_status = status
-            except RuntimeError:
-                pass  # Never echo Portal response bodies or change a verdict.
-            if final_status != "unknown":
-                break
-        if final_status != "unknown":
-            break
-        remaining = deadline - time.monotonic()
-        if remaining > 0:
-            time.sleep(min(max(poll_seconds, 1), remaining))
-    if final_status == "unknown":
-        log("warning: final parent status was unavailable after metadata refresh")
-    return {"final_pipeline_status": final_status}
-
-
-def collect_live_results(
-    client: PortalClient,
-    plan: dict,
-    *,
-    run_id: str,
-    pipeline_status: str,
-    tests_status: str,
-    timeout_seconds: int,
-    poll_seconds: int,
-    initial_live: dict | None = None,
-) -> tuple[dict, dict]:
-    """Wait briefly for the terminal launcher snapshot and normalize it."""
-    deadline = time.monotonic() + max(timeout_seconds, 0)
-    latest_live: dict = initial_live or {}
-    latest_manifest = build_results_manifest(
-        plan,
-        latest_live,
-        mode="live",
-        pipeline_status=pipeline_status,
-        tests_status=tests_status,
-    )
-    if latest_manifest["ready"]:
-        return latest_manifest, latest_live
-    last_error = ""
-    while True:
-        try:
-            response = client.request("GET", f"/api/runs/{run_id}/live")
-            if not isinstance(response, dict):
-                raise RuntimeError("live endpoint returned a non-object response")
-            latest_live = merge_live_snapshot(latest_live, response)
-            latest_manifest = build_results_manifest(
-                plan,
-                latest_live,
-                mode="live",
-                pipeline_status=pipeline_status,
-                tests_status=tests_status,
-            )
-            last_error = ""
-            if latest_manifest["ready"]:
-                return latest_manifest, latest_live
-        except RuntimeError as exc:
-            last_error = str(exc)
-
-        if time.monotonic() >= deadline:
-            if last_error:
-                for item in latest_manifest["items"]:
-                    if not item["terminal"]:
-                        item["status"] = "error"
-                        item["error"] = (
-                            f"could not read terminal live results: {last_error}"
-                        )
-            return latest_manifest, latest_live
-        time.sleep(max(poll_seconds, 1))
-
-
-def run_outcome_is_terminal(pipeline_status: str, manifest: dict) -> bool:
-    """Aggregate test status is provisional; require every requested session."""
-    return pipeline_status in TERMINAL_PIPELINE_STATES or manifest.get("ready") is True
-
-
 def pipeline_reporting_completed(
     pipeline_status: str,
     items: list[dict],
@@ -1410,8 +987,7 @@ def summary(
         ) or []
         if failure_summary:
             handle.write("\n### Infrastructure failure\n\n```text\n")
-            for line in failure_summary:
-                handle.write(safe_failure_message(line) + "\n")
+            handle.writelines(safe_failure_message(line) + "\n" for line in failure_summary)
             handle.write("```\n")
         items = (results or {}).get("items") or []
         if items:
@@ -1429,315 +1005,174 @@ def summary(
 
 
 def main() -> int:
-    plan_path = Path(env("PLAN_FILE"))
-    if not str(plan_path):
+    if not env("PLAN_FILE"):
         raise SystemExit("PLAN_FILE is required")
-    plan = validate_plan(plan_path)
+    plan = validate_plan(Path(env("PLAN_FILE")))
     plan_name = str(plan.get("name") or "skills-evals")
     mode = env("MODE", "live").lower()
     if mode not in {"live", "mock"}:
         raise SystemExit("MODE must be live or mock")
     results_path = Path(env("RESULTS_FILE", "orchestrai-results.json"))
     live_path = Path(env("LIVE_FILE", "orchestrai-live.json"))
-    # Validate the one-session-per-item reporting contract before contacting
-    # the Portal or allocating hardware.
     expected_items(plan)
 
     if mode == "mock":
+        inline_request(plan)  # Exercise the V2 envelope without OIDC or hardware.
         results = mock_results_manifest(plan)
         _write_json(results_path, results)
         _write_json(live_path, {"mode": "mock", "launcher": {"sessions": []}})
-        log(
-            f"MOCK: validated plan '{plan_name}' with {len(plan['sessions'])} session(s)"
-        )
-        log(
-            "MOCK: would login, resolve the Space, create the plan, trigger it, and poll it"
-        )
+        log(f"MOCK: validated plan '{plan_name}' with {len(plan['sessions'])} session(s)")
+        log("MOCK: would request GitHub OIDC, submit an inline V2 plan, and poll it")
         summary(mode=mode, plan_name=plan_name, results=results)
         return 0
 
     require_linux_provisioning(plan)
     require_windows_provisioning(plan)
-
     required = (
-        "ORCHESTRAI_PORTAL_URL",
-        "ORCHESTRAI_USER",
-        "ORCHESTRAI_PASSWORD",
-        "ORCHESTRAI_SPACE",
+        "ORCHESTRAI_V2_CI_API_URL", "ORCHESTRAI_V2_OIDC_AUDIENCE",
+        "ORCHESTRAI_V2_WORKSPACE", "ORCHESTRAI_PIPELINE_URL",
+        "ORCHESTRAI_PIPELINE_USER", "ORCHESTRAI_PIPELINE_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
     )
     missing = [name for name in required if not env(name)]
     if missing:
-        raise SystemExit("missing required secret(s): " + ", ".join(missing))
+        raise SystemExit("missing required V2 configuration: " + ", ".join(missing))
 
-    client = PortalClient(env("ORCHESTRAI_PORTAL_URL"))
+    client = ControlPlaneClient()
+    evidence = PipelineResults()
+    state_path = Path(env("CONTROL_STATE_FILE", ".orchestrai-control-state.json"))
     run_id = ""
+    submitted = False
     interrupted = False
+    terminal = False
     state: dict[str, Any] = {}
-    results: dict | None = None
     latest_live: dict = {}
+    results: dict | None = None
+    pipeline_status = "unknown"
+    tests_status = "unknown"
 
     def stop(_signum: int, _frame: object) -> None:
         nonlocal interrupted
-        if interrupted:
+        if not interrupted:
+            interrupted = True
             raise KeyboardInterrupt
-        interrupted = True
-        if run_id:
-            client.cancel(run_id)
-        raise KeyboardInterrupt
 
-    signal.signal(signal.SIGINT, stop)
-    signal.signal(signal.SIGTERM, stop)
-
+    previous_handlers = {
+        sig: signal.signal(sig, stop) for sig in (signal.SIGINT, signal.SIGTERM)
+    }
     try:
-        log("authenticating to OrchestrAI Portal")
-        login = client.request(
-            "POST",
-            "/api/auth/login",
-            {
-                "username": env("ORCHESTRAI_USER"),
-                "password": env("ORCHESTRAI_PASSWORD"),
-            },
-        )
-        client.token = str(login.get("token") or "")
-        if not client.token:
-            raise RuntimeError("login response did not contain a token")
-
-        me = client.request("GET", "/api/auth/me")
-        matches = [
-            space
-            for space in me.get("spaces", [])
-            if space.get("name") == env("ORCHESTRAI_SPACE")
-        ]
-        if not matches:
-            raise RuntimeError("the configured OrchestrAI space was not available")
-        client.space_id = str(matches[0]["id"])
-        resolve_stock_os_images(plan, client)
-
-        log(f"creating plan '{plan_name}'")
-        created = client.request(
-            "POST",
-            "/api/plans",
-            {
-                "name": plan_name,
-                "description": str(plan.get("description") or ""),
-                "plan_json": {
-                    "sessions": plan["sessions"],
-                    "run_settings": plan.get("run_settings") or {},
-                },
-                "tags": plan.get("tags") or [],
-            },
-        )
-        plan_id = str(created.get("id") or "")
-        if not plan_id:
-            raise RuntimeError("plan creation response did not contain an id")
-
-        # This POST is deliberately not retried: an uncertain retry could launch
-        # duplicate hardware sessions. A GitHub rerun is a new intentional run.
-        run_request = build_run_request(plan, plan_id)
-        triggered = client.request("POST", "/api/runs", run_request)
-        run_id = str(triggered.get("id") or "")
-        if not run_id:
-            raise RuntimeError("run trigger response did not contain an id")
-        log("run submitted")
-
-        timeout_seconds = int(env("POLL_TIMEOUT_SEC", "14400"))
+        timeout_seconds = int(env("POLL_TIMEOUT_SEC", "13800"))
+        outage_seconds = int(env("POLL_ERROR_TIMEOUT_SEC", "300"))
+        if min(timeout_seconds, outage_seconds) <= 0:
+            raise ControlPlaneError("OrchestrAI V2 polling timeouts must be positive.")
+        log("submitting an inline plan through OrchestrAI Control Plane V2 using GitHub OIDC")
+        submitted = True
+        state = client.start(plan, state_path)
+        run_id = state["id"]
+        log("run submitted; machine acquisition is managed by the Control Plane")
         deadline = time.monotonic() + timeout_seconds
-        poll_errors = 0
-        poll_failure_started: float | None = None
-        live_failure_started: float | None = None
-        poll_error_timeout = int(env("POLL_ERROR_TIMEOUT_SEC", "300"))
-        if poll_error_timeout <= 0:
-            raise ValueError("POLL_ERROR_TIMEOUT_SEC must be a positive integer")
+        outage_start = None
         while time.monotonic() < deadline:
-            try:
-                state = client.request("GET", f"/api/runs/{run_id}")
-                poll_errors = 0
-                poll_failure_started = None
-            except RuntimeError as exc:
-                now = time.monotonic()
-                if poll_failure_started is None:
-                    poll_failure_started = now
-                poll_errors += 1
-                if poll_outage_exhausted(
-                    poll_failure_started,
-                    now=now,
-                    timeout_seconds=poll_error_timeout,
-                ):
-                    raise
-                safe_error = classify_controller_exception(exc)
-                log(
-                    "poll temporarily unavailable "
-                    f"(attempt {poll_errors}; retrying for up to "
-                    f"{poll_error_timeout} seconds): {safe_error}"
-                )
-                time.sleep(15)
-                continue
-
-            pipeline_status = safe_status(
-                state.get("pipeline_status") or state.get("status"),
-                SAFE_PIPELINE_STATES,
-            )
+            pipeline_status = safe_status(state.get("status"), SAFE_PIPELINE_STATES)
             tests_status = safe_status(state.get("tests_status"), SAFE_TEST_STATES)
             log(f"status={pipeline_status} tests={tests_status}")
             if pipeline_status in TERMINAL_PIPELINE_STATES:
-                break
-            try:
-                live = client.request("GET", f"/api/runs/{run_id}/live")
-                if not isinstance(live, dict):
-                    raise RuntimeError("live endpoint returned a non-object response")
-                latest_live = merge_live_snapshot(latest_live, live)
-                results = build_results_manifest(
-                    plan,
-                    latest_live,
-                    mode=mode,
-                    pipeline_status=pipeline_status,
-                    tests_status=tests_status,
-                )
-                live_failure_started = None
-            except RuntimeError as exc:
-                now = time.monotonic()
-                if live_failure_started is None:
-                    live_failure_started = now
-                if poll_outage_exhausted(
-                    live_failure_started, now=now, timeout_seconds=poll_error_timeout
-                ):
-                    raise
-                log(
-                    "live results temporarily unavailable: "
-                    f"{classify_controller_exception(exc)}"
-                )
-                time.sleep(15)
-                continue
-            if run_outcome_is_terminal(pipeline_status, results):
-                log(
-                    "every requested test session reached a terminal state; "
-                    "releasing the still-active parent run"
-                )
+                terminal = True
                 break
             time.sleep(15)
+            try:
+                state = client.status(run_id)
+                outage_start = None
+            except ControlPlaneError as exc:
+                if "unavailable after bounded retries" not in str(exc):
+                    raise
+                now = time.monotonic()
+                if outage_start is None:
+                    outage_start = now
+                if poll_outage_exhausted(outage_start, now=now, timeout_seconds=outage_seconds):
+                    raise
+                log("Control Plane status temporarily unavailable; retrying")
         else:
             raise RuntimeError(f"run timed out after {timeout_seconds} seconds")
 
-        parent_run_still_active = pipeline_status not in TERMINAL_PIPELINE_STATES
-        try:
-            if not parent_run_still_active or results is None or not results["ready"]:
-                results, latest_live = collect_live_results(
-                    client,
-                    plan,
-                    run_id=run_id,
-                    pipeline_status=pipeline_status,
-                    tests_status=tests_status,
-                    timeout_seconds=int(env("RESULT_TIMEOUT_SEC", "90")),
-                    poll_seconds=int(env("RESULT_POLL_SEC", "5")),
-                    initial_live=latest_live,
-                )
-        finally:
-            if parent_run_still_active:
-                cleanup_confirmed = client.cancel_and_wait(run_id)
-            else:
-                cleanup_confirmed = True
-        # The Portal persists/enriches test logs after the parent stops. Keep
-        # the pre-cancellation verdict snapshot; cancellation must not turn
-        # completed behavioral results into cancelled test failures.
-        latest_live = collect_test_logs(client, plan, latest_live, run_id=run_id)
-        enriched_results = build_results_manifest(
-            plan,
-            latest_live,
-            mode=mode,
-            pipeline_status=pipeline_status,
-            tests_status=tests_status,
-        )
-        for previous, item in zip(
-            results["items"], enriched_results["items"], strict=True
-        ):
-            if not item["terminal"] and str(previous.get("error") or "").startswith(
-                "could not read terminal live results:"
-            ):
-                item["error"] = previous["error"]
-        results = enriched_results
-        metadata = collect_report_metadata(
-            client,
-            run_id=run_id,
-            initial_live=latest_live,
-            initial_pipeline_status=pipeline_status,
-        )
-        results["run"]["final_pipeline_status"] = metadata["final_pipeline_status"]
-        results["run"]["cleanup_status"] = (
-            ("confirmed" if cleanup_confirmed else "unconfirmed")
-            if parent_run_still_active
-            else "not_needed"
-        )
+        # Wait for the CP parent, not just its test counter: reporting and
+        # cleanup must be allowed to finish before reading archived evidence.
+        build_url = str(state.get("pipeline_url") or "")
+        result_deadline = time.monotonic() + int(env("RESULT_TIMEOUT_SEC", "90"))
+        while True:
+            if build_url and "/queue/" not in build_url:
+                try:
+                    latest_live = evidence.snapshot(build_url)
+                except ControlPlaneError as exc:
+                    retryable = (
+                        "artifacts were unreadable" in str(exc)
+                        or re.search(r"artifact request failed with HTTP (?:408|429|5\d\d)", str(exc))
+                    )
+                    if not retryable or time.monotonic() >= result_deadline:
+                        raise
+                    log("result artifacts temporarily unavailable; retrying")
+            results = build_results_manifest(
+                plan, latest_live, mode=mode,
+                pipeline_status=pipeline_status, tests_status=tests_status,
+            )
+            if results["ready"] or time.monotonic() >= result_deadline:
+                break
+            time.sleep(5)
+            state = client.status(run_id)
+            build_url = str(state.get("pipeline_url") or build_url)
+
+        results["run"]["final_pipeline_status"] = pipeline_status
+        results["run"]["cleanup_status"] = "not_needed"
         _write_json(results_path, results)
         _write_json(live_path, sanitized_live_snapshot(latest_live))
         summary(
-            mode=mode,
-            plan_name=plan_name,
-            pipeline_status=pipeline_status,
-            tests_status=tests_status,
-            results=results,
+            mode=mode, plan_name=plan_name, pipeline_status=pipeline_status,
+            tests_status=tests_status, results=results,
         )
         write_output("pipeline_status", pipeline_status)
         write_output("tests_status", tests_status)
-
-        if not cleanup_confirmed:
-            # Preserve the per-skill artifacts, but never hide a failed cleanup
-            # behind otherwise successful behavioral verdicts.
-            return 1
         if not results["ready"]:
-            log(
-                "terminal Portal snapshot did not contain every requested skill/OS verdict"
-            )
+            log("Control Plane run ended without a result for every requested skill/OS")
             return 1
-        failed_items = [item for item in results["items"] if item["status"] != "passed"]
-        if not pipeline_reporting_completed(
-            pipeline_status,
-            results["items"],
-        ):
-            log(
-                f"pipeline did not complete cleanly; pipeline={pipeline_status}, "
-                f"tests={tests_status}; inspect the private controller job for details"
-            )
+        if not pipeline_reporting_completed(pipeline_status, results["items"]):
+            log("Control Plane parent did not complete cleanly")
             return 1
-        if failed_items:
-            log(
-                f"captured {len(failed_items)} failed skill/OS verdict(s); "
-                "GitHub matrix jobs will report them individually"
-            )
-        else:
-            log("all OrchestrAI behavioral sessions passed")
+        if any(not any(item.get("public_streams", {}).values()) for item in results["items"]):
+            log("some test streams were not present in result artifacts; log coverage is reported separately")
+        failed = sum(item["status"] != "passed" for item in results["items"])
+        log(f"captured {len(results['items'])} skill/OS verdict(s), {failed} non-passing; matrix jobs enforce them")
         return 0
-    except KeyboardInterrupt:
-        return 130 if interrupted else 1
-    except (RuntimeError, ValueError, TypeError, AttributeError) as exc:
-        safe_error = classify_controller_exception(exc)
+    except (KeyboardInterrupt, RuntimeError, ValueError, TypeError, AttributeError, OSError) as exc:
+        safe_error = (
+            "OrchestrAI run was interrupted." if isinstance(exc, KeyboardInterrupt)
+            else classify_controller_exception(exc)
+        )
         log(f"error: {safe_error}")
-        if run_id:
+        cleanup_confirmed = False
+        # Recover an uncertain submission using the SAME idempotency key/body;
+        # never start a second run merely to discover the first one's identity.
+        if submitted and not run_id:
+            try:
+                run_id = client.start(plan, state_path, attempts=1)["id"]
+            except (ControlPlaneError, OSError, ValueError):
+                log("warning: could not recover the submitted run; cleanup is unconfirmed")
+        if run_id and not terminal:
             cleanup_confirmed = client.cancel_and_wait(run_id)
-        try:
-            results = write_failure_artifacts(
-                plan,
-                mode=mode,
-                error=safe_error,
-                results_path=results_path,
-                live_path=live_path,
-                live=latest_live or state,
-            )
-            if run_id:
-                results["run"]["cleanup_status"] = (
-                    "confirmed" if cleanup_confirmed else "unconfirmed"
-                )
-                _write_json(results_path, results)
-        except (OSError, ValueError, TypeError):
-            log("warning: could not write failure result artifacts")
-        if run_id:
-            summary(
-                mode=mode,
-                plan_name=plan_name,
-                pipeline_status="error",
-                tests_status="unknown",
-                results=results,
-            )
-        return 1
+            log("parent cancellation confirmed" if cleanup_confirmed else "warning: parent cleanup is unconfirmed")
+        results = write_failure_artifacts(
+            plan, mode=mode, error=safe_error, results_path=results_path,
+            live_path=live_path, live=latest_live,
+        )
+        results["run"]["cleanup_status"] = (
+            "not_needed" if terminal or not submitted
+            else "confirmed" if cleanup_confirmed else "unconfirmed"
+        )
+        _write_json(results_path, results)
+        summary(mode=mode, plan_name=plan_name, results=results)
+        return 130 if interrupted else 1
+    finally:
+        for sig, handler in previous_handlers.items():
+            signal.signal(sig, handler)
 
 
 if __name__ == "__main__":

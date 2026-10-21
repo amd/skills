@@ -79,24 +79,67 @@ the routing room. Expectation-type counts include only retained grader lines
 associated with a recorded case. Missing/redacted lines are excluded and all
 rates are labeled observed; zero denominators are shown as **Not reported**.
 
-The controller fetches missing test streams through the authenticated Portal
-log endpoint, allowing up to two minutes for persisted logs to become available.
-Raw streams stay in memory; only redacted streams enter GitHub artifacts.
+The V2 controller reads archived per-session result JSON from the private
+pipeline build selected by the Control Plane, like Playbooks. It matches both
+the session and test path; an overall green pipeline cannot substitute for a
+missing skill/OS result. Raw result data stays in memory; only normalized results
+and redacted test streams enter GitHub artifacts. It does not fetch or publish
+the pipeline console, dependency/provisioning console, or agent attachments.
+
+**V2 log coverage limitation:** the CI API exposes test outcomes, not stdout and
+stderr. Streams embedded in session result JSON are retained and redacted, but
+separately sealed/encrypted test-evidence artifacts cannot be read with this CI
+identity. Those streams are reported as unavailable, not empty/successful or
+complete. Case/expectation detail and judge-error reclassification depend on
+the available evidence; a status-only result cannot reconstruct these details.
+Full-log parity requires a supported authenticated V2 evidence-download API;
+this workflow does not bypass that boundary with a Portal login.
 Each stream has a 16 MB transport bound. Oversized responses are rejected rather
 than silently tail-truncated; unavailable/partial streams are labeled, never
 described as full output. Full received streams are printed in the job console
 and saved in the artifact, not embedded in the size-limited Markdown summary.
 Timestamp wrappers are removed only for reconstructing grader summaries.
-After all requested tests finish, an active parent is cancelled with bounded
-retries. Its terminal state must be confirmed within one minute or the controller
-fails, while preserving the individual test results. Machine release remains
-managed by OrchestrAI.
+The controller waits for the Control Plane parent to become terminal so reporting
+and cleanup can finish, then allows up to 90 seconds for result artifacts.
+On timeout, interruption or a controller failure while the parent is active,
+it requests cancellation through V2 and checks for a terminal state for up to
+one minute. Submission retries reuse an idempotency key unique to this GitHub
+run, attempt and OS plan. Terminal state is not independent proof of machine
+release; allocation and cleanup are owned by the Control Plane.
 
-After cleanup, the controller refreshes final parent metadata for up to one minute.
-These reads do not replace completed test verdicts or
-logs with cancelled launcher snapshots. Summaries distinguish the pipeline
-and test snapshots before cleanup from the final parent state read after cleanup.
-Missing final metadata is reported explicitly without changing test grades.
+### Control Plane V2 configuration
+
+The OrchestrAI controller uses the same inline-plan CI API contract as
+[Playbooks #1120](https://github.com/amd/playbooks/pull/1120). GitHub OIDC replaces
+Portal username/password authentication. There is no legacy Portal API fallback,
+boot-image catalog lookup, direct pipeline submission, or broker call.
+
+Set these Actions **secrets** so private endpoint/workspace metadata is also
+masked in the public step preamble:
+
+| Name | Value/purpose |
+|---|---|
+| `ORCHESTRAI_V2_CI_API_URL` | HTTPS Control Plane CI API ending in `/ci/v1`, or Portal passthrough ending in `/api/ci/v1`. |
+| `ORCHESTRAI_V2_OIDC_AUDIENCE` | Exact HTTPS audience configured by the Control Plane workspace owner. |
+| `ORCHESTRAI_V2_WORKSPACE` | Workspace slug, not the old Portal space display name. |
+| `ORCHESTRAI_PIPELINE_URL` | Trusted HTTPS pipeline service base (optionally its context path), used to confine result-read credentials. |
+| `ORCHESTRAI_PIPELINE_USER` | Read-only account for that pipeline's build artifacts. |
+| `ORCHESTRAI_PIPELINE_TOKEN` | That account's token; never used to submit/cancel work. |
+
+Keep `ORCHESTRAI_DEVICE_TAGS`, `ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON` and
+`ORCHESTRAI_WINDOWS_DRIVER_SOURCE` unchanged. The routing job still uses
+`ORCHESTR_API_KEY`. The V2 controller no longer consumes `ORCHESTRAI_PORTAL_URL`,
+`ORCHESTRAI_USER`, `ORCHESTRAI_PASSWORD` or `ORCHESTRAI_SPACE`; do not remove shared
+secrets used by other workflows. Optional Actions **variables**
+`ORCHESTRAI_V2_LINUX_IMAGE` and `ORCHESTRAI_V2_WINDOWS_IMAGE` override the existing
+`ubuntu` / `windows` aliases, which are resolved by the Control Plane.
+
+The workspace owner must authorize the intended repository, workflow ref and
+events in **CI access**, with scopes `plans:write`, `plans:publish`, `runs:start`,
+`runs:read`, and `runs:cancel`. OIDC permission is granted only to the controller
+job (in addition to Instinct's existing federation permission). A 403 means the
+CI access policy must be checked; adding a Portal password will not resolve it.
+No repository settings or workspace trust rules are changed by this PR.
 
 ### Windows provisioning
 

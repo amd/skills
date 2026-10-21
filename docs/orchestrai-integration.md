@@ -50,15 +50,30 @@ GPU-readiness check remains deferred; coverage depends on each skill's case.
 
 ## Configuration and scope
 
-Keep `ORCHESTRAI_CONTROL_RUNNER` set to the runner pool with access to the Portal
-and model gateway, such as `arc-lnx-pub`. Discovery and reporting use
+Keep `ORCHESTRAI_CONTROL_RUNNER` set to the runner pool with access to the Control
+Plane CI API, private pipeline artifacts and model gateway, such as `arc-lnx-pub`. Discovery and reporting use
 GitHub-hosted runners. No separate wait-runner setting is used.
 
-Routing and the OrchestrAI controller use the existing Actions secrets available
-to those jobs. They do not declare a new `skills-ci` Environment. Secrets stored
+Routing keeps its existing model credential. The V2 controller uses GitHub OIDC
+to submit an inline plan with `require_capacity: queue`, poll it and cancel on
+interruption. It no longer logs into the Portal or queries its stock-image catalog;
+the Control Plane resolves OS aliases and owns machine acquisition. See the
+[V2 configuration](evals.md#control-plane-v2-configuration) for the required
+endpoint/workspace settings, workspace CI access scopes and read-only pipeline
+artifact credentials. Those new settings must be configured before a live run.
+
+The jobs do not declare a new `skills-ci` Environment. Secrets stored
 only in that Environment will not be available. This change does not move
 credentials or modify repository settings, runner groups, branch rules or
 federation rules. Instinct retains its selected Environment.
+
+Like Playbooks V2, result reading is separate from submission. Skills reads the
+CP-selected build's per-session result artifacts, not just an overall success
+flag. Missing or ambiguous skill/OS evidence fails closed. Embedded stdout/stderr
+is redacted as before. The CI API does not expose full test logs, and encrypted
+evidence artifacts are not readable by this workflow: absent streams and grader
+details are marked unavailable. Full-log parity remains a V2 evidence-API gap,
+not a reason to expose raw pipeline consoles or bypass authentication.
 
 Additional authorization hardening is a separate change: reviewed-controller
 checkout, new Environment approval checks and additional PR/branch restrictions

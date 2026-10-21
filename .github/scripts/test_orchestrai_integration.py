@@ -182,9 +182,14 @@ class UpstreamPolicyParityTests(unittest.TestCase):
             "can_admins_bypass",
         ]:
             self.assertNotIn(value, WORKFLOW)
-        # New OAI transport does not need an OIDC token. Instinct still does.
-        self.assertEqual(WORKFLOW.count("id-token: write"), 1)
-        self.assertIn("id-token: none", job("orchestrai-behavioral"))
+        # Only the V2 controller gains OIDC; Instinct's federation is unchanged.
+        self.assertEqual(WORKFLOW.count("id-token: write"), 2)
+        self.assertIn("id-token: write", job("orchestrai-behavioral"))
+        self.assertIn("id-token: none", job("routing"))
+        self.assertIn("id-token: none", job("orchestrai-verdict"))
+        self.assertNotIn("secrets.ORCHESTRAI_PASSWORD", WORKFLOW)
+        self.assertIn("secrets.ORCHESTRAI_V2_CI_API_URL", WORKFLOW)
+        self.assertIn("secrets.ORCHESTRAI_PIPELINE_TOKEN", WORKFLOW)
         self.assertIn("needs: discover", job("orchestrai-behavioral"))
         self.assertIn(
             "if: needs.discover.outputs.default_any == 'true'",

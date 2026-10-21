@@ -80,13 +80,8 @@ class WindowsProvisioningTests(unittest.TestCase):
         )
         orchestrai_run.require_windows_provisioning(plan)
         before = deepcopy(plan)
-        self.assertEqual(
-            orchestrai_run.build_run_request(plan, "fixture-plan"),
-            {
-                "plan_id": "fixture-plan",
-                "builds_json": builds,
-            },
-        )
+        from orchestrai_control_plane import inline_request
+        self.assertEqual(inline_request(plan)["builds_json"], builds)
         self.assertEqual(plan, before)
         self.assertNotIn(source, json.dumps(plan["sessions"]))
         self.assertNotIn("driver_source", json.dumps(plan["sessions"]))
@@ -172,7 +167,7 @@ class WindowsProvisioningTests(unittest.TestCase):
             with mock.patch.dict(
                 os.environ, {"PLAN_FILE": str(plan_path), "MODE": "live"}
             ):
-                with mock.patch.object(orchestrai_run, "PortalClient") as client:
+                with mock.patch.object(orchestrai_run, "ControlPlaneClient") as client:
                     with self.assertRaisesRegex(
                         SystemExit, "ORCHESTRAI_WINDOWS_DRIVER_SOURCE"
                     ):
@@ -290,7 +285,7 @@ class WindowsProvisioningTests(unittest.TestCase):
                     "GITHUB_STEP_SUMMARY": "",
                 },
             ):
-                with mock.patch.object(orchestrai_run, "PortalClient") as client:
+                with mock.patch.object(orchestrai_run, "ControlPlaneClient") as client:
                     with contextlib.redirect_stdout(io.StringIO()):
                         self.assertEqual(orchestrai_run.main(), 0)
                     client.assert_not_called()
