@@ -15,7 +15,8 @@ allowed-tools: Read,Edit,Bash,Grep,Glob,Agent,Write
 Profile and analyze GPU kernel ATT traces to identify stall hotspots and produce
 an optimization plan.
 
-All analysis is done programmatically via `hotspot_analyzer.py` + `code.json`.
+All analysis is done by running the bundled `hotspot_analyzer.py` (ATT) and
+`pmc_l2_analyzer.py` (PMC CSVs); never recompute their metrics yourself.
 Do **not** use GUI tools.
 
 > If the question is only "did my change increase register pressure, spills, or
