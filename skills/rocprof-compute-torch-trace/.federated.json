@@ -1,0 +1,10 @@
+{
+  "source": "rocm-rocm-systems",
+  "repo": "ROCm/rocm-systems",
+  "ref": "develop",
+  "commit": "f2b844211d55eb3618cc5ab3e783acb617882ebd",
+  "path": "projects/rocprofiler-compute/skills/rocprof-compute-torch-trace",
+  "license": "MIT",
+  "content_hash": "ef7a5100a32ef30aea6a1bfd3ede8bbdad07bcdd1e48c512e4fb732023487b5f",
+  "imported_at": "2026-10-22T20:41:18Z"
+}
