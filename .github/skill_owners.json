@@ -17,6 +17,7 @@
     },
     {
       "repo": "ROCm/rocm-systems",
+      "path": "projects/rocprofiler-compute",
       "engineering_owner": "feizheng10",
       "product_release_owner": "serap-suvari"
     },
