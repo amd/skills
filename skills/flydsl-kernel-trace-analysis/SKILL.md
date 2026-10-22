@@ -57,8 +57,7 @@ If the user provides `--dir <path>` or already has a `ui_output_agent_*_dispatch
 
 ```bash
 # Both analyzers ship with this skill -- do not reimplement them.
-python ${CLAUDE_SKILL_DIR}/scripts/hotspot_analyzer.py <dispatch_dir> --topk 15 --mode both
-python ${CLAUDE_SKILL_DIR}/scripts/hotspot_analyzer.py <dispatch_dir> --topk 5 --mode src --detail --context 4
+python ${CLAUDE_SKILL_DIR}/scripts/hotspot_analyzer.py <dispatch_dir> --kernel <kernel> --topk 15 --mode both --detail --context 4
 ```
 
 Skip to **Step 5: Interpret Results**.
@@ -350,6 +349,7 @@ Capture PMC counters (see capture-kernel-trace "PMC Mode") and analyze with
 `${CLAUDE_SKILL_DIR}/scripts/pmc_l2_analyzer.py`:
 
 ```bash
+# Ships with this skill -- run it, do not recompute the metrics yourself.
 python ${CLAUDE_SKILL_DIR}/scripts/pmc_l2_analyzer.py \
     /tmp/pmc_out/pass_1/pmc_l2_counter_collection.csv \
     /tmp/pmc_ea_out/pass_1/pmc_ea_counter_collection.csv \
