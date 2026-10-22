@@ -5,6 +5,7 @@ description: >
   analyze the trace data using hotspot_analyzer.py to identify top-K stall hotspots
   (VMEM-load, VMEM-wait, LDS/SMEM-wait, barrier, MFMA stalls) mapped back to source
   lines, and produce an actionable optimization plan.
+  Also analyzes rocprofv3 PMC counter CSVs (L2 hit rate, partial reads, over-fetch).
   Usage: /kernel-trace-analysis <cmd>
   Can also analyze an existing dispatch dir directly: /kernel-trace-analysis --dir <path>
 allowed-tools: Read,Edit,Bash,Grep,Glob,Agent,Write
@@ -350,7 +351,6 @@ Capture PMC counters (see capture-kernel-trace "PMC Mode") and analyze with
 `${CLAUDE_SKILL_DIR}/scripts/pmc_l2_analyzer.py`:
 
 ```bash
-# Ships with this skill -- run it, do not recompute the metrics yourself.
 python ${CLAUDE_SKILL_DIR}/scripts/pmc_l2_analyzer.py \
     /tmp/pmc_out/pass_1/pmc_l2_counter_collection.csv \
     /tmp/pmc_ea_out/pass_1/pmc_ea_counter_collection.csv \
