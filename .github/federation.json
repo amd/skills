@@ -45,6 +45,15 @@
       ]
     },
     {
+      "repo": "ROCm/FlyDSL",
+      "license": "Apache-2.0",
+      "skills": [
+        {
+          "path": ".claude/skills/flydsl-kernel-authoring"
+        }
+      ]
+    },
+    {
       "repo": "ROCm/rocm-cli",
       "license": "MIT",
       "skills": [
