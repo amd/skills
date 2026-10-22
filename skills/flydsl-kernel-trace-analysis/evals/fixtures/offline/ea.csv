@@ -1,0 +1,4 @@
+Kernel_Name,Dispatch_Id,Counter_Name,Counter_Value
+sample_kernel,3,TCC_EA0_RDREQ_sum,1000
+sample_kernel,3,TCC_EA0_RDREQ_32B_sum,0
+sample_kernel,3,TCC_EA0_RDREQ_DRAM_sum,1000
