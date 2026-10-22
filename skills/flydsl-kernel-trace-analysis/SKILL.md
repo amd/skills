@@ -443,7 +443,7 @@ After running `hotspot_analyzer.py --detail`, produce a prioritized plan:
 ### #1 :LINE  stall=XK (N%)  VMEM-load  stall_rate=92%
 Root cause: buffer_load inside QK MFMA loop — only 1 MFMA of hiding time.
 Fix: Move all V loads before the QK MFMA loop.
-Estimated gain: ~20% kernel cycle reduction.
+Estimated gain: ~20% kernel cycle reduction (hypothesis; verify correctness and re-time).
 
 ### #2 :LINE  stall=XK (N%)  VMEM-load  stall_rate=80%
 Root cause: K loads sequential with no compute interleaved.
