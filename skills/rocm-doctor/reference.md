@@ -126,7 +126,7 @@ reporting confident nonsense.
 | `fix-14-adrenalin-too-old` | windows | Adrenalin / kernel-mode driver too old for the HIP SDK | `hipInfo` can't enumerate, "driver too old", HSA "no agents found" | print-only |
 | `fix-15-msvc-redist` | windows | MSVC runtime missing (programs that link it, such as the HIP SDK DLLs and the llama.cpp server, can't load) | `vcruntime140.dll` / `vcruntime140_1.dll` missing | print-only |
 | `fix-16-vllm-oom` | linux/wsl | vLLM reserved ~90% of the GPU's TOTAL VRAM for its KV cache and ran out at startup | vLLM engine start fails with an out-of-memory error; the GPU is shared/busy, or the model does not fit | print-only |
-| `fix-17-torch-dlpack` | linux | `torch-c-dlpack-ext` loads its CUDA prebuilt on a ROCm torch, aborting vLLM's engine start at import time | vLLM engine start fails on import; error names `torch_c_dlpack_ext` or tvm_ffi's `_optional_torch_c_dlpack` | print-only |
+| `fix-17-torch-dlpack` | linux/wsl | `torch-c-dlpack-ext` loads its CUDA prebuilt on a ROCm torch, aborting vLLM's engine start at import time | vLLM engine start fails on import; error names `libtorch_cuda.so` (enough on its own), or both `torch_c_dlpack_ext` and tvm_ffi's `_optional_torch_c_dlpack` | print-only |
 | `fix-18-comgr-conflict` | linux/wsl | The code object manager library (`libamd_comgr`) that would load belongs to a different installation than the HIP runtime that would load, so device code compilation fails with an error naming neither | compilation error naming neither library; `rocm examine --json`'s `comgr_selected`/`hip_selected` resolve to two different `install_root`s | print-only |
 | `fix-19-shm-too-small` | linux/wsl | `/dev/shm` too small for a serving workload, which needs gigabytes where a container and WSL2 both default to 64 MB | reported under 1 GiB; a data-loader worker killed by a bus error, or a failed write to a temporary file, with nothing naming shared memory | print-only |
 | `info-20-gpu-no-rocm-support` | linux/windows | Every AMD GPU on the host is a part ROCm has never shipped a runtime build for (today: gfx90c, the Vega iGPU in Renoir / Lucienne / Cezanne / Barcelo). Vulkan-based engines still work | every detected AMD GPU identifies as an unsupported target, and none is unidentified; scores a flat 60 | diagnose-only |
@@ -148,10 +148,10 @@ the number `fix-20` is simply not used here: slot 20 belongs to
 prefix because it has no fix to offer. A gap is not an error, and a retired
 entry would leave a hole rather than renumber the ones after it.
 
-Linux-only: fix-3, -4, -5, -7, -10, -11, -12, -17. Windows-only: fix-13, -14, -15, -21.
+Linux-only: fix-3, -4, -5, -7, -10, -11, -12. Windows-only: fix-13, -14, -15, -21.
 Linux + Windows: info-20 (diagnose-only).
 WSL-only: fix-wsl-1 through fix-wsl-7. Linux + Windows: fix-9.
-Linux + WSL: fix-16, -18, -19. Linux + Windows + WSL: fix-1, -2, -6, -8.
+Linux + WSL: fix-16, -17, -18, -19. Linux + Windows + WSL: fix-1, -2, -6, -8.
 
 ## Framework routing
 
