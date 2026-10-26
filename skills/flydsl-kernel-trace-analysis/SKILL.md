@@ -5,6 +5,7 @@ description: >
   analyze the trace data using hotspot_analyzer.py to identify top-K stall hotspots
   (VMEM-load, VMEM-wait, LDS/SMEM-wait, barrier, MFMA stalls) mapped back to source
   lines, and produce an actionable optimization plan.
+  Also analyzes rocprofv3 PMC counter CSVs (L2 hit rate, partial reads, over-fetch).
   Usage: /kernel-trace-analysis <cmd>
   Can also analyze an existing dispatch dir directly: /kernel-trace-analysis --dir <path>
 allowed-tools: Read,Edit,Bash,Grep,Glob,Agent,Write
@@ -15,7 +16,8 @@ allowed-tools: Read,Edit,Bash,Grep,Glob,Agent,Write
 Profile and analyze GPU kernel ATT traces to identify stall hotspots and produce
 an optimization plan.
 
-All analysis is done programmatically via `hotspot_analyzer.py` + `code.json`.
+All analysis is done by running the bundled `hotspot_analyzer.py` (ATT) and
+`pmc_l2_analyzer.py` (PMC CSVs); never recompute their metrics yourself.
 Do **not** use GUI tools.
 
 > If the question is only "did my change increase register pressure, spills, or
@@ -57,8 +59,7 @@ If the user provides `--dir <path>` or already has a `ui_output_agent_*_dispatch
 
 ```bash
 # Both analyzers ship with this skill -- do not reimplement them.
-python ${CLAUDE_SKILL_DIR}/scripts/hotspot_analyzer.py <dispatch_dir> --topk 15 --mode both
-python ${CLAUDE_SKILL_DIR}/scripts/hotspot_analyzer.py <dispatch_dir> --topk 5 --mode src --detail --context 4
+python ${CLAUDE_SKILL_DIR}/scripts/hotspot_analyzer.py <dispatch_dir> --kernel <kernel> --topk 15 --mode both --detail --context 4
 ```
 
 Skip to **Step 5: Interpret Results**.
@@ -443,7 +444,7 @@ After running `hotspot_analyzer.py --detail`, produce a prioritized plan:
 ### #1 :LINE  stall=XK (N%)  VMEM-load  stall_rate=92%
 Root cause: buffer_load inside QK MFMA loop — only 1 MFMA of hiding time.
 Fix: Move all V loads before the QK MFMA loop.
-Estimated gain: ~20% kernel cycle reduction.
+Estimated gain: ~20% kernel cycle reduction (hypothesis; verify correctness and re-time).
 
 ### #2 :LINE  stall=XK (N%)  VMEM-load  stall_rate=80%
 Root cause: K loads sequential with no compute interleaved.
