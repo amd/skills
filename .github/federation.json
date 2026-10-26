@@ -82,6 +82,13 @@
       "repo": "ROCm/rocm-systems",
       "branch": "develop",
       "license": "MIT",
+      "fixtures": [
+        {
+          "path": "projects/rocprofiler-compute/sample",
+          "as": "rocprof-compute-sample",
+          "workspace_prefix": "../../sample"
+        }
+      ],
       "skills": [
         {
           "path": "projects/rocprofiler-sdk/skills/pc-sampling",

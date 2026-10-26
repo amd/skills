@@ -147,6 +147,106 @@ class TestFederationFile(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     parse(payload)
 
+    def test_parses_a_shared_fixture(self):
+        source = parse(
+            one_source(
+                fixtures=[
+                    {
+                        "path": "projects/rocprofiler-compute/sample",
+                        "as": "rocprof-compute-sample",
+                        "workspace_prefix": "../../sample",
+                    }
+                ]
+            )
+        )[0]
+        self.assertEqual(len(source.fixtures), 1)
+        fixture = source.fixtures[0]
+        self.assertEqual(fixture.path, "projects/rocprofiler-compute/sample")
+        self.assertEqual(fixture.local_name, "rocprof-compute-sample")
+        self.assertEqual(fixture.workspace_prefix, "../../sample")
+
+    def test_rejects_a_fixture_that_collides_with_a_skill(self):
+        with self.assertRaises(ValueError):
+            parse(
+                one_source(
+                    skills=[{"path": "skills/sample", "as": "rocprof-compute-sample"}],
+                    fixtures=[
+                        {
+                            "path": "projects/sample",
+                            "as": "rocprof-compute-sample",
+                            "workspace_prefix": "../../sample",
+                        }
+                    ],
+                )
+            )
+
+    def test_rewrites_workspace_prefixes_once(self):
+        fixture = fed.FixtureSpec(
+            path="projects/sample",
+            local_name="rocprof-compute-sample",
+            workspace_prefix="../../sample",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = write_skill(
+                Path(tmp) / "skill",
+                {
+                    "evals/evals.json": (
+                        '{ "workspace": "../../sample/wmma_gemm_fp16" }\n'
+                    )
+                },
+            )
+            self.assertTrue(fed.rewrite_fixture_workspaces(skill, fixture))
+            text = (skill / "evals" / "evals.json").read_text(encoding="utf-8")
+            self.assertIn("../rocprof-compute-sample/wmma_gemm_fp16", text)
+            self.assertNotIn("../../sample", text)
+            self.assertFalse(fed.rewrite_fixture_workspaces(skill, fixture))
+
+    def test_sync_fixtures_copies_the_tree_and_retargets_evals(self):
+        source = fed.Source(
+            repo="ROCm/rocm-systems",
+            license="MIT",
+            branch="develop",
+            skills=[fed.SkillSpec(path="skills/demo", local_name="demo")],
+            fixtures=[
+                fed.FixtureSpec(
+                    path="projects/sample",
+                    local_name="rocprof-compute-sample",
+                    workspace_prefix="../../sample",
+                )
+            ],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_skill(
+                root / "clone" / "projects" / "sample",
+                {"vcopy.cpp": "int main(){return 0;}\n"},
+            )
+            write_skill(
+                root / "skills" / "demo",
+                {"evals/evals.json": '{ "workspace": "../../sample" }\n'},
+            )
+            log: list[str] = []
+            fed.sync_fixtures(
+                source, root / "clone", "develop", "abc123", log, root / "skills"
+            )
+            copied = root / "skills" / "rocprof-compute-sample" / "vcopy.cpp"
+            self.assertEqual(copied.read_text(encoding="utf-8"), "int main(){return 0;}\n")
+            marker = json.loads(
+                (root / "skills" / "rocprof-compute-sample" / ".fixture.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(marker["commit"], "abc123")
+            self.assertEqual(marker["path"], "projects/sample")
+            evals = (root / "skills" / "demo" / "evals" / "evals.json").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("../rocprof-compute-sample", evals)
+            fed.sync_fixtures(
+                source, root / "clone", "develop", "abc123", log, root / "skills"
+            )
+            self.assertTrue(any("up to date" in line for line in log))
+
     def test_accepts_windows_style_separators_in_paths(self):
         skills = parse(
             one_source(skills=[{"path": r"TraceLens\Agent\skills\orchestrator"}])

@@ -101,6 +101,7 @@ one repo can federate as many skills as it likes from wherever they live:
 | `branch` | Optional. The branch to track, or a release pattern such as `release/*`. Defaults to `main` |
 | `skills[].path` | Path of the skill folder inside your repo, from the repo root |
 | `skills[].as` | Optional local catalog name; use it to namespace as `<project>-<skill>` so names stay unique |
+| `fixtures[]` | Optional directory that is not a skill, copied once to `skills/<as>/`. `workspace_prefix` is the relative `workspace` value in the upstream datasets (`../../sample`). Vendored datasets are rewritten to `../<as>` |
 
 There is no tag or commit field. A source always follows a branch.
 
