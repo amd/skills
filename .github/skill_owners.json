@@ -17,8 +17,20 @@
     },
     {
       "repo": "ROCm/rocm-systems",
+      "path": "projects/rocprofiler-compute",
+      "engineering_owner": "feizheng10",
+      "product_release_owner": "serap-suvari"
+    },
+    {
+      "repo": "ROCm/rocm-systems",
       "path": "projects/rocprofiler-sdk",
       "engineering_owner": "sadikarmagan",
+      "product_release_owner": "serap-suvari"
+    },
+    {
+      "repo": "rocm/rocm-systems",
+      "path": "projects/rocprofiler-systems",
+      "engineering_owner": "dgaliffiamd",
       "product_release_owner": "serap-suvari"
     }
   ]
