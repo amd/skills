@@ -1,6 +1,6 @@
 ---
 name: rocprof-compute-memory
-description: Analyzes the AMD GPU memory hierarchy with rocprof-compute, covering the Memory Chart, vL1D and L2 caches, LDS bank conflicts, Infinity Fabric traffic, and the experimental gfx950 memory bandwidth analysis. Use when the user asks about memory bandwidth, cache hit rates, coalescing, LDS conflicts, data locality, HBM traffic, or says a kernel is memory-bound. Not for CUDA tools, Windows, host memory profiling, or system-wide tracing.
+description: Analyzes the AMD GPU memory hierarchy with rocprof-compute, covering the Memory Chart, vL1D and L2 caches, LDS bank conflicts, Infinity Fabric traffic, and the experimental gfx950 memory bandwidth analysis. Use when the user asks about memory bandwidth, cache hit rates, coalescing, LDS conflicts, data locality, HBM traffic, or says a kernel is memory-bound. Not for CUDA tools, Nsight, Windows, host-memory leaks, GPU out-of-memory allocation failures, or system-wide tracing.
 ---
 
 # Analyze the AMD GPU memory hierarchy
@@ -8,8 +8,15 @@ description: Analyzes the AMD GPU memory hierarchy with rocprof-compute, coverin
 Use this after Speed-of-Light points at memory, or when the user asks about
 bandwidth, caches, or data movement directly.
 
+## Prerequisites
+
+Install, supported GPUs, and which GPU the application runs on are in
+[Install ROCm Compute Profiler](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/install/core-install.rst),
+[source install](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/install/source-install.rst),
+[compatible accelerators](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst),
+and [Selecting a GPU](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+
 Run `rocprof-compute analyze --help` before choosing flags.
-Never use the GUI or TUI.
 
 ## 1. Start with the Memory Chart
 
@@ -55,15 +62,15 @@ architecture with `rocprof-compute --list-blocks <arch>`.
 Each level has its own reference, with the counters, the formulas, and what
 they mean:
 
-- [Vector L1 cache](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/conceptual/cdna/vector-l1-cache.rst)
-- [L2 cache](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/conceptual/cdna/l2-cache.rst)
-- [Local Data Share](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/conceptual/cdna/local-data-share.rst)
-- [Infinity Fabric transactions](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/tutorial/includes/infinity-fabric-transactions.rst)
-- [Vector memory operation counting](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/tutorial/includes/vector-memory-operation-counting.rst)
-- [LDS examples](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/tutorial/includes/lds-examples.rst)
+- [Vector L1 cache](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/conceptual/cdna/vector-l1-cache.rst)
+- [L2 cache](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/conceptual/cdna/l2-cache.rst)
+- [Local Data Share](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/conceptual/cdna/local-data-share.rst)
+- [Infinity Fabric transactions](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/tutorial/includes/infinity-fabric-transactions.rst)
+- [Vector memory operation counting](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/tutorial/includes/vector-memory-operation-counting.rst)
+- [LDS examples](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/tutorial/includes/lds-examples.rst)
 
 Client APUs use a different hierarchy; see the
-[RDNA performance model](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/conceptual/rdna/rdna-performance-model.rst)
+[RDNA performance model](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/conceptual/rdna/rdna-performance-model.rst)
 for GL0, GL1, and GL2.
 
 Read hit rates and utilizations against the `Percent of Peak` and `Peak`
@@ -82,11 +89,12 @@ What usually follows from what:
 | High fabric read or write stalls | traffic exceeds what the fabric can absorb |
 | Near-peak HBM with low cache hits | reduce traffic or add reuse; more bandwidth is not available |
 
-## 4. Memory bandwidth analysis (experimental, gfx950)
+## 4. Memory bandwidth analysis (experimental)
 
 A guided breakdown that walks the bandwidth tree and names the limiting level.
-It is experimental and currently shipped for gfx950 only. It needs block 30 at
-both profile and analyze time:
+Which GPUs it supports, and the experimental flag, are in
+[memory bandwidth analysis](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/membw_analysis.rst). It needs
+block 30 at both profile and analyze time:
 
 ```bash
 rocprof-compute profile --experimental --membw-analysis --name <name> -- <application>
@@ -96,9 +104,15 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> \
 ```
 
 Its cutoffs and guidance text are data, not something to restate from memory.
-They live in `src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml` and
-`src/membw_analysis/tree_spec/gfx950_membw_guidance.yaml`. Read those files
-when you need to explain a verdict, and report the guidance the tool produced
+In a source checkout, read:
+
+- [gfx950_membw_tree_spec.yaml](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml)
+- [gfx950_membw_guidance.yaml](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/src/membw_analysis/tree_spec/gfx950_membw_guidance.yaml)
+
+A ROCm install copies the skills to `<rocm-path>/share/rocprofiler-compute/skills/`
+and does not copy these YAML files next to them. When this skill was installed
+rather than opened from the source tree, read those same two paths in the
+matching rocprofiler-compute checkout. Report the guidance the tool produced
 rather than substituting your own numbers.
 
 On any other architecture, use the Memory Chart path above.

@@ -12,6 +12,20 @@ have already identified the kernel worth this level of detail.
 PC sampling is experimental. Every command below needs `--experimental`, and
 option names can change between releases, so run
 `rocprof-compute profile --experimental --help` before choosing flags.
+
+## Prerequisites
+
+Install, supported GPUs, and which GPU the application runs on are in
+[Install ROCm Compute Profiler](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/install/core-install.rst),
+[source install](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/install/source-install.rst),
+[compatible accelerators](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst),
+and [Selecting a GPU](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+
+This skill drives `rocprof-compute --pc-sampling`. A request to invoke
+`rocprofv3 --pc-sampling-beta-enabled` directly belongs to the rocprofiler-sdk
+PC sampling skill, not this one. Method support is in
+[PC sampling](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst).
+
 Never use the GUI or TUI.
 
 ## 1. Check what the hardware supports
@@ -24,9 +38,10 @@ This reports the sampling methods the installed device accepts and the valid
 interval range. Two methods exist:
 
 - `stochastic` samples in hardware and is the only method that records a stall
-  reason. It requires MI300 or newer.
-- `host_trap` works more widely but records no stall reason, and its samples
-  can land a little past the instruction responsible.
+  reason. Which GPUs accept it is in
+  [PC sampling](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst).
+- `host_trap` records no stall reason, and its samples can land a little past
+  the instruction responsible.
 
 `--pc-sampling-method` defaults to `stochastic`. Fall back to `host_trap` only
 when the device rejects stochastic.
@@ -92,7 +107,7 @@ there, and the fix is usually coalescing, prefetching, or more independent work
 between the load and its use.
 
 Stall reasons and what each one implies are listed in
-[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst). Do not interpret a stall
+[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst). Do not interpret a stall
 reason from host-trap data; it does not record one.
 
 ## 5. Export annotated disassembly
@@ -115,4 +130,4 @@ accepts, rather than drawing conclusions from a handful of samples.
 
 For multi-process workloads, keep each process or rank separate; see the
 multi-process sections of
-[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst).
+[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst).

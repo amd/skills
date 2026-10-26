@@ -1,6 +1,6 @@
 ---
 name: rocprof-compute-kernel-bottleneck
-description: Profiles an AMD GPU application with rocprof-compute and finds which kernel is slow and why, using performance metrics and PC sampling. Collects counters and selects kernels and dispatches, then analyzes GPU memory throughput, compute efficiency, wavefront occupancy and wavefront limits, scheduler stalls, etc. Use when the user asks to profile, benchmark, or speed up a HIP/ROCm kernel or application, or asks where a kernel's bottleneck is. Not for CUDA tools, Windows, system-wide CPU/MPI tracing, or writing kernel source.
+description: Profiles an AMD GPU application with rocprof-compute and finds which kernel is slow and why, using performance metrics and PC sampling. Collects counters and selects kernels and dispatches, then analyzes GPU memory throughput, compute efficiency, wavefront occupancy and wavefront limits, scheduler stalls, etc. Use when the user asks to profile, benchmark, or speed up a HIP/ROCm kernel or application, or asks where a kernel's bottleneck is. Not for CUDA tools, Windows even when the user names rocprof-compute, system-wide CPU/MPI tracing, or writing kernel source.
 ---
 
 # Profile an AMD GPU application and find the kernel bottleneck
@@ -9,10 +9,16 @@ Start here for any "profile this" or "why is this kernel slow" request. This
 skill collects counters, narrows a workload down to one kernel, and identifies
 what limits it. Hand off to a focused skill once the limit is clear.
 
+## Prerequisites
+
+Install, supported GPUs, and which GPU the application runs on are in
+[Install ROCm Compute Profiler](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/install/core-install.rst),
+[source install](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/install/source-install.rst),
+[compatible accelerators](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst),
+and [Selecting a GPU](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+
 Run `rocprof-compute profile --help` and `rocprof-compute analyze --help`
 before choosing flags. Options change between releases; do not guess one.
-
-Never use the GUI or TUI. This is a command-line workflow.
 
 ## Two sources of performance data
 
@@ -27,7 +33,8 @@ different questions. Choose by what the user is asking, not by difficulty.
 Counters are the default starting point because they cover the whole kernel
 cheaply. Go straight to `rocprof-compute-pc-sampling` when the user asks about instructions,
 source lines, or stall reasons, and use both when an architectural limit needs
-to be traced back to the code that causes it.
+to be traced back to the code that causes it. A request to run `rocprofv3`
+itself is neither this skill nor `rocprof-compute-pc-sampling`.
 
 ## 1. Check the environment
 
@@ -46,7 +53,7 @@ rocprof-compute --specs
 it cannot succeed when they fail.
 
 Supported accelerators are listed in
-[compatible-accelerators.rst](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
+[compatible-accelerators.rst](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
 Not every feature works on every architecture. Check there before promising a
 result, and let the tool's own error message stand when a feature is
 unavailable.
@@ -75,14 +82,15 @@ MPI. Change it with `--output-directory`, which replaces `--name` for building
 the path. Re-profiling into a non-empty directory needs `--overwrite`; prefer a
 fresh directory.
 
-To restrict which GPU the application uses, set `HIP_VISIBLE_DEVICES`. Under
-Slurm, derive it from `ROCR_VISIBLE_DEVICES`, not from `SLURM_STEP_GPUS`; the
-indices differ.
+Which GPU the application runs on is in
+[Selecting a GPU](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/profile/mode.rst). Under Slurm, derive
+`HIP_VISIBLE_DEVICES` from `ROCR_VISIBLE_DEVICES`, not from `SLURM_STEP_GPUS`;
+the indices differ.
 
-See [profile mode](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for output layout,
+See [profile mode](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for output layout,
 filtering, and the full option list. To profile a process that is already
 running, see
-[live attach and detach](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/how-to/live_attach_detach.rst).
+[live attach and detach](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/live_attach_detach.rst).
 
 ### Collect less when a full replay is too expensive
 
@@ -122,6 +130,8 @@ contain that file, look one level down for the GPU model or rank directory.
 `--list-stats` prints `Detected Kernels (sorted descending by duration)` and a
 `Dispatch list`. The kernel index is what `-k` takes. Dispatch ids are 1-based
 and go to `-d`.
+
+`--list-stats` cannot be used with `--output-format csv` or `db`.
 
 Work on one kernel at a time:
 
@@ -173,7 +183,7 @@ table. When theoretical occupancy is itself low, the limit is VGPR, SGPR, or
 LDS allocation. Scratch traffic points at register spilling. Low occupancy is
 not a defect when the kernel already saturates its limiting resource. Worked
 examples are in
-[occupancy-limiters-example.rst](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/tutorial/includes/occupancy-limiters-example.rst).
+[occupancy-limiters-example.rst](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/tutorial/includes/occupancy-limiters-example.rst).
 
 ### Scheduler and pipeline limits
 
@@ -189,7 +199,7 @@ There is no single stall panel. Stall counters sit in the block that owns the
 hardware: LDS stalls in `lds`, cache stalls in `vl1d` and `l2`, fabric stalls
 in `l2_per_channel`. Open the block the Speed-of-Light result points at, and
 read what each counter means in the
-[performance model](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/conceptual/performance-model.rst). Ground every
+[performance model](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/conceptual/performance-model.rst). Ground every
 recommendation in a number you read from the report.
 
 ## 6. Normalization
@@ -226,7 +236,7 @@ settings without stating that those differ.
 Terminal output is the default. Only choose a format when the user asks to save
 or export. `--output-format` takes `txt`, `csv`, or `db`, each of which
 disables terminal output, and `--output-name` sets the file name. See
-[analysis output format](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst).
+[analysis output format](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst).
 
 ## 9. When something looks wrong
 
@@ -239,4 +249,4 @@ disables terminal output, and `--output-name` sets the file name. See
 | Roofline missing | not collected, or unsupported on this architecture |
 
 Stop and report permission, firmware, and ROCm version failures instead of
-working around them. More in the [FAQ](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/reference/faq.rst).
+working around them. More in the [FAQ](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/reference/faq.rst).

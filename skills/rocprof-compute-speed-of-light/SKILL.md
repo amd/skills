@@ -1,6 +1,6 @@
 ---
 name: rocprof-compute-speed-of-light
-description: Reads the rocprof-compute System Speed-of-Light panel to show how close an AMD GPU kernel runs to hardware peak for compute throughput, memory bandwidth, and utilization. Use when the user asks how close to peak a kernel is, what percent of peak it reaches, whether a measured percentage is good enough or normal, whether a utilization number should be higher, or asks for an overall efficiency summary. Not for CUDA tools, Windows, per-instruction analysis, or looking up a datasheet specification when there is no profile to read.
+description: Reads the rocprof-compute System Speed-of-Light panel to show how close an AMD GPU kernel runs to hardware peak for compute throughput, memory bandwidth, and utilization. Use when the user asks how close to peak a kernel is, what percent of peak it reaches, whether a measured percentage is good enough or normal, whether a utilization number should be higher, or asks for an overall efficiency summary. Not for CUDA tools, Windows, per-instruction analysis, or a datasheet or theoretical-peak question when there is no profile to read.
 ---
 
 # Read System Speed-of-Light
@@ -9,8 +9,17 @@ Speed-of-Light is the first panel to read after profiling. It puts every
 headline metric next to the hardware peak for the current GPU, so one table
 says whether a kernel is near any limit at all.
 
+## Prerequisites
+
+Install, supported GPUs, and which GPU the application runs on are in
+[Install ROCm Compute Profiler](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/install/core-install.rst),
+[source install](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/install/source-install.rst),
+[compatible accelerators](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst),
+and [Selecting a GPU](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+
+This skill reads an existing workload directory. It does not collect one.
+
 Run `rocprof-compute analyze --help` before choosing flags.
-Never use the GUI or TUI.
 
 ## 1. Get the panel
 
@@ -55,11 +64,11 @@ the neighbouring kernels, and a known-good baseline for the same workload.
 ## 3. Understand the metrics
 
 Each metric's definition and the counters behind it are in
-[system-speed-of-light.rst](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/conceptual/cdna/system-speed-of-light.rst)
+[system-speed-of-light.rst](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/conceptual/cdna/system-speed-of-light.rst)
 for CDNA accelerators and
-[the RDNA equivalent](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/conceptual/rdna/system-speed-of-light.rst)
+[the RDNA equivalent](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/conceptual/rdna/system-speed-of-light.rst)
 for client APUs. The whole metric hierarchy is in the
-[performance model](https://github.com/ROCm/rocm-systems/blob/f2b844211d55eb3618cc5ab3e783acb617882ebd/projects/rocprofiler-compute/docs/conceptual/performance-model.rst).
+[performance model](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/conceptual/performance-model.rst).
 
 ## 4. Compute Speed-of-Light
 
