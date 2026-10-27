@@ -32,8 +32,9 @@ For each declared skill, the script:
    not vendored: they are left out of the copy and of the content hash, and
    named in the run log and the pull request body. The one file kept when
    upstream lacks it is `evals/machine.yml` (`LOCAL_FALLBACK_FILES`).
-   A source may also declare `fixtures`: a directory that is not a skill
-   (the rocprofiler-compute sample tree) copied once under `skills/<as>/`.
+   A source may also declare `fixtures`: files from a directory that is not
+   a skill (the rocprofiler-compute sample tree) copied once under
+   `skills/<as>/`. Only the listed `files` are copied.
    Vendored `evals.json` workspace values that start with that fixture's
    `workspace_prefix` are rewritten to `../<as>` so they resolve next to the
    skill. Upstream files are not modified.
@@ -150,7 +151,7 @@ MARKETPLACE_DESCRIPTION_MAX = 320
 REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 SOURCE_KEYS = {"repo", "license", "branch", "skills", "fixtures"}
 SKILL_KEYS = {"path", "as", "marketplace_description"}
-FIXTURE_KEYS = {"path", "as", "workspace_prefix"}
+FIXTURE_KEYS = {"path", "as", "workspace_prefix", "files"}
 FIXTURE_MARKER = ".fixture.json"
 # Keys that would pin a source to something other than a branch. They are
 # rejected with a pointed message rather than ignored, so an entry that tries
@@ -183,12 +184,14 @@ class FixtureSpec:
 
     `workspace_prefix` is the path those skills use in their own repo
     (for example ``../../sample``). Vendored datasets are rewritten so the
-    same value resolves to ``../<local_name>`` beside the skill.
+    same value resolves to ``../<local_name>`` beside the skill. `files` are
+    the paths under `path` that get vendored; nothing else is copied.
     """
 
     path: str
     local_name: str
     workspace_prefix: str
+    files: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -379,11 +382,20 @@ def _parse_fixtures(raw: object, where: str) -> list[FixtureSpec]:
                 f"{item_where}.workspace_prefix must be a relative path, got "
                 f"{prefix!r}."
             )
+        files = item.get("files")
+        if not isinstance(files, list) or not files:
+            raise ValueError(
+                f"{item_where}.files must list the fixture files to vendor."
+            )
         fixtures.append(
             FixtureSpec(
                 path=_parse_repo_path(item.get("path"), f"{item_where}.path"),
                 local_name=local_name,
                 workspace_prefix=prefix,
+                files=[
+                    _parse_repo_path(rel, f"{item_where}.files[{i}]")
+                    for i, rel in enumerate(files)
+                ],
             )
         )
     return fixtures
@@ -491,9 +503,7 @@ def shallow_clone(repo: str, branch: str, sub_paths: Iterable[str], dest: Path) 
     return run(["git", "rev-parse", "HEAD"], cwd=dest)
 
 
-def content_hash(
-    root: Path, exclude: Iterable[str] = (), *, max_bytes: int | None = MAX_FILE_BYTES
-) -> str:
+def content_hash(root: Path, exclude: Iterable[str] = ()) -> str:
     """Hash every file under `root` (relative paths and bytes).
 
     Change detection compares this against the hash stored in the vendored
@@ -509,18 +519,15 @@ def content_hash(
     on a maintainer's machine and before it on a Linux runner, which would
     hash identical files to different digests.
 
-    Files over `max_bytes` are left out. Skill hashes use `MAX_FILE_BYTES`,
-    because those files are never vendored. A fixture hash passes `None` so a
-    large sample source still counts. `exclude` names relative paths to leave
-    out of the digest.
+    Files over `MAX_FILE_BYTES` are left out, since they are never vendored.
+    `exclude` names relative paths to leave out of the digest.
     """
     skipped = set(exclude)
     entries = sorted(
         (
             (path.relative_to(root).as_posix(), path)
             for path in root.rglob("*")
-            if path.is_file()
-            and (max_bytes is None or path.stat().st_size <= max_bytes)
+            if path.is_file() and path.stat().st_size <= MAX_FILE_BYTES
         ),
         key=lambda entry: entry[0],
     )
@@ -1012,6 +1019,16 @@ def rewrite_fixture_workspaces(skill_dir: Path, fixture: FixtureSpec) -> bool:
     return changed
 
 
+def fixture_hash(root: Path, files: Iterable[str]) -> str:
+    """Hash the named files under `root`, in the same form as `content_hash`."""
+    digest = hashlib.sha256()
+    for rel in sorted(files):
+        digest.update(rel.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256((root / rel).read_bytes()).digest())
+    return digest.hexdigest()
+
+
 def sync_fixtures(
     source: Source,
     clone_dir: Path,
@@ -1024,17 +1041,19 @@ def sync_fixtures(
 
     The fixture is not a skill: its marker is `.fixture.json`, so the
     undeclared-skill report does not treat the directory as a vendored skill.
-    Sample sources are copied whole, including files over `MAX_FILE_BYTES`.
+    Only the fixture's declared `files` are copied, so the vendored copy holds
+    what the eval workspaces use rather than the whole upstream tree.
     """
     for fixture in source.fixtures:
         src = clone_dir / fixture.path
-        if not src.is_dir():
+        missing = [rel for rel in fixture.files if not (src / rel).is_file()]
+        if missing:
             raise FileNotFoundError(
-                f"Fixture path {fixture.path!r} not found in "
+                f"Fixture file(s) {missing} not found under {fixture.path!r} in "
                 f"{source.repo}@{branch}."
             )
         dest = skills_dir / fixture.local_name
-        upstream_hash = content_hash(src, max_bytes=None)
+        upstream_hash = fixture_hash(src, fixture.files)
         marker_path = dest / FIXTURE_MARKER
         previous = {}
         if marker_path.is_file():
@@ -1056,7 +1075,9 @@ def sync_fixtures(
         else:
             if dest.exists():
                 shutil.rmtree(dest)
-            shutil.copytree(src, dest)
+            for rel in fixture.files:
+                (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src / rel, dest / rel)
             marker = {
                 "repo": source.repo,
                 "ref": source.branch,
@@ -1260,7 +1281,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(
                     f"{source.repo}@{source.branch} {fixture.path} "
                     f"-> skills/{fixture.local_name} "
-                    f"(workspace {fixture.workspace_prefix})"
+                    f"({len(fixture.files)} file(s), workspace "
+                    f"{fixture.workspace_prefix})"
                 )
         print("")
         print(f"{args.catalog} is valid: {len(seen)} skill(s) declared.")

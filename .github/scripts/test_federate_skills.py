@@ -155,6 +155,7 @@ class TestFederationFile(unittest.TestCase):
                         "path": "projects/rocprofiler-compute/sample",
                         "as": "rocprof-compute-sample",
                         "workspace_prefix": "../../sample",
+                        "files": ["vcopy.cpp", "wmma_gemm_fp16/Makefile"],
                     }
                 ]
             )
@@ -164,6 +165,19 @@ class TestFederationFile(unittest.TestCase):
         self.assertEqual(fixture.path, "projects/rocprofiler-compute/sample")
         self.assertEqual(fixture.local_name, "rocprof-compute-sample")
         self.assertEqual(fixture.workspace_prefix, "../../sample")
+        self.assertEqual(fixture.files, ["vcopy.cpp", "wmma_gemm_fp16/Makefile"])
+
+    def test_rejects_a_fixture_without_files_or_with_dotdot(self):
+        base = {
+            "path": "projects/sample",
+            "as": "rocprof-compute-sample",
+            "workspace_prefix": "../../sample",
+        }
+        for files in (None, [], ["../secret.txt"]):
+            with self.subTest(files=files):
+                entry = dict(base) if files is None else {**base, "files": files}
+                with self.assertRaises(ValueError):
+                    parse(one_source(fixtures=[entry]))
 
     def test_rejects_a_fixture_that_collides_with_a_skill(self):
         with self.assertRaises(ValueError):
@@ -175,6 +189,7 @@ class TestFederationFile(unittest.TestCase):
                             "path": "projects/sample",
                             "as": "rocprof-compute-sample",
                             "workspace_prefix": "../../sample",
+                            "files": ["vcopy.cpp"],
                         }
                     ],
                 )
@@ -201,7 +216,7 @@ class TestFederationFile(unittest.TestCase):
             self.assertNotIn("../../sample", text)
             self.assertFalse(fed.rewrite_fixture_workspaces(skill, fixture))
 
-    def test_sync_fixtures_copies_the_tree_and_retargets_evals(self):
+    def test_sync_fixtures_copies_listed_files_and_retargets_evals(self):
         source = fed.Source(
             repo="ROCm/rocm-systems",
             license="MIT",
@@ -212,6 +227,7 @@ class TestFederationFile(unittest.TestCase):
                     path="projects/sample",
                     local_name="rocprof-compute-sample",
                     workspace_prefix="../../sample",
+                    files=["vcopy.cpp", "wmma/Makefile"],
                 )
             ],
         )
@@ -219,7 +235,11 @@ class TestFederationFile(unittest.TestCase):
             root = Path(tmp)
             write_skill(
                 root / "clone" / "projects" / "sample",
-                {"vcopy.cpp": "int main(){return 0;}\n"},
+                {
+                    "vcopy.cpp": "int main(){return 0;}\n",
+                    "wmma/Makefile": "all:\n",
+                    "mega_kernel/main.cpp": "int main(){return 1;}\n",
+                },
             )
             write_skill(
                 root / "skills" / "demo",
@@ -231,6 +251,9 @@ class TestFederationFile(unittest.TestCase):
             )
             copied = root / "skills" / "rocprof-compute-sample" / "vcopy.cpp"
             self.assertEqual(copied.read_text(encoding="utf-8"), "int main(){return 0;}\n")
+            vendored = root / "skills" / "rocprof-compute-sample"
+            self.assertTrue((vendored / "wmma" / "Makefile").is_file())
+            self.assertFalse((vendored / "mega_kernel").exists())
             marker = json.loads(
                 (root / "skills" / "rocprof-compute-sample" / ".fixture.json").read_text(
                     encoding="utf-8"
