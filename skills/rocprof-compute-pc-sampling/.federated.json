@@ -2,9 +2,9 @@
   "source": "rocm-rocm-systems",
   "repo": "ROCm/rocm-systems",
   "ref": "develop",
-  "commit": "cd3fda14915e33a9c24f54d8eec55e1ccec03c0d",
+  "commit": "7a1a96c2aab5f963edf9a88120939cec3c45a8e8",
   "path": "projects/rocprofiler-compute/skills/rocprof-compute-pc-sampling",
   "license": "MIT",
-  "content_hash": "44c549984cab525586af8701a3ba86a77fc1485ab1400d823eb5f8137604042f",
-  "imported_at": "2026-10-26T20:16:47Z"
+  "content_hash": "e7302291aadaf366b7aaa3a7c47e3a368b9f2a8e24509c5dc86fb38ee318ae9e",
+  "imported_at": "2026-10-27T20:26:09Z"
 }

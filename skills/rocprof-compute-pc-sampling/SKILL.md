@@ -12,21 +12,20 @@ have already identified the kernel worth this level of detail.
 PC sampling is experimental. Every command below needs `--experimental`, and
 option names can change between releases, so run
 `rocprof-compute profile --experimental --help` before choosing flags.
+Never use the GUI or TUI.
 
 ## Prerequisites
 
 Install, supported GPUs, and which GPU the application runs on are in
-[Install ROCm Compute Profiler](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/install/core-install.rst),
-[source install](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/install/source-install.rst),
-[compatible accelerators](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst),
-and [Selecting a GPU](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+[Install ROCm Compute Profiler](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/install/core-install.rst),
+[source install](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/install/source-install.rst),
+[compatible accelerators](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst),
+and [Selecting a GPU](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
 
 This skill drives `rocprof-compute --pc-sampling`. A request to invoke
 `rocprofv3 --pc-sampling-beta-enabled` directly belongs to the rocprofiler-sdk
 PC sampling skill, not this one. Method support is in
-[PC sampling](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst).
-
-Never use the GUI or TUI.
+[PC sampling](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst).
 
 ## 1. Check what the hardware supports
 
@@ -39,7 +38,7 @@ interval range. Two methods exist:
 
 - `stochastic` samples in hardware and is the only method that records a stall
   reason. Which GPUs accept it is in
-  [PC sampling](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst).
+  [PC sampling](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst).
 - `host_trap` records no stall reason, and its samples can land a little past
   the instruction responsible.
 
@@ -107,7 +106,7 @@ there, and the fix is usually coalescing, prefetching, or more independent work
 between the load and its use.
 
 Stall reasons and what each one implies are listed in
-[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst). Do not interpret a stall
+[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst). Do not interpret a stall
 reason from host-trap data; it does not record one.
 
 ## 5. Export annotated disassembly
@@ -130,4 +129,4 @@ accepts, rather than drawing conclusions from a handful of samples.
 
 For multi-process workloads, keep each process or rank separate; see the
 multi-process sections of
-[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/cd3fda14915e33a9c24f54d8eec55e1ccec03c0d/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst).
+[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst).

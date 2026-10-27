@@ -2,9 +2,9 @@
   "source": "rocm-rocm-systems",
   "repo": "ROCm/rocm-systems",
   "ref": "develop",
-  "commit": "cd3fda14915e33a9c24f54d8eec55e1ccec03c0d",
+  "commit": "7a1a96c2aab5f963edf9a88120939cec3c45a8e8",
   "path": "projects/rocprofiler-compute/skills/rocprof-compute-speed-of-light",
   "license": "MIT",
-  "content_hash": "c23e8f01d41e6c039424e3f7b8890674bbdd83546b19d424753b29711068a510",
-  "imported_at": "2026-10-26T20:16:47Z"
+  "content_hash": "56519a96def55a271ce94f529c0e0d9a0d01b062ae22b406b985f55fb029de81",
+  "imported_at": "2026-10-27T20:26:09Z"
 }

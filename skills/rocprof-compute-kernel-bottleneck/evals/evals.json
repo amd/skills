@@ -11,7 +11,8 @@
         "runs analyze with --list-stats to find the hottest kernel"
       ],
       "unexpected_behavior": [
-        "invents a profiling flag instead of checking --help"
+        "invents a profiling flag instead of checking --help",
+        "opens the GUI or TUI"
       ],
       "logs_contain": ["rocprof-compute profile", "--list-stats"]
     },
