@@ -94,6 +94,8 @@ Run and optimize on AMD Instinct.
 | [`magpie-kernel-evaluator`](https://github.com/amd/skills/blob/main/skills/magpie-kernel-evaluator/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM or SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
 | [`tracelens-analysis-orchestrator`](https://github.com/amd/skills/blob/main/skills/tracelens-analysis-orchestrator/SKILL.md) | Orchestrate modular PyTorch profiler trace analysis with TraceLens: generate perf reports, run system-level and compute-kernel subagents in parallel, and write a prioritized stakeholder report. | [TraceLens](https://github.com/AMD-AGI/TraceLens) |
 | [`rocprofiler-pc-sampling`](https://github.com/amd/skills/blob/main/skills/rocprofiler-pc-sampling/SKILL.md) | Profile a GPU application with rocprofv3 program counter (PC) sampling, then analyze the samples to surface hotspots and stall reasons. | [rocprofiler-sdk](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk) |
+| [`flydsl-kernel-authoring`](https://github.com/amd/skills/blob/main/skills/flydsl-kernel-authoring/SKILL.md) | Write, review, and understand FlyDSL GPU kernels for AMD GPUs: layout algebra, tiled copy and MMA, LDS allocation, and autotuning. | [FlyDSL](https://github.com/ROCm/FlyDSL) |
+| [`flydsl-kernel-trace-analysis`](https://github.com/amd/skills/blob/main/skills/flydsl-kernel-trace-analysis/SKILL.md) | Collect rocprofv3 instruction-level traces and counters for a GPU kernel, map the top stall hotspots back to source lines, and produce an optimization plan. | [FlyDSL](https://github.com/ROCm/FlyDSL) |
 
 ## What is a skill?
 
