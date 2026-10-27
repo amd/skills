@@ -270,6 +270,59 @@ class V2ClientTests(unittest.TestCase):
                 cp.ControlPlaneClient().audience, "https://control.example/"
             )
 
+    def test_authorization_diagnostics_preserve_only_known_enums(self):
+        for code in cp.AUTH_DIAGNOSTICS:
+            with self.subTest(code=code):
+                body = json.dumps(
+                    {
+                        "error": {
+                            "code": code,
+                            "scope": "plans:write",
+                            "message": "private-secret https://private.example",
+                            "project_id": "private-project",
+                            "rule": "private-rule",
+                        },
+                        "request_id": "private-request-id",
+                    }
+                ).encode()
+                with patch.object(
+                    cp, "read_response", side_effect=http_error(403, body=body)
+                ) as read:
+                    with self.assertRaises(cp.ControlPlaneError) as error:
+                        self.client().request("POST", "/runs", {}, key="same")
+                message = str(error.exception)
+                self.assertIn(f"({code})", message)
+                self.assertNotIn("private", message)
+                self.assertEqual(read.call_count, 1)
+                self.assertEqual(
+                    controller.classify_controller_exception(RuntimeError(message)),
+                    message,
+                )
+                if code == "scope_missing":
+                    self.assertIn("Required scope: plans:write.", message)
+
+    def test_unknown_or_malformed_denials_never_leak_remote_values(self):
+        for body in (
+            b"[]",
+            b"null",
+            b'{"error": []}',
+            b"<html>private-secret</html>",
+            b'{"error": {"code": ["private-secret"]}}',
+            b'{"error": {"code": "private-secret"}}',
+            b'{"error": {"code": "scope_missing", "scope": "private-secret"}}',
+            b'{"error": {"code": "scope_missing", "scope": ["private-secret"]}}',
+        ):
+            with (
+                self.subTest(body=body),
+                patch.object(
+                    cp, "read_response", side_effect=http_error(403, body=body)
+                ),
+            ):
+                with self.assertRaises(cp.ControlPlaneError) as error:
+                    self.client().request("POST", "/runs", {}, key="same")
+                self.assertIn(str(error.exception), cp.SAFE_AUTH_DIAGNOSTICS)
+                self.assertNotIn("private", str(error.exception))
+
     def test_persistent_transport_failure_is_bounded_and_safe(self):
         with (
             patch.object(

@@ -30,6 +30,55 @@ RESULT_IDENTITY_GAP = (
     "per-session results before this selection can run."
 )
 
+# These are local messages keyed by documented API enums, not remote prose.
+# In particular, never echo error.message, request IDs, rule/project names,
+# rejected claim values, or an unrecognized error.code into public Actions logs.
+AUTH_DIAGNOSTICS = {
+    "no_matching_rule": "No enabled workspace CI rule matches the job's identity.",
+    "scope_missing": "The matched CI rule lacks a required API permission.",
+    "project_not_allowed": "The CI rule does not allow the requested or default project.",
+    "rule_turned_off": "The matching CI rule is disabled.",
+    "rule_needs_owner": "A current workspace owner must review and save the CI rule again.",
+    "rule_token_ended": "The credential used to save the CI rule has expired or been revoked.",
+    "rule_grants_nothing": "The CI rule grants no currently allowed permissions.",
+    "workspace_missing": "The configured CI workspace is no longer available.",
+    "audience_retired": "The CI rule's audience is no longer accepted by this deployment.",
+    "ci_token_forbidden": "The CI API requires the GitHub job OIDC token, not an exchanged token.",
+    "run_not_started_by_rule": "This CI rule cannot access that run.",
+    "portal_refused": "The Portal refused the Control Plane operation after CI authentication.",
+}
+REQUIRED_SCOPES = frozenset(
+    {
+        "plans:read",
+        "plans:write",
+        "plans:publish",
+        "runs:start",
+        "runs:read",
+        "runs:cancel",
+        "results:read",
+    }
+)
+GENERIC_AUTH_DIAGNOSTIC = (
+    "OrchestrAI V2 denied this workflow. Check workspace CI access "
+    "rules, audience, repository, workflow ref, event and scopes."
+)
+
+
+def authorization_diagnostic(code, scope=""):
+    if not isinstance(code, str) or code not in AUTH_DIAGNOSTICS:
+        return GENERIC_AUTH_DIAGNOSTIC
+    message = f"OrchestrAI V2 authorization denied ({code}). {AUTH_DIAGNOSTICS[code]}"
+    if code == "scope_missing" and isinstance(scope, str) and scope in REQUIRED_SCOPES:
+        message += f" Required scope: {scope}."
+    return message
+
+
+SAFE_AUTH_DIAGNOSTICS = frozenset(
+    [GENERIC_AUTH_DIAGNOSTIC]
+    + [authorization_diagnostic(code) for code in AUTH_DIAGNOSTICS]
+    + [authorization_diagnostic("scope_missing", scope) for scope in REQUIRED_SCOPES]
+)
+
 
 class ControlPlaneError(RuntimeError):
     """Only locally generated, credential-free messages belong here."""
@@ -211,19 +260,25 @@ class ControlPlaneClient:
                 return response
             except urllib.error.HTTPError as exc:
                 status = exc.code
-                # Examine only the fixed API code. Never propagate the remote
-                # message/detail/body, which can include private infrastructure.
+                # Only documented enum values may select a local diagnostic.
+                # Malformed or private response fields are never published.
+                code, scope = "", ""
                 try:
-                    code = json.loads(exc.read(65536)).get("error", {}).get("code", "")
+                    envelope = json.loads(exc.read(65536))
+                    error = (
+                        envelope.get("error") if isinstance(envelope, dict) else None
+                    )
+                    if isinstance(error, dict):
+                        code = error.get("code", "")
+                        scope = error.get("scope", "")
                 except (ValueError, AttributeError, OSError, http.client.HTTPException):
-                    code = ""
+                    pass
                 if status == 401 and not refreshed:
                     self.token = ""
                     refreshed = True
                 elif status == 403:
                     raise ControlPlaneError(
-                        "OrchestrAI V2 denied this workflow. Check workspace CI access "
-                        "rules, audience, repository, workflow ref, event and scopes."
+                        authorization_diagnostic(code, scope)
                     ) from None
                 elif status not in {408, 429, 500, 502, 503, 504} and not (
                     status == 409 and code == "idempotency_in_progress"

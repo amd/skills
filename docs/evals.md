@@ -146,6 +146,10 @@ events in **CI access**, with scopes `plans:write`, `plans:publish`, `runs:start
 `runs:read`, `runs:cancel`, and `results:read`. OIDC permission is granted only to the controller
 job (in addition to Instinct's existing federation permission). A 403 means the
 CI access policy must be checked; adding a Portal password will not resolve it.
+Known denials identify the fixed API category (for example, `scope_missing`,
+`no_matching_rule`, or `project_not_allowed`) and, when recognized, the missing
+permission. Remote error messages, claim values, request IDs, and private
+rule/project names are never included in public diagnostics.
 No repository settings or workspace trust rules are changed by this PR.
 
 ### Windows provisioning
