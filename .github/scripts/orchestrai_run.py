@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from orchestrai_control_plane import (
+    REQUEST_DIAGNOSTICS,
     SAFE_AUTH_DIAGNOSTICS,
     ControlPlaneClient,
     ControlPlaneError,
@@ -412,7 +413,7 @@ def classify_controller_exception(value: BaseException) -> str:
     if isinstance(value, ControlPlaneError):
         return str(value)
     message = str(value)
-    if message in SAFE_AUTH_DIAGNOSTICS:
+    if message in SAFE_AUTH_DIAGNOSTICS or message in REQUEST_DIAGNOSTICS.values():
         return message
     if isinstance(value, json.JSONDecodeError):
         return "The OrchestrAI Control Plane returned an invalid response."

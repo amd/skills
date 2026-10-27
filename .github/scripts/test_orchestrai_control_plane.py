@@ -134,13 +134,57 @@ class V2ClientTests(unittest.TestCase):
         )
         self.assertEqual(result["require_capacity"], "queue")
         document = result["plan_document"]["document"]
-        self.assertEqual(
-            document["sessions"][0]["tests"], source["sessions"][0]["tests"]
-        )
+        test = source["sessions"][0]["tests"][0]
+        self.assertEqual(document["sessions"][0]["tests"], [test["path"]])
+        self.assertEqual(document["sessions"][0]["variables"], test["variables"])
         self.assertEqual(document["sessions"][0]["level"], "L4-sys")
         self.assertNotIn("executor", document["run_settings"])
         self.assertEqual(document["run_settings"]["os_image"], "ubuntu")
         self.assertEqual(result["builds_json"], source["builds_json"])
+
+    def test_v2_sessions_keep_each_skills_variables_separate(self):
+        source = plan()
+        second = deepcopy(source["sessions"][0])
+        second["name"] = "skills-another-skill-windows"
+        second["os_image"] = "windows"
+        second["tests"][0]["path"] = "L4-sys/skills/windows/sys_func-skills_behavioral"
+        second["tests"][0]["variables"].update(
+            SKILLS="another-skill", SKILLS_OS="Windows"
+        )
+        source["sessions"].append(second)
+        document = cp.inline_request(source)["plan_document"]["document"]
+        for original, translated in zip(source["sessions"], document["sessions"]):
+            self.assertEqual(translated["tests"], [original["tests"][0]["path"]])
+            self.assertEqual(translated["variables"], original["tests"][0]["variables"])
+
+    def test_v2_session_translation_rejects_ambiguous_variable_ownership(self):
+        for mutation in (
+            "multiple_tests",
+            "conflicting_variables",
+            "invalid_variables",
+        ):
+            source = plan()
+            session = source["sessions"][0]
+            if mutation == "multiple_tests":
+                session["tests"] *= 2
+            elif mutation == "conflicting_variables":
+                session["variables"] = {"SKILLS": "another-skill"}
+            else:
+                session["tests"][0]["variables"] = ["invalid"]
+            with (
+                self.subTest(mutation=mutation),
+                self.assertRaises(cp.ControlPlaneError),
+            ):
+                cp.inline_request(source)
+
+    def test_v2_session_translation_preserves_nonconflicting_session_variables(self):
+        source = plan()
+        source["sessions"][0]["variables"] = {"EXTRA": "kept", "SKILLS": "local-ai-use"}
+        translated = cp.inline_request(source)["plan_document"]["document"]["sessions"][
+            0
+        ]
+        self.assertEqual(translated["variables"]["EXTRA"], "kept")
+        self.assertEqual(translated["variables"]["SKILLS"], "local-ai-use")
 
     def test_images_are_cp_aliases_or_explicit_overrides_without_discovery(self):
         source = plan()
@@ -322,6 +366,17 @@ class V2ClientTests(unittest.TestCase):
                     self.client().request("POST", "/runs", {}, key="same")
                 self.assertIn(str(error.exception), cp.SAFE_AUTH_DIAGNOSTICS)
                 self.assertNotIn("private", str(error.exception))
+
+    def test_bad_plan_diagnostics_keep_only_fixed_categories(self):
+        for (status, code), expected in cp.REQUEST_DIAGNOSTICS.items():
+            with (
+                self.subTest(code=code),
+                patch.object(cp, "read_response", side_effect=http_error(status, code)),
+            ):
+                with self.assertRaises(cp.ControlPlaneError) as error:
+                    self.client().request("POST", "/runs", {}, key="same")
+                self.assertEqual(str(error.exception), expected)
+                self.assertEqual(controller.safe_failure_message(expected), expected)
 
     def test_persistent_transport_failure_is_bounded_and_safe(self):
         with (

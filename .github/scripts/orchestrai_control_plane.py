@@ -78,6 +78,16 @@ SAFE_AUTH_DIAGNOSTICS = frozenset(
     + [authorization_diagnostic(code) for code in AUTH_DIAGNOSTICS]
     + [authorization_diagnostic("scope_missing", scope) for scope in REQUIRED_SCOPES]
 )
+REQUEST_DIAGNOSTICS = {
+    (400, "invalid_request"): (
+        "OrchestrAI V2 CI request failed with HTTP 400 (invalid_request). "
+        "Check the CI API plan request schema."
+    ),
+    (400, "portal_refused"): (
+        "OrchestrAI V2 CI request failed with HTTP 400 (portal_refused). "
+        "The supplied plan was rejected; check private plan and catalog validation."
+    ),
+}
 
 
 class ControlPlaneError(RuntimeError):
@@ -129,7 +139,34 @@ def inline_request(plan: dict) -> dict:
     # Generic ubuntu/windows aliases are resolved by the Control Plane. Do not
     # call the retired Portal boot-resources API or choose an arbitrary image.
     for session in document["sessions"]:
-        session.setdefault("level", session["tests"][0]["path"].split("/", 1)[0])
+        # V2 plan drafts require string test references, as Playbooks submits.
+        # Keep the local per-test envelope for result attribution, but move its
+        # variables onto the one-test session at the API boundary. Never merge
+        # several skills' variables onto a shared adapter invocation.
+        tests = session.get("tests")
+        if (
+            not isinstance(tests, list)
+            or len(tests) != 1
+            or not isinstance(tests[0], dict)
+            or not isinstance(tests[0].get("path"), str)
+            or not tests[0]["path"]
+            or not isinstance(tests[0].get("variables", {}), dict)
+            or not isinstance(session.get("variables", {}), dict)
+        ):
+            raise ControlPlaneError(
+                "OrchestrAI V2 requires one test adapter with variables per skill session."
+            )
+        test = tests[0]
+        variables = session.get("variables", {})
+        for name, value in test.get("variables", {}).items():
+            if name in variables and variables[name] != value:
+                raise ControlPlaneError(
+                    "OrchestrAI V2 refuses conflicting session and test variables."
+                )
+            variables[name] = value
+        session["tests"] = [test["path"]]
+        session["variables"] = variables
+        session.setdefault("level", test["path"].split("/", 1)[0])
         variable = "ORCHESTRAI_V2_" + (
             "WINDOWS_IMAGE" if session.get("os_image") == "windows" else "LINUX_IMAGE"
         )
@@ -284,7 +321,10 @@ class ControlPlaneClient:
                     status == 409 and code == "idempotency_in_progress"
                 ):
                     raise ControlPlaneError(
-                        f"OrchestrAI V2 CI request failed with HTTP {status}; "
+                        REQUEST_DIAGNOSTICS.get((status, code), "")
+                        if isinstance(code, str)
+                        and (status, code) in REQUEST_DIAGNOSTICS
+                        else f"OrchestrAI V2 CI request failed with HTTP {status}; "
                         "inspect the private Control Plane diagnostics."
                     ) from None
             except (
