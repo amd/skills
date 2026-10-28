@@ -2,9 +2,9 @@
   "source": "rocm-rocm-systems",
   "repo": "ROCm/rocm-systems",
   "ref": "develop",
-  "commit": "7a1a96c2aab5f963edf9a88120939cec3c45a8e8",
+  "commit": "8cce7054f17a77272e1ba73ef78f4f77cf056956",
   "path": "projects/rocprofiler-compute/skills/rocprof-compute-roofline",
   "license": "MIT",
-  "content_hash": "a7d8ed53d1cddb4db4700592435ade1fa42f6ff1e2b9442545cec53c8c1dbf4e",
-  "imported_at": "2026-10-27T20:26:09Z"
+  "content_hash": "6624d509ddee66144bf15f8bb39d0ccfde81a0e536cf11e34dfed618d05c17eb",
+  "imported_at": "2026-10-28T01:19:39Z"
 }

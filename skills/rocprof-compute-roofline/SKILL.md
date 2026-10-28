@@ -10,18 +10,11 @@ ceilings, peak compute and peak bandwidth, and answers one question: which of
 the two is the limit.
 
 Run `rocprof-compute profile --help` and `rocprof-compute analyze --help`
-before choosing flags. Never use the GUI or TUI, and do not open the generated
-HTML chart. The analyze table carries the same numbers in readable form.
+before choosing flags. Do not open the generated HTML chart. The analyze table
+carries the same numbers in readable form.
 
-## Prerequisites
-
-Install, supported GPUs, and which GPU the application runs on are in
-[Install ROCm Compute Profiler](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/install/core-install.rst),
-[source install](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/install/source-install.rst),
-[compatible accelerators](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst),
-and [Selecting a GPU](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
 Roofline support by GPU is in
-[supported hardware](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/what-is-rocprof-compute.rst).
+[supported hardware](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/what-is-rocprof-compute.rst).
 
 ## 1. Collect
 
@@ -36,14 +29,14 @@ which takes extra time. `--no-roof` skips them when the user only wants
 counters.
 
 On MI100 (gfx908), the roofline microbenchmarks are skipped and the profile
-still succeeds. When [supported hardware](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/what-is-rocprof-compute.rst)
+still succeeds. When [supported hardware](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/what-is-rocprof-compute.rst)
 shows no roofline support, do not ask the user to re-profile without
 `--no-roof`. Use Speed-of-Light and the `rocprof-compute-memory` skill instead.
 
 `--device` and `HIP_VISIBLE_DEVICES` are different selections. See
-[Selecting a GPU](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+[Selecting a GPU](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
 
-See [standalone roofline](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for `--roof-only`
+See [standalone roofline](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for `--roof-only`
 and `--bench-only`, which run the microbenchmarks without profiling an
 application.
 
@@ -85,29 +78,23 @@ at 45% of peak bandwidth" tells the user there is headroom; "memory-bound at
 
 ## 3. Pick the right precision and memory level
 
-Section 2 gives the verdict against the default ceilings. Refine it here when
-the kernel does not use FP32, or when the question is about a specific level of
-the hierarchy.
+The table lists a peak for every precision and an arithmetic intensity for
+every memory level. Compare against the peak row for the precision the kernel
+actually issues, and the intensity row for the memory level in question.
 
-```bash
-# Ceilings for the precision the kernel actually uses
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
-    -R FP16 BF16
-
-# Ceilings for a specific level
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
-    -m HBM L2
-```
-
-`-R` defaults to FP32. A mixed-precision or matrix kernel compared against the
-FP32 ceiling will look far worse than it is, so set `-R` to the precision the
-kernel actually issues. Read that from the instruction mix with `-b cu_ins`
+A mixed-precision or matrix kernel compared against the FP32 peak will look far
+worse than it is. Read the precision from the instruction mix with `-b cu_ins`
 rather than assuming it. Ask the user which precision the kernel is meant to
 use only when the mix is genuinely mixed and no single type dominates; they
 know the intent, the counters know what ran.
 
-`-m` defaults to every level. HBM answers "am I limited by main memory", while
-L2 and vL1D show whether caches are absorbing the traffic.
+HBM answers "am I limited by main memory", while L2 and vL1D show whether
+caches are absorbing the traffic.
+
+`--view table` prints one table for all kernels together instead of one per
+kernel. To compare many kernels, write the
+[analysis database](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst) with
+`--output-format db` and query it with SQL.
 
 ## 4. When roofline data is missing
 
@@ -118,4 +105,4 @@ L2 and vL1D show whether caches are absorbing the traffic.
 | `roofline.csv` absent from the workload directory | the benchmark did not complete; check the profile log |
 
 The concepts behind the ceilings are in the
-[performance model](https://github.com/ROCm/rocm-systems/blob/7a1a96c2aab5f963edf9a88120939cec3c45a8e8/projects/rocprofiler-compute/docs/conceptual/performance-model.rst).
+[performance model](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/conceptual/performance-model.rst).
