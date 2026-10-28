@@ -5,6 +5,15 @@ generation steps in `SKILL.md` leave a question open. The server-side parser
 (`routing_policy_parser.cpp`) is strict: it rejects unknown keys at every
 level, so never emit fields not listed here.
 
+The machine-readable source of truth is `scripts/route_policy.schema.json`, a
+verbatim copy of the server's
+[`route_policy.schema.json`](https://github.com/lemonade-sdk/lemonade/blob/main/src/cpp/resources/schemas/route_policy.schema.json);
+`scripts/route_policy.schema.source.json` records the ref it was copied from.
+`scripts/validate.py` derives its key sets from it, so the validator follows
+the schema automatically after `python scripts/sync_schema.py`. The tables
+below are hand-written. When a sync reports new keys or types, update them too.
+`python scripts/sync_schema.py --check` exits 1 when the copy is stale.
+
 ## Contents
 
 - [Root document](#root-document)
@@ -14,6 +23,7 @@ level, so never emit fields not listed here.
 - [Model capability requirements](#model-capability-requirements)
 - [Validation checklist](#validation-checklist)
 - [Registering, invoking, tracing](#registering-invoking-tracing)
+- [Router scope and limits](#router-scope-and-limits)
 - [Desktop-editor compatibility](#desktop-editor-compatibility)
 
 ---
@@ -114,15 +124,17 @@ Match-expression grammar:
 | `keywords_any` | non-empty array of non-empty strings | case-insensitive substring, any - `"hi"` also matches inside `"this"`, `"shipping"`, `"high"`, etc. Use `regex` `\b...\b` for word-boundary matching |
 | `keywords_all` | same | all must appear; same substring semantics as `keywords_any` |
 | `regex` | non-empty string | ECMAScript regex over the input text |
-| `min_chars` / `max_chars` | integer ≥ 0 | input length in **UTF-8 bytes** |
+| `min_chars` / `max_chars` | integer ≥ 0 | length of the routing input (latest user turn) in **UTF-8 bytes** |
+| `min_total_chars` / `max_total_chars` | integer ≥ 0 | length of **all** text in the request in UTF-8 bytes: every chat message of every role (system/user/assistant/tool), the `/completions` `prompt`, or every Responses `input` item. Images/audio count as 0. Fires on a long history even when the last turn is `"go on"`, which `min_chars` sees as 5 bytes. Estimate ~4 bytes per token when sizing against a context window. Server v11.8.0+ |
 | `has_tools` / `has_images` | boolean | request carries `tools[]` / image parts. `false` is legal and means "must NOT have"; `{"not": {"has_tools": true}}` is the equivalent preferred spelling |
 | `classifier` | classifier id (string) | band test on that classifier's score |
 | `label` | string | only with `classifier`; must exist on that classifier; may be omitted only if the classifier has `default_label` |
 | `min_score` / `max_score` | number in [0,1], min ≤ max | only with `classifier`; omitting both defaults to `min_score: 0.5` |
 | `metadata` | `{ "key": <string>, ... }` | plus exactly one of `equals` (string), `any` (non-empty string array), `exists` (boolean); evaluated over the request's OpenAI `metadata` object. Comparisons are case-sensitive. `any` comma-decodes the metadata value before matching: a caller sending `{"dept": "legal,compliance"}` (scalar) matches `any: ["legal", "compliance"]` - same as if two separate values were in the array. |
 
-The routed input text is the last user message (chat), the `prompt`
-(completions), or the `input` (responses).
+The routed input text is the last user message (`/chat/completions`), the
+`prompt` (`/completions`), or the `input` (`/responses`). All three endpoints
+route a `collection.router` model on every supported server (v11.5.0+).
 
 ## Model capability requirements
 
@@ -178,6 +190,11 @@ authoring judgment and aren't (fully) checkable by a script.
 ## Registering, invoking, tracing
 
 ```bash
+curl -X POST http://localhost:13305/api/v1/routing/validate \
+     -H "Content-Type: application/json" \
+     -d '{"policy": {...}, "prompt": "My SSN is 123-45-6789",
+          "has_tools": false, "has_images": false, "metadata": {"consent": "denied"}}'
+
 # register (idempotent - re-POST to update)
 curl -X POST http://localhost:13305/api/v1/pull \
      -H "Content-Type: application/json" --data-binary @router.json
@@ -221,8 +238,10 @@ there:
 - One condition per leaf object. Compound leaves (`{"min_chars": 5,
   "has_tools": true}`) are valid server-side but the editor cannot display
   them and will warn it must drop them on save.
-- `metadata` conditions are JSON-only for now - the editor shows a lossy-edit
-  warning for rules containing them. Generate them only when the user
-  explicitly wants metadata routing, and say so in your reply.
+- `metadata` and `min_total_chars` / `max_total_chars` conditions are
+  JSON-only in released builds - the editor shows a lossy-edit warning for
+  rules containing them. (The editor on Lemonade `main` edits `metadata` but
+  refuses to import `*_total_chars`.) Generate them only when the user's
+  intent needs them, and say so in your reply.
 - Everything else in this reference (nested `all`/`any`/`not`, all three
   classifier types, negated booleans) round-trips cleanly.
