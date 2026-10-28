@@ -327,14 +327,14 @@ For each P-item (`### ...P{N}:`) under `## Compute Kernel Optimizations`:
 
 ### marker\_eval\_3: Detail Estimate Markers
 
-**Sub-indices:** `marker_eval_3_P{N}` (one per compute P-item in Detailed Analysis)
+**Sub-indices:** `marker_eval_3_P{N}` (one per compute P-item in Detailed Analysis) and `marker_eval_3_fusion_P{N}` (one per P-item under `### Kernel Fusion Insights`)
 
-For each compute P-item section under `## Detailed Analysis`:
+For each compute P-item section under `## Detailed Analysis`, and each fusion P-item under `### Kernel Fusion Insights`:
 
 | Check | Pass Criteria |
 |-------|---------------|
 | `kind=detail_estimate` marker or sentinel | Either a `<!-- impact-begin kind=detail_estimate ... -->` / `<!-- impact-end -->` pair exists, or the text "not quantifiable from trace data" is present |
-| Required attributes | If marker present, it contains `low` and `high` attributes |
+| Required attributes | If marker present, it contains `low`, `mid` and `high` attributes (compute and fusion) |
 | Pairing | Every `impact-begin` has a matching `impact-end` |
 
 **Pass:** Marker with correct attributes present, or not-quantifiable sentinel present.
