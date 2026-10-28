@@ -118,6 +118,12 @@ passes — the GPU is AMD. Linux, Windows and WSL2 all run the same workflow.
      automatically the end of the question, either: a `diagnose-only` top
      match can clear the gate from host state alone, independent of whatever
      symptom was pasted — see the refinement in step 2.
+   - An **advice-only** entry in `matched[]` (today `fix-22-display-driver-old`)
+     scores below the threshold on purpose and never sets `has_match`. It is
+     not a cause of the symptom. Relay the entry's `title` and `evidence` to
+     the user as advice, and never apply it for them. Keep routing upstream if
+     `has_match` is false. Step 2's rule that a lower cause may be mentioned only
+     if it also clears `min_score_for_match` does not apply to this entry.
    - `matched[]` — ranked causes, each with `id`, `title`, `score` (0–100),
      `evidence[]`, and a `fix` (with `fix_id`, `summary`, `commands`, `verify`,
      `notes`, and the `needs_sudo` / `needs_reboot` / `needs_relogin` /
@@ -162,7 +168,9 @@ passes — the GPU is AMD. Linux, Windows and WSL2 all run the same workflow.
    would if `has_match` were false. You may mention a lower cause only if it
    *also* clears `min_score_for_match` — below that threshold nothing was
    established, which is the same bar the `has_match` paragraph above sets,
-   and a `diagnose-only` top match does not lower it.
+   and a `diagnose-only` top match does not lower it. The one exception is the
+   advice-only `fix-22-display-driver-old` entry described under `has_match`
+   above: relay it as advice, never as a cause.
 
 3. **Apply with consent.** For an auto-applicable fix:
 
@@ -172,7 +180,7 @@ passes — the GPU is AMD. Linux, Windows and WSL2 all run the same workflow.
    rocm fix <fix-id> --yes      # required to apply in a non-interactive shell
    ```
 
-   Only the four auto-applicable fixes are ones the CLI runs itself. The other 23
+   Only the four auto-applicable fixes are ones the CLI runs itself. The other 24
    are **print-only** (bootloader, kernel, reinstall, Windows driver, …): `rocm
    fix <id>` just prints the plan for the user to run themselves — no prompt, and
    the CLI never performs those.
