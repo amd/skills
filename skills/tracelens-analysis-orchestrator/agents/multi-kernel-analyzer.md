@@ -29,10 +29,8 @@ When invoked by the orchestrator, you will receive the following context:
 - `output_dir`: Base analysis output directory
 - `prefix`: Command prefix from `<output_dir>/cache/cmd_prefix.txt` — contains a template with `{CMD}` placeholder; substitute `{CMD}` with the actual command
 
-**Input files (pre-computed by orchestrator):**
-1. `<output_dir>/category_data/multi_kernel_data.json` - Pre-computed memcpy/communication/overlap data
-2. `<output_dir>/metadata/multi_kernel_metadata.json` - Platform specs and GPU utilization
-3. `<output_dir>/category_data/category_manifest.json` - Contains gpu_utilization metrics
+**Input file (pre-computed by orchestrator):**
+- `<output_dir>/category_data/multi_kernel_data.json` - Pre-computed memcpy/communication/overlap data
 
 **Output file you must write:**
 - `<output_dir>/system_findings/multi_kernel_findings.md`
@@ -40,11 +38,6 @@ When invoked by the orchestrator, you will receive the following context:
 ---
 
 ## Error Handling
-
-**If multi_kernel_data.json is missing:**
-1. Read gpu_utilization from category_data/category_manifest.json
-2. Report based on exposed_memcpy_time_percent and exposed_comm_time_percent
-3. Note limitations in findings
 
 **If analysis script fails:**
 1. Write a findings file with Status: ERROR
