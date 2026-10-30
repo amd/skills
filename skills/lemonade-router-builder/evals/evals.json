@@ -53,6 +53,24 @@
       ]
     },
     {
+      "id": "long-conversation-router",
+      "skill_should_trigger": true,
+      "prompt": "Once a conversation's total history gets past about 15,000 tokens, send it to fireworks.deepseek-v3; otherwise keep it on Qwen3.5-9B-GGUF.",
+      "expected_behavior": [
+        "Use a min_total_chars condition (whole-conversation length), not min_chars",
+        "Size the bound at roughly 4 bytes per token (about 60000)",
+        "Set Qwen3.5-9B-GGUF as default_model",
+        "Run the offline validator scripts/validate.py and report it passed"
+      ],
+      "unexpected_behavior": [
+        "Use min_chars as a substitute for min_total_chars",
+        "Claim the validator or the server does not support min_total_chars"
+      ],
+      "files_exist": [
+        "router.json"
+      ]
+    },
+    {
       "id": "nginx-load-balance",
       "skill_should_trigger": false,
       "prompt": "Set up nginx to load-balance incoming requests across three backend servers."

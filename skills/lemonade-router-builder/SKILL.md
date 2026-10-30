@@ -26,6 +26,8 @@ try and stays editable in the desktop app's Hybrid Router editor.
 - **Lemonade Server v11.5.0+** running locally (`lemonade server start`).
   Required only to register and test the generated policy - the skill itself
   (JSON generation + offline validation) works without a live server.
+  `min_total_chars` / `max_total_chars` need **v11.8.0+**; the
+  `POST /api/v1/routing/validate` check in Step 8b needs **v11.6.0+**.
 - **No GPU or ROCm dependency** for authoring. The router policy is a JSON
   document; no hardware is needed to generate or validate it.
 - **Python** (any 3.x) in PATH - used by the bundled offline validator
@@ -202,7 +204,8 @@ condition per leaf object; nesting is allowed:
 |------|---------|-------|
 | `keywords_any` / `keywords_all` | `{ "keywords_any": ["SSN", "Email"] }` | case-insensitive substring - `"hi"` matches inside `"this"`, `"shipping"`, `"high"`, etc. Use `regex` with `\b...\b` when word-boundary precision is needed |
 | `regex` | `{ "regex": "\\b\\d{3}-?\\d{2}-?\\d{4}\\b" }` | ECMAScript flavor |
-| `min_chars` / `max_chars` | `{ "min_chars": 4000 }` | input length, UTF-8 bytes, non-negative integer |
+| `min_chars` / `max_chars` | `{ "min_chars": 4000 }` | length of the **latest user turn**, UTF-8 bytes, non-negative integer |
+| `min_total_chars` / `max_total_chars` | `{ "min_total_chars": 60000 }` | length of **all** text in the request (every message, every role), UTF-8 bytes; use for "long conversation" rules - `min_chars` sees only the last turn. ~4 bytes per token. v11.8.0+; not editable in the desktop UI |
 | `has_tools` / `has_images` | `{ "has_images": true }` | booleans |
 | `classifier` | `{ "classifier": "clf-1", "label": "PII", "min_score": 0.5 }` | band test; `min_score`/`max_score` in [0,1]; default `min_score` 0.5; omit `label` only if the classifier has `default_label` |
 | `metadata` | `{ "metadata": { "key": "consent", "equals": "denied" } }` | exactly one of `equals` / `any` / `exists`; note: not editable in the desktop UI yet - use only when the user asks for metadata routing |
@@ -228,7 +231,17 @@ It exits 0 with `"ready": true` when there are no errors. If it reports
 errors, fix the JSON and re-run. Do not present a policy that fails this
 check.
 
-**8b. Immediately after validation passes, print these three curl commands**
+The validator takes its vocabulary (keys, conditions, classifier types and
+their required fields) from `scripts/route_policy.schema.json`, a copy of the
+server's own schema; the output's `schema` field says which Lemonade ref it
+came from. If the validator rejects a field the user says their server or the
+Lemonade docs support, the copy is stale - run
+`python scripts/sync_schema.py --ref <server version tag, e.g. v11.8.1>`
+(fetches from GitHub) and re-validate, rather than editing the policy around
+it. A `schema_drift` warning means the schema has a constraint the validator
+can't check; rely on the server-side check in 8b.
+
+**8b. Immediately after validation passes, print these curl commands**
 as plain text for the user to copy and run. This is not optional. Fill in
 `<model-id>` and `<model_name>` from the policy, and a short `<test prompt>`
 that should hit the first rule. Do not execute these with Bash or any tool —
@@ -237,9 +250,16 @@ print them as text only.
 `ready: true` from the validator only means the JSON is schema-valid - it
 says nothing about whether these models exist on the target host. Run #1 for
 every candidate/classifier model before #2, or `/pull` will 400 on a policy
-that just passed validation.
+that just passed validation. #0 runs the target server's own parser on the
+policy without registering it - the authoritative answer if the server's
+version differs from the bundled schema.
 
 ```bash
+# 0. Parse and test the policy on the server itself, without registering it
+curl -X POST http://localhost:13305/api/v1/routing/validate \
+     -H "Content-Type: application/json" \
+     -d '{"policy": <contents of router.json>, "prompt": "<test prompt>"}'
+
 # 1. Check a model exists before registering
 curl http://localhost:13305/api/v1/models/<model-id>
 
