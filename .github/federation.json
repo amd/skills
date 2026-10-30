@@ -95,10 +95,52 @@
       "repo": "ROCm/rocm-systems",
       "branch": "develop",
       "license": "MIT",
+      "fixtures": [
+        {
+          "path": "projects/rocprofiler-compute/sample",
+          "as": "rocprof-compute-sample",
+          "workspace_prefix": "../../sample",
+          "files": [
+            "common.h",
+            "lds.hip",
+            "mat_mul_max.hip",
+            "occupancy.hip",
+            "simple_net.py",
+            "vcopy.cpp",
+            "vmem.hip",
+            "vrandom_access.cpp",
+            "vsequential_access.cpp",
+            "membw_analysis_test_suite/gl2_backpressure.hip",
+            "wmma_gemm_fp16/Makefile",
+            "wmma_gemm_fp16/main.cpp",
+            "wmma_gemm_fp16/wmma_gemm_fp16.hip",
+            "wmma_gemm_fp16/wmma_gemm_fp16.hpp",
+            "wmma_gemm_fp16/wmma_gemm_fp16_config.hpp"
+          ]
+        }
+      ],
       "skills": [
         {
           "path": "projects/rocprofiler-sdk/skills/pc-sampling",
           "as": "rocprofiler-pc-sampling"
+        },
+        {
+          "path": "projects/rocprofiler-compute/skills/rocprof-compute-kernel-bottleneck"
+        },
+        {
+          "path": "projects/rocprofiler-compute/skills/rocprof-compute-memory"
+        },
+        {
+          "path": "projects/rocprofiler-compute/skills/rocprof-compute-pc-sampling"
+        },
+        {
+          "path": "projects/rocprofiler-compute/skills/rocprof-compute-roofline"
+        },
+        {
+          "path": "projects/rocprofiler-compute/skills/rocprof-compute-speed-of-light"
+        },
+        {
+          "path": "projects/rocprofiler-compute/skills/rocprof-compute-torch-trace"
         }
       ]
     }

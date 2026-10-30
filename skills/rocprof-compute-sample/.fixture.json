@@ -1,0 +1,8 @@
+{
+  "repo": "ROCm/rocm-systems",
+  "ref": "develop",
+  "commit": "8cce7054f17a77272e1ba73ef78f4f77cf056956",
+  "path": "projects/rocprofiler-compute/sample",
+  "content_hash": "20210259dfbeada334ea1a051d146f05fde13a280ef6ac4523931f725f66f001",
+  "imported_at": "2026-10-28T01:19:39Z"
+}

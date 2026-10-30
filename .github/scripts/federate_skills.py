@@ -32,6 +32,12 @@ For each declared skill, the script:
    not vendored: they are left out of the copy and of the content hash, and
    named in the run log and the pull request body. The one file kept when
    upstream lacks it is `evals/machine.yml` (`LOCAL_FALLBACK_FILES`).
+   A source may also declare `fixtures`: files from a directory that is not
+   a skill (the rocprofiler-compute sample tree) copied once under
+   `skills/<as>/`. Only the listed `files` are copied.
+   Vendored `evals.json` workspace values that start with that fixture's
+   `workspace_prefix` are rewritten to `../<as>` so they resolve next to the
+   skill. Upstream files are not modified.
 3b. Optionally vendors the skill under a different local catalog name (the
    `as:` field on a skill entry). Federated skills follow a
    `<projectrepo>-<skill>` naming convention in this catalog (e.g. the
@@ -143,8 +149,10 @@ URI_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 MARKETPLACE_DESCRIPTION_MAX = 320
 
 REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
-SOURCE_KEYS = {"repo", "license", "branch", "skills"}
+SOURCE_KEYS = {"repo", "license", "branch", "skills", "fixtures"}
 SKILL_KEYS = {"path", "as", "marketplace_description"}
+FIXTURE_KEYS = {"path", "as", "workspace_prefix", "files"}
+FIXTURE_MARKER = ".fixture.json"
 # Keys that would pin a source to something other than a branch. They are
 # rejected with a pointed message rather than ignored, so an entry that tries
 # to track a tag or commit fails loudly instead of silently tracking `main`.
@@ -171,10 +179,27 @@ class SkillSpec:
 
 
 @dataclass
+class FixtureSpec:
+    """A non-skill directory vendored once and shared by a source's skills.
+
+    `workspace_prefix` is the path those skills use in their own repo
+    (for example ``../../sample``). Vendored datasets are rewritten so the
+    same value resolves to ``../<local_name>`` beside the skill. `files` are
+    the paths under `path` that get vendored; nothing else is copied.
+    """
+
+    path: str
+    local_name: str
+    workspace_prefix: str
+    files: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Source:
     repo: str
     license: str
     skills: list[SkillSpec] = field(default_factory=list)
+    fixtures: list[FixtureSpec] = field(default_factory=list)
     # As declared: a branch name, or a pattern such as `release/*`.
     branch: str = branches.DEFAULT_BRANCH
 
@@ -295,15 +320,105 @@ def parse_federation(catalog: Path) -> list[Source]:
                 )
             )
 
+        fixtures = _parse_fixtures(raw.get("fixtures", []), f"{where}.fixtures")
         sources.append(
             Source(
                 repo=repo,
                 license=raw.get("license") or "UNKNOWN",
                 skills=skills,
+                fixtures=fixtures,
                 branch=branch,
             )
         )
+    _reject_name_collisions(sources)
     return sources
+
+
+def _parse_repo_path(path: object, where: str) -> str:
+    """A repo-relative directory path: no scheme, no ``..``, no leading slash."""
+    if not isinstance(path, str) or not path.strip("/"):
+        raise ValueError(
+            f"{where} must be a directory path inside the repo, got {path!r}."
+        )
+    normalized = path.replace("\\", "/").strip("/")
+    if ".." in normalized.split("/"):
+        raise ValueError(f"{where} must not contain '..': {path!r}")
+    return normalized
+
+
+def _parse_fixtures(raw: object, where: str) -> list[FixtureSpec]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"{where} must be an array.")
+    fixtures: list[FixtureSpec] = []
+    for idx, item in enumerate(raw):
+        item_where = f"{where}[{idx}]"
+        if not isinstance(item, dict):
+            raise ValueError(f"{item_where} must be an object.")
+        unknown = set(item) - FIXTURE_KEYS
+        if unknown:
+            raise ValueError(
+                f"{item_where} has unknown key(s) {sorted(unknown)}; expected "
+                f"{sorted(FIXTURE_KEYS)}."
+            )
+        local_name = item.get("as")
+        if not isinstance(local_name, str) or not local_name or "/" in local_name:
+            raise ValueError(
+                f"{item_where}.as must be a plain local folder name, got "
+                f"{local_name!r}."
+            )
+        if local_name.startswith("."):
+            raise ValueError(f"{item_where}.as must not be hidden: {local_name!r}")
+        prefix = item.get("workspace_prefix")
+        if not isinstance(prefix, str) or not prefix.strip("/"):
+            raise ValueError(
+                f"{item_where}.workspace_prefix must be the relative workspace "
+                f"path used upstream, got {prefix!r}."
+            )
+        prefix = prefix.replace("\\", "/").strip("/")
+        if prefix.startswith("/") or "://" in prefix:
+            raise ValueError(
+                f"{item_where}.workspace_prefix must be a relative path, got "
+                f"{prefix!r}."
+            )
+        files = item.get("files")
+        if not isinstance(files, list) or not files:
+            raise ValueError(
+                f"{item_where}.files must list the fixture files to vendor."
+            )
+        fixtures.append(
+            FixtureSpec(
+                path=_parse_repo_path(item.get("path"), f"{item_where}.path"),
+                local_name=local_name,
+                workspace_prefix=prefix,
+                files=[
+                    _parse_repo_path(rel, f"{item_where}.files[{i}]")
+                    for i, rel in enumerate(files)
+                ],
+            )
+        )
+    return fixtures
+
+
+def _reject_name_collisions(sources: list[Source]) -> None:
+    """Skill folders and fixture folders share `skills/`, so names must be unique."""
+    seen: set[str] = set()
+    for source in sources:
+        for spec in source.skills:
+            if spec.dest_name in seen:
+                raise ValueError(
+                    f"Skill name collision: {spec.dest_name!r} is declared "
+                    "more than once."
+                )
+            seen.add(spec.dest_name)
+        for fixture in source.fixtures:
+            if fixture.local_name in seen:
+                raise ValueError(
+                    f"Fixture name collision: {fixture.local_name!r} is also "
+                    "used as a skill or fixture folder."
+                )
+            seen.add(fixture.local_name)
 
 
 def run(cmd: list[str], cwd: Path | None = None) -> str:
@@ -746,7 +861,11 @@ def import_source(
             log.append(f"[{source.name}] {source.branch} resolved to {branch}")
         log.append(f"[{source.name}] cloning {source.repo}@{branch}")
         commit = shallow_clone(
-            source.repo, branch, [spec.path for spec in source.skills], tmp_path
+            source.repo,
+            branch,
+            [spec.path for spec in source.skills]
+            + [fixture.path for fixture in source.fixtures],
+            tmp_path,
         )
         log.append(f"[{source.name}] resolved to commit {commit}")
         repo_files = list_repo_files(tmp_path, commit)
@@ -873,7 +992,116 @@ def import_source(
                     omitted=omitted,
                 )
             )
+        if source.fixtures:
+            sync_fixtures(source, tmp_path, branch, commit, log)
     return results
+
+
+def rewrite_fixture_workspaces(skill_dir: Path, fixture: FixtureSpec) -> bool:
+    """Point vendored workspace paths at the catalog copy of a fixture.
+
+    Upstream keeps ``workspace_prefix`` (``../../sample`` inside the product
+    tree). The catalog copy lives beside the skill, so the same cases use
+    ``../<fixture>``. A second run finds nothing to replace.
+    """
+    prefix = fixture.workspace_prefix
+    replacement = f"../{fixture.local_name}"
+    changed = False
+    for name in ("evals/evals.json", "evals/extended_evals.json"):
+        path = skill_dir / name
+        if not path.is_file():
+            continue
+        original = path.read_text(encoding="utf-8")
+        updated = original.replace(f'"{prefix}', f'"{replacement}')
+        if updated != original:
+            path.write_text(updated, encoding="utf-8")
+            changed = True
+    return changed
+
+
+def fixture_hash(root: Path, files: Iterable[str]) -> str:
+    """Hash the named files under `root`, in the same form as `content_hash`."""
+    digest = hashlib.sha256()
+    for rel in sorted(files):
+        digest.update(rel.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256((root / rel).read_bytes()).digest())
+    return digest.hexdigest()
+
+
+def sync_fixtures(
+    source: Source,
+    clone_dir: Path,
+    branch: str,
+    commit: str,
+    log: list[str],
+    skills_dir: Path = SKILLS_DIR,
+) -> None:
+    """Copy each declared fixture under `skills/` and retarget workspace paths.
+
+    The fixture is not a skill: its marker is `.fixture.json`, so the
+    undeclared-skill report does not treat the directory as a vendored skill.
+    Only the fixture's declared `files` are copied, so the vendored copy holds
+    what the eval workspaces use rather than the whole upstream tree.
+    """
+    for fixture in source.fixtures:
+        src = clone_dir / fixture.path
+        missing = [rel for rel in fixture.files if not (src / rel).is_file()]
+        if missing:
+            raise FileNotFoundError(
+                f"Fixture file(s) {missing} not found under {fixture.path!r} in "
+                f"{source.repo}@{branch}."
+            )
+        dest = skills_dir / fixture.local_name
+        upstream_hash = fixture_hash(src, fixture.files)
+        marker_path = dest / FIXTURE_MARKER
+        previous = {}
+        if marker_path.is_file():
+            try:
+                loaded = json.loads(marker_path.read_text(encoding="utf-8"))
+                previous = loaded if isinstance(loaded, dict) else {}
+            except json.JSONDecodeError:
+                previous = {}
+        same = (
+            previous.get("content_hash") == upstream_hash
+            and previous.get("repo") == source.repo
+            and previous.get("path") == fixture.path
+            and previous.get("ref") == source.branch
+        )
+        if same:
+            log.append(
+                f"[{source.name}] skills/{fixture.local_name} fixture is up to date"
+            )
+        else:
+            if dest.exists():
+                shutil.rmtree(dest)
+            for rel in fixture.files:
+                (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src / rel, dest / rel)
+            marker = {
+                "repo": source.repo,
+                "ref": source.branch,
+                "commit": commit,
+                "path": fixture.path,
+                "content_hash": upstream_hash,
+                "imported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+            if branch != source.branch:
+                marker["resolved_ref"] = branch
+            (dest / FIXTURE_MARKER).write_text(
+                json.dumps(marker, indent=2) + "\n", encoding="utf-8"
+            )
+            log.append(
+                f"[{source.name}] vendoring fixture {fixture.path} -> "
+                f"skills/{fixture.local_name}"
+            )
+        for spec in source.skills:
+            skill_dir = skills_dir / spec.dest_name
+            if rewrite_fixture_workspaces(skill_dir, fixture):
+                log.append(
+                    f"[{source.name}] skills/{spec.dest_name}: workspace "
+                    f"{fixture.workspace_prefix} -> ../{fixture.local_name}"
+                )
 
 
 def report_undeclared(
@@ -1048,6 +1276,13 @@ def main(argv: list[str] | None = None) -> int:
                 print(
                     f"{source.repo}@{source.branch} {spec.path} "
                     f"-> skills/{spec.dest_name}"
+                )
+            for fixture in source.fixtures:
+                print(
+                    f"{source.repo}@{source.branch} {fixture.path} "
+                    f"-> skills/{fixture.local_name} "
+                    f"({len(fixture.files)} file(s), workspace "
+                    f"{fixture.workspace_prefix})"
                 )
         print("")
         print(f"{args.catalog} is valid: {len(seen)} skill(s) declared.")

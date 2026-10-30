@@ -1,0 +1,10 @@
+{
+  "source": "rocm-rocm-systems",
+  "repo": "ROCm/rocm-systems",
+  "ref": "develop",
+  "commit": "8cce7054f17a77272e1ba73ef78f4f77cf056956",
+  "path": "projects/rocprofiler-compute/skills/rocprof-compute-kernel-bottleneck",
+  "license": "MIT",
+  "content_hash": "fc6c0e7c031c170e9f2cff67973a40ec8c9ccfecbd513f057c79121fd9e2a2c2",
+  "imported_at": "2026-10-28T01:19:39Z"
+}
