@@ -121,12 +121,12 @@ reporting confident nonsense.
 | `fix-4-render-group` | linux | User not in `render`/`video` group (or `/dev/kfd` owned by the other group) | cannot open `/dev/kfd`, permission denied | auto |
 | `fix-5-amdgpu-load` | linux | `amdgpu` module not loaded (or blacklisted) | "ROCk module is NOT loaded", blacklist entry, Secure Boot | print-only |
 | `fix-6-path` | linux/windows/wsl | ROCm/HIP binaries not on PATH after install | `rocminfo: command not found`, `hipInfo` missing from PATH | auto |
-| `fix-7-stale-repos` | linux | Stale/conflicting APT/DNF repos from prior installer runs | apt 404 `repo.radeon.com`, unmet deps, ≥2 ROCm repo files | print-only |
+| `fix-7-stale-repos` | linux | Stale/conflicting APT/DNF/zypper repos from prior installer runs | apt 404 `repo.radeon.com`, unmet deps, ≥2 ROCm repo files | print-only |
 | `fix-8-wheel-rocm` | linux/windows/wsl | Framework wheel built for a different ROCm major than the system | `libamdhip64.so.X` / `amdhip64_X.dll` load failure | print-only |
 | `fix-9-igpu-dgpu` | linux/windows | iGPU enumerated alongside dGPU, destabilising the runtime | APU + discrete AMD present, `HIP_VISIBLE_DEVICES` unset, crash/segfault | needs-arg |
 | `fix-10-container` | linux | Container can't see `/dev/kfd` or `/dev/dri/renderD*` | running in docker/podman, kfd/render devices missing | print-only |
 | `fix-11-iommu` | linux | Multi-GPU hang with IOMMU enabled | ≥2 AMD GPUs, `iommu=` not `pt`, hang/deadlock/timeout | print-only |
-| `fix-12-installer` | linux | `amdgpu-install` left a broken DKMS / repo state | dpkg half-configured, DKMS failed, `--accept-eula` | print-only |
+| `fix-12-installer` | linux | Repo-native package-manager install left a broken DKMS / repo state | dpkg half-configured, DKMS build failure, dpkg/apt error | print-only |
 | `fix-13-hip-sdk-missing` | windows | HIP SDK not installed | **something on the host actually calls into HIP** — an ambient (non-managed-runtime) PyTorch HIP build, or a `GGML_HIP=ON` llama.cpp, either way with a detected AMD GPU — **and** no HIP SDK under Program Files, or `hipInfo.exe` missing from its `bin`. A paste naming any of `amdhip64` not found, "could not find HIP", `HIP_PATH` not set, or `hipInfo` not recognized counts as calling into HIP on its own, with no GPU required. A Vulkan-backed engine (the Lemonade default) or a managed-runtime wheel needs no system SDK, so its absence is not evidence there | print-only |
 | `fix-14-adrenalin-too-old` | windows | Adrenalin / kernel-mode driver too old for the HIP SDK | `hipInfo` can't enumerate, "driver too old", HSA "no agents found" | print-only |
 | `fix-15-msvc-redist` | windows | MSVC runtime missing (programs that link it, such as the HIP SDK DLLs and the llama.cpp server, can't load) | `vcruntime140.dll` / `vcruntime140_1.dll` missing | print-only |
