@@ -1,5 +1,9 @@
 # Skill Evaluation
 
+> This integration changes Strix execution and reporting, not workflow eligibility.
+> See the [OrchestrAI integration notes](orchestrai-integration.md).
+> A green offline preview is not a hardware or model-evaluation result.
+
 ## Testing Pipeline Overview
 
 A skill reaches the catalog after passing three review stages: an eligibility and compliance check, structural screening, and multi-stage agentic testing.
@@ -18,6 +22,182 @@ in [`.github/workflows/evals.yml`](../.github/workflows/evals.yml) — which
 skills are published and so compete for a prompt, which runners we own, and
 which key pays for a run. The graders themselves are not in this repo, so the
 same prompts score the same way in your product repo as they do here.
+
+Dataset discovery and OrchestrAI behavioral execution use the same immutable
+commit: the PR head for pull requests, or the triggering commit for other events.
+Discovery does not use GitHub's synthetic PR merge, which could contain skills
+from newer upstream commits that are absent from the tested PR head.
+
+**V2 rollout status:** the current Control Plane CI API supplies status-only test
+results. It does not supply the session identity needed when multiple skills
+share an adapter, or authenticated test-stream access. Those multi-skill selections
+fail before acquiring machines; they are not silently skipped or split into extra
+allocations. Single-skill selections can use the compatibility result endpoint,
+but do not have full log/grader-detail parity. OAI's detailed Results access
+contract is a rollout dependency, not a reason to add executor credentials.
+
+When test streams are available, each GitHub skill/OS report includes a **Test stdout/stderr
+(redacted)** log group and a downloadable `stdout-stderr.log` in its
+`test-results-SKILL-OS` artifact. Received test output is retained subject to
+redaction and the transport bounds below; sensitive values, malformed credential
+fields, and control characters can be replaced or removed. Publication does not
+depend on recognizing Skillscope's format. Each job also shows the case/expectation totals, model and
+effort, and an **Unmet expectations** table with case IDs and sanitized judge
+explanations, outside the collapsed log group. The same overview appears in the
+job summary and aggregate report. These overviews are reconstructed from
+recognized grader lines, not copied from arbitrary test output. Incomplete or
+inconsistent output is explicitly marked partial. Known secrets, credential
+assignments/auth headers/private keys, opaque credential-shaped values, private
+URLs (including driver URLs), network addresses, host/user identities and machine
+paths are redacted **before** GitHub upload and revalidated before printing.
+Paths are normalized to `<local>/filename` (or a common tool directory), keeping
+traceback/script names without revealing private roots, usernames or directory
+hierarchies. Fixed public adapter test paths remain visible. Only the tested
+skills commit and the checked-out Skillscope release commit are exempted from
+opaque-value masking; the workflow supplies these verified revisions to both
+redaction passes. Actor-supplied hash labels or allowlists cannot exempt secrets.
+Reviewed public package URLs, warnings, prompts and arbitrary errors remain
+visible. GitHub URLs are limited to explicitly listed public projects, not a
+whole host or organization. Known-value masking includes case changes, common
+percent encoding and Base64 forms; it cannot cover arbitrary encodings.
+GitHub workflow-command sequences are neutralized. This covers test stdout/stderr,
+not raw control-plane consoles, hardware inventories or agent-transcript attachments.
+ReportPortal is not needed to read the published test logs; the shared private
+reporting backend is unchanged. Redaction reduces risk but cannot guarantee that
+arbitrary future agent output contains no sensitive information.
+
+The aggregate report separates skill/OS verdicts from observed graded-case and
+expectation totals. It includes a Linux/Windows overview, public-log coverage,
+model/effort and case timing when reported, and a visible **Needs attention**
+section with failure categories and sanitized explanations. Per-case breakdowns
+show which checks passed and failed. Missing data is labeled rather than counted
+as a pass. Controller snapshots include parent-termination status without machine
+identities; confirmation is not an independent verification of machine release.
+Case timing excludes acquisition and adapter dependency setup, but includes
+in-case setup and agent work. A judge timeout, missing verdict, or API error is
+an evaluation error, not evidence that the skill violated an expectation. Such
+checks are ungraded and excluded from expectation pass/fail rates. The requested
+evaluation still fails the final CI gate until grading completes successfully.
+
+Like the routing summary, the OrchestrAI behavioral report has **Verdict / Count /
+Meaning**, **By expectation type**, and **Per skill** tables. The behavioral
+tables use case pass rates and expectation met rates, not routing recall or
+precision: each case loads its skill separately rather than competing against
+the routing room. Expectation-type counts include only retained grader lines
+associated with a recorded case. Missing/redacted lines are excluded and all
+rates are labeled observed; zero denominators are shown as **Not reported**.
+
+The V2 controller reads `GET /ci/v1/runs/{id}/tests` using the same GitHub OIDC
+identity as submission. It validates the run identity, API version, list shape,
+count and execution identities. A planned adapter path must identify exactly one
+skill and one returned execution; row order and a green parent never substitute
+for that identity. Repeated adapter paths are refused before submission. Duplicate,
+unknown, contradictory or incomplete results fail closed. No executor URLs,
+artifact APIs, consoles, Portal login or additional service credentials are used.
+
+**V2 log coverage limitation:** the CI API exposes test outcomes, not stdout and
+stderr. Streams and grader details are reported as unavailable, not empty or
+complete. A status-only result cannot reconstruct case counts, expectation detail
+or judge-error reclassification. OAI owns the missing authenticated execution and
+evidence-access contract; this workflow does not invent endpoints, consume raw
+document fields, or distribute broad Results/object-store credentials to CI.
+The existing redaction/reporting code remains for evidence integration and offline
+regression coverage; it is not evidence of live stream availability.
+Each stream has a 16 MB transport bound. Oversized responses are rejected rather
+than silently tail-truncated; unavailable/partial streams are labeled, never
+described as full output. Full received streams are printed in the job console
+and saved in the artifact, not embedded in the size-limited Markdown summary.
+Timestamp wrappers are removed only for reconstructing grader summaries.
+The controller waits for the Control Plane parent to become terminal so reporting
+and cleanup can finish, then allows up to 90 seconds for test-result publication.
+On timeout, interruption or a controller failure while the parent is active,
+it requests cancellation through V2 and checks for a terminal state for up to
+one minute. Submission retries reuse an idempotency key unique to this GitHub
+run, attempt and OS plan. Terminal state is not independent proof of machine
+release; allocation and cleanup are owned by the Control Plane.
+
+### Control Plane V2 configuration
+
+The OrchestrAI controller uses the same inline-plan CI API contract as
+[Playbooks #1120](https://github.com/amd/playbooks/pull/1120). GitHub OIDC replaces
+Portal username/password authentication. There is no legacy Portal API fallback,
+boot-image catalog lookup, direct pipeline submission, or broker call.
+
+Set these Actions **secrets** so private endpoint/workspace metadata is also
+masked in the public step preamble:
+
+| Name | Value/purpose |
+|---|---|
+| `ORCHESTRAI_V2_CI_API_URL` | HTTPS Control Plane CI API ending in `/ci/v1`, or Portal passthrough ending in `/api/ci/v1`. |
+| `ORCHESTRAI_V2_OIDC_AUDIENCE` | Exact HTTPS audience configured by the Control Plane workspace owner. |
+| `ORCHESTRAI_V2_WORKSPACE` | Workspace slug, not the old Portal space display name. |
+
+Keep `ORCHESTRAI_DEVICE_TAGS`, `ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON` and
+`ORCHESTRAI_WINDOWS_DRIVER_SOURCE` unchanged. The routing job still uses
+`ORCHESTR_API_KEY`. The V2 controller no longer consumes `ORCHESTRAI_PORTAL_URL`,
+`ORCHESTRAI_USER`, `ORCHESTRAI_PASSWORD`, `ORCHESTRAI_SPACE`, or any
+`ORCHESTRAI_PIPELINE_*` settings. No Jenkins token is needed; do not remove shared
+secrets used by other workflows. Optional Actions **variables**
+`ORCHESTRAI_V2_LINUX_IMAGE` and `ORCHESTRAI_V2_WINDOWS_IMAGE` override the existing
+`ubuntu` / `windows` aliases, which are resolved by the Control Plane.
+
+The workspace owner must authorize the intended repository, workflow ref and
+events in **CI access**, with scopes `plans:write`, `plans:publish`, `runs:start`,
+`runs:read`, `runs:cancel`, and `results:read`. OIDC permission is granted only to the controller
+job (in addition to Instinct's existing federation permission). A 403 means the
+CI access policy must be checked; adding a Portal password will not resolve it.
+Known denials identify the fixed API category (for example, `scope_missing`,
+`no_matching_rule`, or `project_not_allowed`) and, when recognized, the missing
+permission. Remote error messages, claim values, request IDs, and private
+rule/project names are never included in public diagnostics.
+No repository settings or workspace trust rules are changed by this PR.
+
+### Windows provisioning
+
+Windows provisioning follows the Playbooks contract. Store the internal driver
+source in the Actions secret `ORCHESTRAI_WINDOWS_DRIVER_SOURCE`. The existing
+provisioner accepts a supported internal share path or locally staged driver
+package containing `setup.exe`; this is not an arbitrary HTTP download setting.
+The controller sends `driver_source` and `driver_copy: direct` in the private
+provisioning request. It runs these shared scripts in order, with
+`reboot_after: true` on both:
+
+1. `InstallationScripts/common/enable-test-signing.ps1`
+2. `InstallationScripts/gfx/windows.ps1`
+
+Provisioning enables test signing, reboots, installs the driver, and reboots again
+before the existing test adapter starts. A live Windows run requires this source
+before it allocates a machine. The source is never a public result field.
+
+There is no additional mandatory GPU-readiness preflight or adapter upgrade.
+Installer completion does not independently establish post-reboot device health
+or GPU kernel execution. GPU execution depends on the selected skill and its
+expectations. Unsupported-runtime and approval-only cases must not be interpreted
+as GPU workload coverage.
+
+### Local validation and control runners
+
+Run `.github/scripts/check.sh` for the same OrchestrAI unit-test discovery used
+by CI, followed by structural, federation, and plugin-manifest checks. The full
+repository unit suite is `python3 -m unittest discover -s .github/scripts -p
+'test_*.py'`; the OrchestrAI subset uses `test_orchestrai*.py`. Counts differ
+because these commands select different suites. Neither command runs routing
+agents or establishes behavioral hardware results.
+
+`ORCHESTRAI_CONTROL_RUNNER` chooses the routing and controller runner; the
+fallback is `ubuntu-latest`. For the organization's ARC pool, set this repository
+variable to `arc-lnx-pub`. Discovery, verdict/report and offline-preview jobs use
+`ubuntu-latest`. The workflow retains the existing PR/manual/scheduled triggers
+and Instinct's `enable_mi_ci` gate and selected Environment. It does not add a
+`run_behavioral` label, `skills-ci` Environment or reviewed-controller prerequisite.
+Fork PRs do not receive repository secrets; this integration does not add a
+mechanism for sharing credentials with them. When
+choosing a self-hosted runner, its owner must verify job isolation, replacement
+of the runner and its writable workspace between untrusted jobs, least-privilege
+network and service-account access, and the runner group's allowed repositories
+and workflows. Withheld pull-request secrets alone do not establish isolation.
+An ARC label does not prove these policies are configured; runner administration
+is a separate operational review from the OrchestrAI behavioral changes.
 
 The rest of this document is the dataset those stages read. You write one file, `evals/evals.json`, inside your skill folder. For a federated skill that folder lives in your product repo and is imported with the rest of the skill, so edit the dataset there; an edit made in this catalog is overwritten by the next import. Run `skillscope template` for a file to start from.
 
@@ -123,11 +303,10 @@ Keep prompts and expectations in the dataset even when you use hooks, so what is
 
 ### Running tests locally
 
-Install the harness once, at the version CI grades this repo with — the `uses:`
-ref in [`.github/workflows/evals.yml`](../.github/workflows/evals.yml):
+Install the same released harness version that CI uses:
 
 ```bash
-uv tool install --system-certs git+https://github.com/amd/skillscope@v0.1.2
+uv tool install --system-certs "git+https://github.com/amd/skillscope@v0.1.3"
 ```
 
 Then, from the repo root:
