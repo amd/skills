@@ -99,26 +99,57 @@ Legacy raw intrinsics (`create_buffer_resource` / `buffer_load` / `buffer_store`
 | `fx.UniversalCopy(64)` | 64 | 2x f32 elements |
 | `fx.UniversalCopy(128)` | 128 | 4x f32 elements |
 | `fx.rocdl.BufferCopy128b()` | 128 | AMD buffer load 4xf32 (CDNA) |
-| `fx.rocdl.make_tdm_atom(...)` | whole tile | gfx1250 TDM async Global↔LDS DMA (1–5D) — see below |
+| `fx.rocdl.cdna5.make_tiled_tdm_atom(...)` | whole tile | gfx1250 TDM async Global↔LDS DMA (1–5D) — see below |
 
-**gfx1250 TDM async copy** (`fx.rocdl.make_tdm_atom`): a whole-tile DMA whose
-descriptor (base pointer, per-dim extent for HW OOB handling, per-dim stride) is
-carried as **atom state**. The global operand of the copy is a
-shape/direction token only — its layout gives the compile-time N-D tile shape and
-its address space picks load vs store; its *pointer is unused* (base comes from
-state). Needs a **raw VA** (not `make_buffer_tensor`).
+**gfx1250 TDM async copy** — for new kernels prefer the **tiled atom**
+(`fx.rocdl.cdna5.make_tiled_tdm_atom` + `fx.rocdl.cdna5.tdm_partition`). The atom
+is built over the **whole** global tensor and returns a coordinate tensor;
+`zipped_divide` picks this block's tile, and `tdm_partition` cuts the LDS tile and
+the coordinate tile into one warp's share. Needs a **raw VA** (not
+`make_buffer_tensor`).
 
 ```python
-lds = fx.SharedAllocator().allocate(fx.Array[fx.Float16, M * N]).peek()
-lds2d = fx.make_view(lds.ptr, fx.make_layout((M, N), (N, 1)))       # note: lds.ptr
-g2d = fx.make_view(fx.get_iter(A), fx.make_layout((M, N), (N, 1)))
-atom = fx.rocdl.make_tdm_atom(g2d, [M, N], num_warps=4)            # rank = len(extents), 1–5D
-fx.copy(atom, g2d, lds2d)                                        # Global → LDS
-fx.rocdl.tdm_ops.tensor_wait(0)                                  # await async DMA
-fx.copy(atom, g2d, lds2d, imm_offset=k_tile * k_stride_bytes)    # K-loop tile bump
-# imm_offset is atom state, so it must go through fx.copy -- copy_atom_call
-# takes no **kwargs and cannot carry it.
+lds  = fx.SharedAllocator().allocate(fx.Array[fx.Float16, TM * TK]).peek()
+box  = fx.make_layout((TM, TK), (TK, 1))          # LDS tile; row slack here IS the padding
+smem = fx.make_view(lds.ptr, fx.make_layout(((TM, TK), 1), ((TK, 1), TM * TK)))  # box + rest
+gA   = fx.make_view(fx.get_iter(A), fx.make_layout((M, K), (K, 1)))  # FULL tensor, true strides
+atom, coord = fx.rocdl.cdna5.make_tiled_tdm_atom(fx.rocdl.TensorLoad(), gA, box, (TM, TK))
+blk  = fx.zipped_divide(coord, (TM, TK))[None, (fx.block_idx.x, None)]  # pick block, keep rest
+tAs, tAg = fx.rocdl.cdna5.tdm_partition(atom, 0, fx.make_layout(1, 1), smem, blk)
+fx.copy(atom, tAg[None, kt], tAs[None, 0])        # kt is an i32 TILE INDEX, not a byte offset
+fx.rocdl.s_wait_tensorcnt(0)                      # await async DMA
 ```
+
+Rules that bite:
+- **The coordinate index is an i32 tile number.** Handing it the old i64 byte
+  offset fails with `coordinate leaf 0 must be i32`.
+- **Two indices per tensor, for every warp count**: `[None, rest]` —
+  `tdm_partition` always returns `((ATOM, ITER), rest...)`.
+- **`zipped_divide` must leave at least one rest mode**, or `tdm_partition`
+  rejects the operand with a misleading size message.
+- **The warp layout's size must equal `num_warps`** handed to the atom, or every
+  wave computes the same slice and `s_wait_tensorcnt` never retires — a GPU hang,
+  not a diagnostic.
+- **Padding** is row slack in the LDS box layout (`(TK + PAD, 1)`), not a kwarg;
+  the compiler re-derives `padInterval` / `padAmount` from it.
+- **Out-of-bounds** comes from the global tensor's own extent plus
+  `init_boundary_check` / the `boundary_check` state; there is no per-dim extent
+  argument any more. Runtime extents and strides go in the view's layout.
+- **Store**: pass `fx.rocdl.TensorStore()` and flip the `fx.copy` operands. A
+  store cannot drain a *padded* LDS tile, so where the box is deliberately padded,
+  make `tdm_tile` the padded width and the global view's inner extent the real
+  width — `boundary_check` then drops the pad columns.
+- `workgroup_mask` / `early_timeout` remain atom state, set between
+  `make_tiled_tdm_atom` and `tdm_partition`, and exist on **load** atoms only.
+  `early_timeout` has no tiled-atom equivalent.
+
+The older `fx.rocdl.make_tdm_atom` (explicit `tensor_extents` / `strides` /
+`pad_*` plus an `imm_offset` tile bump) still works, and is still required where
+the tiled atom cannot express the copy: an innermost dim that is not contiguous
+in global memory, and gather/scatter (`make_tensor_gather_descriptor`,
+`tensor_load_gather`). Mixing both in one kernel is fine, but no in-tree kernel
+does: `make_tdm_atom` and `tensor_load_gather` now have zero callers under
+`kernels/`. Prefer the tiled atom for new code.
 
 ## 5. Shared Memory (LDS)
 
