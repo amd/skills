@@ -57,14 +57,18 @@ the result from `--json`:
   together with `--distro`: the verdict is about the machine running the
   command, not the one `--distro` names.
 
-### `rocm fix [<id>] [--yes] [--dry-run] [--device-index N]`
+### `rocm fix [<id>] [--yes] [--dry-run] [--device-index N] [--json]`
 
-Apply a fix by id (run with no id to list). Exit codes:
+Apply a fix by id (run with no id to list). `rocm fix --json` with no id prints
+the catalog manifest instead: `contract_version`, one entry per fix, and the
+exit-code map. It applies no fix and exits 0. The skill reads
+`contract_version` before it diagnoses (Phase 0 in [SKILL.md](SKILL.md)). `--json` with an
+id is refused, and the refusal exits 1 (see the table). Exit codes:
 
 | code | meaning |
 | --- | --- |
 | 0 | applied / dry-run / print-only plan / list |
-| 1 | internal error |
+| 1 | internal error; also the refusal of `--json` together with a fix id |
 | 2 | usage error (incl. unknown fix-id) |
 | 3 | not applicable on this host (OS mismatch, negative `--device-index`) — nothing changed |
 | 4 | attempted but the command failed |
