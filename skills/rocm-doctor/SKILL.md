@@ -11,7 +11,8 @@ description: >-
   permission denied on /dev/kfd, "ROCk module is NOT loaded", a missing
   libamdhip64.so / amdhip64_6.dll / hipblas.dll / vcruntime140_1.dll, an
   HSA_OVERRIDE_GFX_VERSION page fault, an iGPU+dGPU crash, a container that can't
-  see the GPU, or an amdgpu-install / DKMS failure. Backed by the `rocm` CLI
+  see the GPU, or a repo-native package-manager install (formerly `amdgpu-install`) / DKMS
+  failure. Backed by the `rocm` CLI
   (`rocm examine` / `rocm diagnose` / `rocm fix`); this skill is a thin driver
   over those commands, not a re-implementation.
 ---

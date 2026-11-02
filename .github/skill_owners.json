@@ -1,6 +1,11 @@
 {
   "repos": [
     {
+      "repo": "AMD-Ecosystem/moat",
+      "engineering_owner": "jeffdaily",
+      "product_release_owner": "jeffdaily"
+    },
+    {
       "repo": "amd/Quark",
       "engineering_owner": "amd-zhaofeng",
       "product_release_owner": "thiagocrepaldi"
