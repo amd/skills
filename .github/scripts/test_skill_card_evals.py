@@ -131,13 +131,13 @@ class RenderTest(unittest.TestCase):
         rows = [line for line in section.splitlines() if line.startswith("| ") and "---" not in line]
         self.assertEqual(
             rows[1],
-            "| Structural | All checks for formatting standards, structural requirements, "
-            "and file completeness passed |",
+            "| Structural (formatting standards, structural requirements, "
+            "and file completeness) | All checks passing |",
         )
 
     def test_nothing_graded(self) -> None:
         section = sce.render("pc-sampling", "8a45f2c", self.URL, None, {}, "failure")
-        self.assertIn("| Structural | One or more checks for", section)
+        self.assertIn("file completeness) | One or more checks failing |", section)
         self.assertIn("\nNo graded evals ran for this bump\n", section)
         self.assertNotIn("Routing", section)
 
