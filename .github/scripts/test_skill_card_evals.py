@@ -95,30 +95,33 @@ class RenderTest(unittest.TestCase):
         )
         self.assertIn("| Routing recall (triggers when it should) | 5/5 (100%) |", section)
         self.assertIn("| Near-miss prompts correctly ignored | 2/2 |", section)
-        self.assertIn("| Behavioral: `gemm-01-repeatability` | 7/7 checks, 606s |", section)
+        self.assertIn("| Behavioral | 1/1 cases (7/7 checks), 606s |", section)
         self.assertIn(
             "Model: opus (high) · Behavioral on Linux · "
             "Routing room: 5 published skills, room accuracy 41/45 (91%)",
             section,
         )
 
-    def test_both_oses_share_a_row(self) -> None:
+    def test_both_oses_share_one_row(self) -> None:
         section = sce.render("rocm-doctor", "3dec0eb", self.URL, None, {
             "Linux": sce.parse_behavioral_log(LINUX_LOG),
             "Windows": sce.parse_behavioral_log(WINDOWS_LOG),
         })
         self.assertIn(
-            "| Behavioral: `rocm-permission-denied-kfd` | Linux 2/2, 21s · Windows 1/2, 24s |", section
+            "| Behavioral | Linux 2/2 cases (6/6 checks), 50s · "
+            "Windows 1/2 cases (5/6 checks), 59s |",
+            section,
         )
+        self.assertEqual(section.count("| Behavioral"), 1)
         self.assertIn("Model: opus (high) · Routing: not run for this bump", section)
 
-    def test_case_missing_from_a_failed_job(self) -> None:
+    def test_job_that_failed_partway(self) -> None:
         windows = sce.parse_behavioral_log(WINDOWS_LOG.splitlines()[0]) | {"conclusion": "failure"}
         section = sce.render("rocm-doctor", "3dec0eb", self.URL, None, {
             "Linux": sce.parse_behavioral_log(LINUX_LOG),
             "Windows": windows,
         })
-        self.assertIn("Linux 2/2, 21s · Windows job failed |", section)
+        self.assertIn("Windows 1/2 cases (4/4 checks), 35s, job failed |", section)
 
     def test_nothing_graded(self) -> None:
         section = sce.render("pc-sampling", "8a45f2c", self.URL, None, {})

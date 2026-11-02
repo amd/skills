@@ -98,15 +98,20 @@ def routing_rows(report: dict, skill: str) -> list[tuple[str, str]]:
     return rows
 
 
-def case_cell(result: dict | None, label: str | None, job_failed: bool = False) -> str:
-    """One case on one OS; `label` is None when only one OS ran."""
-    if result is None:
-        body = "job failed" if job_failed else "not run"
-    elif result["total"] == 0:
-        body = "error"
-    else:
-        checks = " checks" if label is None else ""
-        body = f"{result['met']}/{result['total']}{checks}, {round(result['elapsed_s'])}s"
+def behavioral_cell(leg: dict, expected_cases: int, label: str | None) -> str:
+    """One OS's aggregate; `label` is None when only one OS ran.
+
+    `expected_cases` is every case seen on any OS, so a leg that crashed
+    partway reads as short of the others rather than as a clean pass.
+    """
+    cases = leg["cases"]
+    passed = sum(1 for c in cases if c["passed"])
+    met = sum(c["met"] for c in cases)
+    total = sum(c["total"] for c in cases)
+    elapsed = round(sum(c["elapsed_s"] for c in cases))
+    body = f"{passed}/{expected_cases} cases ({met}/{total} checks), {elapsed}s"
+    if leg.get("conclusion") == "failure" and len(cases) < expected_cases:
+        body += ", job failed"
     return body if label is None else f"{label} {body}"
 
 
@@ -126,21 +131,12 @@ def render(
             if case["id"] not in case_ids:
                 case_ids.append(case["id"])
     labels = list(behavioral)
-
-    def cells(case_id: str | None) -> str:
-        results = {
-            label: next((c for c in behavioral[label]["cases"] if c["id"] == case_id), None)
-            for label in labels
-        }
-        failed = {label: behavioral[label].get("conclusion") == "failure" for label in labels}
-        if len(labels) == 1:
-            return case_cell(results[labels[0]], None, failed[labels[0]])
-        return " · ".join(case_cell(results[label], label, failed[label]) for label in labels)
-
-    for case_id in case_ids:
-        rows.append((f"Behavioral: `{case_id}`", cells(case_id)))
-    if labels and not case_ids:
-        rows.append(("Behavioral", cells(None)))
+    if len(labels) == 1:
+        rows.append(("Behavioral", behavioral_cell(behavioral[labels[0]], len(case_ids), None)))
+    elif labels:
+        rows.append(("Behavioral", " · ".join(
+            behavioral_cell(behavioral[label], len(case_ids), label) for label in labels
+        )))
 
     model = next((leg["model"] for leg in behavioral.values() if leg["model"]), None)
     effort = next((leg["effort"] for leg in behavioral.values() if leg["effort"]), None)
