@@ -136,8 +136,12 @@ def render(
     """
     rows = []
     if structural:
-        result = {"success": "Passed", "failure": "Failed"}.get(structural, structural)
-        rows.append(("Structure (SKILL.md format, skill card, eval dataset, internal links)", result))
+        checks = "checks for formatting standards, structural requirements, and file completeness"
+        result = {
+            "success": f"All {checks} passed",
+            "failure": f"One or more {checks} failed",
+        }.get(structural, structural)
+        rows.append(("Structural", result))
     rows += routing_rows(routing, skill) if routing else []
 
     case_ids: list[str] = []
