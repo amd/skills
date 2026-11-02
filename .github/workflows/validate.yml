@@ -63,6 +63,11 @@ jobs:
       - name: Test the skill owners recorder
         run: uv run .github/scripts/test_record_skill_owner.py
 
+      # Pinned to lines from real `evals` logs, so a change in how skillscope
+      # prints results fails here instead of leaving bump cards empty.
+      - name: Test the skill card eval section
+        run: uv run .github/scripts/test_skill_card_evals.py
+
       - name: Validate marketplace manifest
         run: uv run .github/scripts/validate_marketplace.py
 
