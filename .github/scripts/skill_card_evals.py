@@ -11,8 +11,11 @@ short `## Evaluation` section, and puts it at the end of the vendored card:
 
 `--print` writes the section to stdout instead of touching the card.
 
-Two sources feed the section, both read through the `gh` CLI:
+Three sources feed the section, all read through the `gh` CLI:
 
+* the conclusion of skillscope's structural job, which checks SKILL.md's
+  format, the skill card's required sections, the eval dataset, and that the
+  skill's internal links resolve;
 * the `routing-report` artifact, when routing ran, for this skill's recall,
   precision, and near-miss cases plus the accuracy of the whole routing room;
 * the logs of this skill's `Behavioral (<skill> on <os>)` jobs, one per OS,
@@ -36,6 +39,9 @@ from pathlib import Path
 START = "<!-- skill-card-evals:start -->"
 END = "<!-- skill-card-evals:end -->"
 MARKER_FILENAME = ".federated.json"
+# skillscope's discover job, which runs the structural checks before selecting
+# what to grade.
+STRUCTURAL_JOB = "Check dataset structure and select runs"
 
 CASE_RE = re.compile(r"\[(PASS|FAIL)\] ([\w.-]+): (\d+)/(\d+) checks in ([\d.]+)s")
 SUMMARY_RE = re.compile(r"cases passed\*\* .*? on `([^`]+)` \(effort `([^`]+)`\)")
@@ -121,9 +127,18 @@ def render(
     run_url: str,
     routing: dict | None,
     behavioral: dict[str, dict],
+    structural: str | None = None,
 ) -> str:
-    """The `## Evaluation` section, markers included."""
-    rows = routing_rows(routing, skill) if routing else []
+    """The `## Evaluation` section, markers included.
+
+    `structural` is the conclusion of the job that runs skillscope's
+    structural checks, or None if the run had no such job.
+    """
+    rows = []
+    if structural:
+        result = {"success": "Passed", "failure": "Failed"}.get(structural, structural)
+        rows.append(("Structure (SKILL.md format, skill card, eval dataset, internal links)", result))
+    rows += routing_rows(routing, skill) if routing else []
 
     case_ids: list[str] = []
     for leg in behavioral.values():
@@ -155,17 +170,17 @@ def render(
             f"Routing room: {len(routing['meta']['skills'])} published skills, "
             f"room accuracy {totals['passed']}/{totals['graded']} ({accuracy}%)"
         )
-    elif rows:
+    elif labels:
         footer.append("Routing: not run for this bump")
+    else:
+        footer.append("No graded evals ran for this bump")
 
     lines = [START, f"## Evaluation — `{commit}` ([CI run]({run_url}))", ""]
     if rows:
         lines += ["| Check | Result |", "| --- | --- |"]
         lines += [f"| {check} | {result} |" for check, result in rows]
         lines.append("")
-        lines.append(" · ".join(footer))
-    else:
-        lines.append("No graded evals ran for this bump; structural checks only.")
+    lines.append(" · ".join(footer))
     lines.append(END)
     return "\n".join(lines) + "\n"
 
@@ -184,8 +199,9 @@ def gh(*args: str) -> str:
     ).stdout
 
 
-def fetch(repo: str, run_id: str, skill: str) -> tuple[dict | None, dict[str, dict]]:
-    """The run's routing report (None if routing did not run) and behavioral legs."""
+def fetch(repo: str, run_id: str, skill: str) -> tuple[dict | None, dict[str, dict], str | None]:
+    """The run's routing report (None if routing did not run), behavioral legs,
+    and the structural checks' conclusion."""
     routing = None
     with tempfile.TemporaryDirectory() as tmp:
         try:
@@ -201,15 +217,19 @@ def fetch(repo: str, run_id: str, skill: str) -> tuple[dict | None, dict[str, di
         "--jq", ".jobs[] | {id, name, conclusion}",
     )
     behavioral: dict[str, dict] = {}
+    structural = None
     for line in jobs.splitlines():
         job = json.loads(line)
+        if job["name"].endswith(STRUCTURAL_JOB):
+            structural = job["conclusion"]
+            continue
         label = behavioral_job_label(job["name"], skill)
         if label is None or job["conclusion"] in ("skipped", "cancelled", None):
             continue
         behavioral[label] = parse_behavioral_log(
             gh("api", f"repos/{repo}/actions/jobs/{job['id']}/logs")
         ) | {"conclusion": job["conclusion"]}
-    return routing, dict(sorted(behavioral.items()))
+    return routing, dict(sorted(behavioral.items())), structural
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -232,8 +252,8 @@ def main(argv: list[str] | None = None) -> int:
         commit = json.loads(marker.read_text(encoding="utf-8"))["commit"] if marker.is_file() else "unknown"
     run_url = f"https://github.com/{args.repo}/actions/runs/{args.run_id}"
 
-    routing, behavioral = fetch(args.repo, args.run_id, args.skill)
-    section = render(args.skill, commit[:7], run_url, routing, behavioral)
+    routing, behavioral, structural = fetch(args.repo, args.run_id, args.skill)
+    section = render(args.skill, commit[:7], run_url, routing, behavioral, structural)
     if args.print:
         sys.stdout.write(section)
         return 0

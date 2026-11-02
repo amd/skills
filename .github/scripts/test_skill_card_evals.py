@@ -123,10 +123,21 @@ class RenderTest(unittest.TestCase):
         })
         self.assertIn("Windows 1/2 cases (4/4 checks), 35s, job failed |", section)
 
+    def test_structure_row_comes_first(self) -> None:
+        section = sce.render(
+            "tracelens", "a2575ae", self.URL, ROUTING,
+            {"Linux": sce.parse_behavioral_log(GEMM_LOG)}, "success",
+        )
+        rows = [line for line in section.splitlines() if line.startswith("| ") and "---" not in line]
+        self.assertEqual(
+            rows[1], "| Structure (SKILL.md format, skill card, eval dataset, internal links) | Passed |"
+        )
+
     def test_nothing_graded(self) -> None:
-        section = sce.render("pc-sampling", "8a45f2c", self.URL, None, {})
-        self.assertIn("No graded evals ran for this bump; structural checks only.", section)
-        self.assertNotIn("| Check |", section)
+        section = sce.render("pc-sampling", "8a45f2c", self.URL, None, {}, "success")
+        self.assertIn("internal links) | Passed |", section)
+        self.assertIn("\nNo graded evals ran for this bump\n", section)
+        self.assertNotIn("Routing", section)
 
 
 class ApplyTest(unittest.TestCase):
