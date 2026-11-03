@@ -49,13 +49,13 @@ jobs:
       skills: ${{ steps.discover.outputs.skills }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Need history so we can diff against the base ref below.
           fetch-depth: 0
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
       # On pull_request, diff against the PR base; on push, diff against the
       # commit we pushed over; otherwise (manual run) leave it empty so the
@@ -87,10 +87,10 @@ jobs:
         skill: ${{ fromJson(needs.discover-skills.outputs.skills) }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
       # Run SkillSpector pinned to a specific commit for reproducibility and
       # supply-chain safety. To bump it, update the SHA below to the desired
@@ -159,7 +159,7 @@ jobs:
 
       - name: Upload report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: skillspector-report-${{ matrix.skill }}
           path: reports/${{ matrix.skill }}.md
