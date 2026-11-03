@@ -99,6 +99,18 @@
         {
           "path": "projects/rocprofiler-sdk/skills/pc-sampling",
           "as": "rocprofiler-pc-sampling"
+        },
+        {
+          "path": "projects/rocprofiler-systems/skills/choosing-a-profiling-preset",
+          "as": "rocprofiler-systems-choosing-a-profiling-preset"
+        },
+        {
+          "path": "projects/rocprofiler-systems/skills/discovering-profiling-options",
+          "as": "rocprofiler-systems-discovering-profiling-options"
+        },
+        {
+          "path": "projects/rocprofiler-systems/skills/instrumenting-binaries",
+          "as": "rocprofiler-systems-instrumenting-binaries"
         }
       ]
     }

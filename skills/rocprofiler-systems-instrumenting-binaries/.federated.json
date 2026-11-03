@@ -1,0 +1,10 @@
+{
+  "source": "rocm-rocm-systems",
+  "repo": "ROCm/rocm-systems",
+  "ref": "develop",
+  "commit": "69379f2d8bc59311b4e20aa76ef3375964c87985",
+  "path": "projects/rocprofiler-systems/skills/instrumenting-binaries",
+  "license": "MIT",
+  "content_hash": "9d3ae5331652cc27dd99a6f67885d2172b1d2c7dff0fdbc616c746e3b19e5d8c",
+  "imported_at": "2026-10-27T18:54:05Z"
+}
