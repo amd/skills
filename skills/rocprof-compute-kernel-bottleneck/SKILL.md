@@ -27,20 +27,7 @@ cheaply. Go straight to `rocprof-compute-pc-sampling` when the user asks about i
 source lines, or stall reasons, and use both when an architectural limit needs
 to be traced back to the code that causes it.
 
-## 1. Collect what you need before profiling
-
-Ask once:
-
-1. Launch command and arguments
-2. A short workload name, used as `--name`
-3. Which kernels matter, if not all
-
-Profiling replays the application once per counter pass, so the command must be
-safe to run repeatedly and short enough to run several times. Ask for a reduced
-iteration count or problem size rather than profiling a long run. Do not invent
-a timeout; profile mode has no such option.
-
-## 2. Check the environment
+## 1. Check the environment
 
 In this order, because each command depends on the one before it:
 
@@ -61,6 +48,19 @@ Supported accelerators are listed in
 Not every feature works on every architecture. Check there before promising a
 result, and let the tool's own error message stand when a feature is
 unavailable.
+
+## 2. Collect what you need before profiling
+
+Ask once:
+
+1. Launch command and arguments
+2. A short workload name, used as `--name`
+3. Which kernels matter, if not all
+
+Profiling replays the application once per counter pass, so the command must be
+safe to run repeatedly and short enough to run several times. Ask for a reduced
+iteration count or problem size rather than profiling a long run. Do not invent
+a timeout; profile mode has no such option.
 
 ## 3. Profile
 
