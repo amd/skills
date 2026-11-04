@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "id": "rocm-older-cli-stops-before-diagnosing",
+      "cli": "older",
+      "symptom": "hipErrorNoBinaryForGpu: Unable to find code object for all current devices!"
+    },
+    {
+      "id": "rocm-current-cli-carries-on",
+      "cli": "current",
+      "symptom": "hipErrorNoBinaryForGpu: Unable to find code object for all current devices!"
+    }
+  ]
+}
