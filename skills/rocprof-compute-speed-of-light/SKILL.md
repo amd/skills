@@ -9,8 +9,6 @@ Speed-of-Light is the first panel to read after profiling. It puts every
 headline metric next to the hardware peak for the current GPU, so one table
 says whether a kernel is near any limit at all.
 
-This skill reads an existing workload directory. It does not collect one.
-
 Run `rocprof-compute analyze --help` before choosing flags.
 
 ## 1. Get the panel
@@ -24,9 +22,32 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b 
 pass `-k` with one kernel id from `--list-stats`; a Speed-of-Light table
 averaged over unrelated kernels means nothing.
 
-If the panel is missing or empty, those counters were not collected. Collect
-them with the `rocprof-compute-kernel-bottleneck` skill, using `-b sol` at
-profile time for a cheap single-topic run.
+If there is no workload yet, or the panel is missing or empty, collect
+Speed-of-Light alone:
+
+```bash
+rocprof-compute profile --name <workload_name> -b sol -- <application> <args>
+```
+
+### Collect only what the question needs
+
+Never run a full profile. It replays the application once per counter pass and
+also runs the roofline benchmarks.
+
+- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
+  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
+  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
+  Aliases differ by architecture.
+- `--set <set_name>` collects a predefined topic in one pass.
+  `rocprof-compute profile --list-sets` lists the sets.
+- Add `-k <kernel_name>` when the user names the kernels that matter.
+- Add `--no-roof` unless the question is about roofline. A `-b` list without
+  block 4 (`roof`) already skips it.
+- `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
+  each kernel, so it only helps when every profiled kernel is dispatched many
+  times. Pair it with `-k`. See Iteration multiplexing in
+  [profile mode](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+- Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 2. Read it
 
@@ -56,11 +77,11 @@ the neighbouring kernels, and a known-good baseline for the same workload.
 ## 3. Understand the metrics
 
 Each metric's definition and the counters behind it are in
-[system-speed-of-light.rst](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/conceptual/cdna/system-speed-of-light.rst)
+[system-speed-of-light.rst](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/cdna/system-speed-of-light.rst)
 for CDNA accelerators and
-[the RDNA equivalent](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/conceptual/rdna/system-speed-of-light.rst)
+[the RDNA equivalent](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/rdna/system-speed-of-light.rst)
 for client APUs. The whole metric hierarchy is in the
-[performance model](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/conceptual/performance-model.rst).
+[performance model](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/performance-model.rst).
 
 ## 4. Compute Speed-of-Light
 

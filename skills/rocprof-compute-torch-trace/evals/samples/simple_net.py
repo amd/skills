@@ -1,6 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+# Keep in sync with the original under projects/rocprofiler-compute/:
+#   sample/simple_net.py
+
 """
 Sample PyTorch workload for rocprof-compute --torch-trace.
 

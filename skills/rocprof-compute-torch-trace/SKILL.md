@@ -15,18 +15,19 @@ Torch and Triton tracing are experimental. Every command needs
 
 ## 1. Check the requirements
 
-PyTorch version coverage, the native collector versus reduced
-`TorchDispatchMode` coverage, and the abort when two ROCm installs load in
-one process are in the Torch trace section of
-[profile mode](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/how-to/profile/mode.rst). Check the loader message
-before treating a missing backward operator as missing GPU work.
+Torch tracing needs PyTorch installed against a matching ROCm. PyTorch 2.13
+and 2.14 use the prebuilt native collector, which records operators on every
+thread, including autograd workers. Other versions, or a missing or unusable
+collector, warn and use `TorchDispatchMode` with reduced coverage on the Python
+thread where it is active. Confirm the version and check the loader message
+before interpreting missing backward operators as an absence of GPU work.
 
 The workload must be a Python command or Python script; the tracer cannot
 annotate a compiled binary. The collector is a generic prebuilt
 `torch_trace_collector.so` and needs no PyTorch or Python development packages
 to build. The workload still needs Python-compatible `roctx` bindings. The
 full requirement list is in the Torch trace section of
-[profile mode](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+[profile mode](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
 
 ## 2. Collect
 
@@ -34,6 +35,7 @@ full requirement list is in the Torch trace section of
 rocprof-compute profile \
     --experimental \
     --torch-trace \
+    --no-roof \
     --name <workload_name> \
     -- python <script.py> <args>
 ```
@@ -54,16 +56,33 @@ Tracing adds overhead on top of the usual counter replay. Profile a few
 iterations of a steady-state model rather than a full training run, and skip
 warmup. `ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0` reduces instrumentation
 overhead by dropping the device and layout wraps; see
-[profile mode](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for what that costs you.
+[profile mode](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for what that costs you.
 
 Tracing cannot be combined with attaching to a running process, and cannot be
 combined with a PC-sampling-only profile.
 
-When counters are being spread thin across many short operator kernels,
-`--iteration-multiplexing kernel` collects more per pass.
-
 Profile preserves each pass's raw marker and counter CSVs with the
 `ml_api_trace` prefix.
+
+### Collect only what the question needs
+
+Never run a full profile. It replays the application once per counter pass and
+also runs the roofline benchmarks.
+
+- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
+  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
+  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
+  Aliases differ by architecture.
+- `--set <set_name>` collects a predefined topic in one pass.
+  `rocprof-compute profile --list-sets` lists the sets.
+- Add `-k <kernel_name>` when the user names the kernels that matter.
+- Add `--no-roof` unless the question is about roofline. A `-b` list without
+  block 4 (`roof`) already skips it.
+- `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
+  each kernel, so it only helps when every profiled kernel is dispatched many
+  times. Pair it with `-k`. See Iteration multiplexing in
+  [profile mode](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+- Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 3. List the captured operators
 
@@ -102,7 +121,7 @@ Quote patterns so the shell does not expand them.
 rmsnorm nodes on a Triton tree.
 
 Worked examples are in the PyTorch operator analysis section of
-[the analyze CLI guide](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst).
+[the analyze CLI guide](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst).
 
 ## 5. Read the result
 

@@ -1,6 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+// Keep in sync with the original under projects/rocprofiler-compute/:
+//   sample/lds.hip
+
 /*
 An example to explore LDS bandwidth and bank conflicts, written by Nicholas Curtis [AMD].
 */

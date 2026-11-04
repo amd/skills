@@ -25,8 +25,7 @@ different questions. Choose by what the user is asking, not by difficulty.
 Counters are the default starting point because they cover the whole kernel
 cheaply. Go straight to `rocprof-compute-pc-sampling` when the user asks about instructions,
 source lines, or stall reasons, and use both when an architectural limit needs
-to be traced back to the code that causes it. A request to run `rocprofv3`
-itself is neither this skill nor `rocprof-compute-pc-sampling`.
+to be traced back to the code that causes it.
 
 ## 1. Check the environment
 
@@ -45,7 +44,7 @@ rocprof-compute --specs
 it cannot succeed when they fail.
 
 Supported accelerators are listed in
-[compatible-accelerators.rst](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
+[compatible-accelerators.rst](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
 Not every feature works on every architecture. Check there before promising a
 result, and let the tool's own error message stand when a feature is
 unavailable.
@@ -65,49 +64,49 @@ a timeout; profile mode has no such option.
 
 ## 3. Profile
 
+Start with Speed-of-Light for the kernels that matter:
+
 ```bash
-rocprof-compute profile --name <workload_name> -- <application> <args>
+rocprof-compute profile --name <workload_name> -b sol -k <kernel_name> -- <application> <args>
 ```
+
+Drop `-k` when the user has not named kernels. Once Speed-of-Light points at a
+limit, profile again with only the blocks section 5 opens, such as `wavefront`,
+`spi`, or `cu_pipe`.
 
 Output lands in `./workloads/<workload_name>/<gpu_model>/`, or `<rank>/` under
 MPI. Change it with `--output-directory`, which replaces `--name` for building
 the path. Re-profiling into a non-empty directory needs `--overwrite`; prefer a
 fresh directory.
 
-Which GPU the application runs on is in
-[Selecting a GPU](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/how-to/profile/mode.rst). Under Slurm, derive
-`HIP_VISIBLE_DEVICES` from `ROCR_VISIBLE_DEVICES`, not from `SLURM_STEP_GPUS`;
-the indices differ.
+To restrict which GPU the application uses, set `HIP_VISIBLE_DEVICES`. Under
+Slurm, derive it from `ROCR_VISIBLE_DEVICES`, not from `SLURM_STEP_GPUS`; the
+indices differ.
 
-See [profile mode](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for output layout,
+See [profile mode](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for output layout,
 filtering, and the full option list. To profile a process that is already
 running, see
-[live attach and detach](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/how-to/live_attach_detach.rst).
+[live attach and detach](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/live_attach_detach.rst).
 
-### Collect less when a full replay is too expensive
+### Collect only what the question needs
 
-A single-pass, topic-focused collection:
+Never run a full profile. It replays the application once per counter pass and
+also runs the roofline benchmarks.
 
-```bash
-rocprof-compute profile --list-sets
-rocprof-compute profile --name <name> --set <set_name> -- <application>
-```
-
-Or collect only named blocks:
-
-```bash
-rocprof-compute profile --name <name> -b sol wavefront -- <application>
-```
-
-Iteration multiplexing spreads counters across kernel launches so a single pass
-collects more:
-
-```bash
-rocprof-compute profile --name <name> --iteration-multiplexing kernel -- <application>
-```
-
-Whenever you collect a subset, tell the user which analysis panels will be
-empty and that answering those questions needs another profile.
+- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
+  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
+  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
+  Aliases differ by architecture.
+- `--set <set_name>` collects a predefined topic in one pass.
+  `rocprof-compute profile --list-sets` lists the sets.
+- Add `-k <kernel_name>` when the user names the kernels that matter.
+- Add `--no-roof` unless the question is about roofline. A `-b` list without
+  block 4 (`roof`) already skips it.
+- `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
+  each kernel, so it only helps when every profiled kernel is dispatched many
+  times. Pair it with `-k`. See Iteration multiplexing in
+  [profile mode](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+- Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 4. Find the hot kernel
 
@@ -175,7 +174,7 @@ table. When theoretical occupancy is itself low, the limit is VGPR, SGPR, or
 LDS allocation. Scratch traffic points at register spilling. Low occupancy is
 not a defect when the kernel already saturates its limiting resource. Worked
 examples are in
-[occupancy-limiters-example.rst](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/tutorial/includes/occupancy-limiters-example.rst).
+[occupancy-limiters-example.rst](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/tutorial/includes/occupancy-limiters-example.rst).
 
 ### Scheduler and pipeline limits
 
@@ -191,7 +190,7 @@ There is no single stall panel. Stall counters sit in the block that owns the
 hardware: LDS stalls in `lds`, cache stalls in `vl1d` and `l2`, fabric stalls
 in `l2_per_channel`. Open the block the Speed-of-Light result points at, and
 read what each counter means in the
-[performance model](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/conceptual/performance-model.rst). Ground every
+[performance model](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/performance-model.rst). Ground every
 recommendation in a number you read from the report.
 
 ## 6. Normalization
@@ -228,7 +227,7 @@ settings without stating that those differ.
 Terminal output is the default. Only choose a format when the user asks to save
 or export. `--output-format` takes `txt`, `csv`, or `db`, each of which
 disables terminal output, and `--output-name` sets the file name. See
-[analysis output format](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst).
+[analysis output format](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst).
 
 ## 9. When something looks wrong
 
@@ -241,4 +240,4 @@ disables terminal output, and `--output-name` sets the file name. See
 | Roofline missing | not collected, or unsupported on this architecture |
 
 Stop and report permission, firmware, and ROCm version failures instead of
-working around them. More in the [FAQ](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/reference/faq.rst).
+working around them. More in the [FAQ](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/reference/faq.rst).

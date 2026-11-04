@@ -23,6 +23,35 @@ cache level, because it tells you which level to open.
 
 Always analyze one kernel at a time with `-k`.
 
+If there is no workload yet, collect only the memory blocks:
+
+```bash
+rocprof-compute profile --name <workload_name> -b memchart vl1d l2 lds -- <application> <args>
+```
+
+The cache aliases differ by architecture; for example, some GPUs name their
+caches `gl0` and `gl2`.
+
+### Collect only what the question needs
+
+Never run a full profile. It replays the application once per counter pass and
+also runs the roofline benchmarks.
+
+- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
+  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
+  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
+  Aliases differ by architecture.
+- `--set <set_name>` collects a predefined topic in one pass.
+  `rocprof-compute profile --list-sets` lists the sets.
+- Add `-k <kernel_name>` when the user names the kernels that matter.
+- Add `--no-roof` unless the question is about roofline. A `-b` list without
+  block 4 (`roof`) already skips it.
+- `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
+  each kernel, so it only helps when every profiled kernel is dispatched many
+  times. Pair it with `-k`. See Iteration multiplexing in
+  [profile mode](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+- Tell the user which analysis panels the narrower profile leaves empty.
+
 ## 2. Open the level the chart points at
 
 ```bash
@@ -54,15 +83,15 @@ architecture with `rocprof-compute --list-blocks <arch>`.
 Each level has its own reference, with the counters, the formulas, and what
 they mean:
 
-- [Vector L1 cache](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/conceptual/cdna/vector-l1-cache.rst)
-- [L2 cache](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/conceptual/cdna/l2-cache.rst)
-- [Local Data Share](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/conceptual/cdna/local-data-share.rst)
-- [Infinity Fabric transactions](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/tutorial/includes/infinity-fabric-transactions.rst)
-- [Vector memory operation counting](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/tutorial/includes/vector-memory-operation-counting.rst)
-- [LDS examples](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/tutorial/includes/lds-examples.rst)
+- [Vector L1 cache](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/cdna/vector-l1-cache.rst)
+- [L2 cache](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/cdna/l2-cache.rst)
+- [Local Data Share](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/cdna/local-data-share.rst)
+- [Infinity Fabric transactions](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/tutorial/includes/infinity-fabric-transactions.rst)
+- [Vector memory operation counting](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/tutorial/includes/vector-memory-operation-counting.rst)
+- [LDS examples](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/tutorial/includes/lds-examples.rst)
 
 Client APUs use a different hierarchy; see the
-[RDNA performance model](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/conceptual/rdna/rdna-performance-model.rst)
+[RDNA performance model](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/rdna/rdna-performance-model.rst)
 for GL0, GL1, and GL2.
 
 Read hit rates and utilizations against the `Percent of Peak` and `Peak`
@@ -84,10 +113,9 @@ What usually follows from what:
 ## 4. Memory bandwidth analysis (experimental, gfx950)
 
 A guided breakdown that walks the bandwidth tree and names the limiting level.
-Which GPUs it supports, and the experimental flag, are in
-[memory bandwidth analysis](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/docs/how-to/membw_analysis.rst). It is
-experimental and currently shipped for gfx950 only. It needs only the
-memory chart (block 3) and block 30, so profile only those two blocks:
+It is experimental and currently shipped for gfx950 only; see
+[memory bandwidth analysis](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/membw_analysis.rst). It needs
+only the memory chart (block 3) and block 30, so profile only those two blocks:
 
 ```bash
 rocprof-compute profile --experimental --membw-analysis -b 3 30 \
@@ -96,17 +124,7 @@ rocprof-compute profile --experimental --membw-analysis -b 3 30 \
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id>
 ```
 
-Its cutoffs and guidance text are data, not something to restate from memory.
-In a source checkout, read:
-
-- [gfx950_membw_tree_spec.yaml](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml)
-- [gfx950_membw_guidance.yaml](https://github.com/ROCm/rocm-systems/blob/8cce7054f17a77272e1ba73ef78f4f77cf056956/projects/rocprofiler-compute/src/membw_analysis/tree_spec/gfx950_membw_guidance.yaml)
-
-A ROCm install copies the skills to `<rocm-path>/share/rocprofiler-compute/skills/`
-and does not copy these YAML files next to them. When this skill was installed
-rather than opened from the source tree, read those same two paths in the
-matching rocprofiler-compute checkout. Report the guidance the tool produced
-rather than substituting your own numbers.
+Report the guidance the tool produced rather than substituting your own numbers.
 
 On any other architecture, use the Memory Chart path above.
 

@@ -1,6 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+// Keep in sync with the original under projects/rocprofiler-compute/:
+//   sample/vrandom_access.cpp
+
 /*
 An example code to execute random access to explore cache hits/misses in L2 Cache.
 */

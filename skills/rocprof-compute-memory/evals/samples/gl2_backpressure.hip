@@ -1,6 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+// Keep in sync with the original under projects/rocprofiler-compute/:
+//   sample/membw_analysis_test_suite/gl2_backpressure.hip
+
 #include <hip/hip_runtime.h>
 #include <iostream>
 #include <chrono>

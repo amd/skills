@@ -1,6 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+// Keep in sync with the original under projects/rocprofiler-compute/:
+//   sample/vcopy.cpp
+
 #include "hip/hip_runtime.h"
 #include <assert.h>
 #include <thread>
