@@ -15,7 +15,7 @@ set -uo pipefail
 # far enough to produce the artifact a scripted eval scores against a
 # pre-baked reference. The first such test is semantic_purity, which runs the
 # semantic-comparison workflow through its "Generate TraceDiff Output" step
-# (== main orchestrator through Step 1.S) to produce
+# (== main orchestrator through Step 1 pre-processing) to produce
 #   <OUTPUT_DIR>/tracediff_output/diff_stats.csv
 # and scores its LCA-partition purity against the committed gold.
 #

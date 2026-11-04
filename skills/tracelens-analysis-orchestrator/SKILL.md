@@ -5,8 +5,8 @@ description: >-
   reports, prepares category data, runs system-level and compute-kernel subagents in
   parallel, validates outputs, and writes a prioritized stakeholder report (analysis.md).
   Use when the user asks to follow the analysis orchestrator, run the agentic analysis
-  workflow, analyze a trace, compare two traces, or mentions standalone or comparative
-  TraceLens analysis.
+  workflow, run it from config <run.yaml>, analyze a trace, compare two traces, or
+  mentions standalone or comparative TraceLens analysis.
 license: MIT
 ---
 
@@ -22,13 +22,13 @@ Coordinate **system-level** analysis (CPU/idle, kernel fusion, multi-kernel / co
 
 ## Full procedure
 
-Follow **[reference.md](reference.md)** for every step (user prompts, `<prefix>` / `{CMD}` usage, CLI commands, subagent launch text, validation, report `tee` order, plot embedding, and trace diagnostics).
+Follow **[reference.md](reference.md)** for every step (user prompts, `<prefix>` / `{CMD}` usage, CLI commands, subagent launch text, validation, report `tee` order, and plot embedding).
 
 ## Workflow index
 
 ```
-0. Query User Inputs (Platform, Trace Path(s), Analysis Mode, Environment Setup)
-1. Generate Performance Report (branches on analysis mode: training vs inference then, comparison scope)
+0. Query User Inputs (interactive answers or a run YAML, Environment Setup) → cache/run_config.yaml
+1. Generate Performance Report (one wrapper call on cache/run_config.yaml; semantic pre-processing first)
 2. Trace-Quality Gate → Deterministic fallback analysis
 3-6. Prepare Category Data (GPU Util, Top Ops, Tree Data, Multi-Kernel Data, Category Filtering)
 7. System-Level Analysis (PARALLEL) → system_findings/

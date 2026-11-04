@@ -1,10 +1,30 @@
-// cuda_demo.cu
+// MIT License
 //
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 // Build:
-//   nvcc -O3 -g cuda_demo.cu -o cuda_demo
+//   nvcc -O3 -g myCudaProgram.cu -o myCudaProgram
 //
 // Run:
-//   ./cuda_demo [repeat]     # repeat defaults to 1
+//   ./myCudaProgram [repeat]     # repeat defaults to 1
 
 #include <cuda_runtime.h>
 
@@ -23,8 +43,9 @@
     }                                                                          \
   } while (0)
 
+// Same problem sizes as the HIP version (myHipProgram.hip.cpp).
 constexpr int kN = 8192;
-constexpr int kTransposeReps = 36;
+constexpr int kTransposeReps = 35;
 constexpr int kBlock = 256;
 constexpr int kDivThreads = 1 << 20;
 constexpr int kDivIters = 58000;
@@ -32,22 +53,12 @@ constexpr int kAtomicThreads = 1 << 20;
 constexpr int kAtomicBins = 4;
 constexpr int kAtomicReps = 14;
 
-__global__ __launch_bounds__(kBlock) void k_naive_transpose(float* __restrict__ a,
-                                                            float* __restrict__ b, int n,
-                                                            int reps) {
+__global__ __launch_bounds__(kBlock) void k_naive_transpose(const float* __restrict__ in,
+                                                            float* __restrict__ out, int n) {
   const int col = blockIdx.x * blockDim.x + threadIdx.x;
   const int row = blockIdx.y * blockDim.y + threadIdx.y;
   if (col >= n || row >= n) return;
-
-  for (int i = 0; i < reps; ++i) {
-    if ((i & 1) == 0) {
-      b[static_cast<size_t>(col) * n + row] =
-          a[static_cast<size_t>(row) * n + col] + 1.0f;
-    } else {
-      a[static_cast<size_t>(col) * n + row] =
-          b[static_cast<size_t>(row) * n + col] + 1.0f;
-    }
-  }
+  out[static_cast<size_t>(col) * n + row] = in[static_cast<size_t>(row) * n + col] + 1.0f;
 }
 
 __global__ __launch_bounds__(kBlock) void k_integer_div(uint32_t* __restrict__ out,
@@ -95,7 +106,7 @@ int main(int argc, char** argv) {
 
   cudaDeviceProp prop;
   CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
-  std::printf("Device: %s (SM %d.%d), %d SMs\n", prop.name, prop.major, prop.minor,
+  std::printf("Device: %s (sm_%d%d), %d SMs\n", prop.name, prop.major, prop.minor,
               prop.multiProcessorCount);
 
   const size_t elems = static_cast<size_t>(kN) * kN;
@@ -119,7 +130,12 @@ int main(int argc, char** argv) {
   Timer timer;
   for (int rep = 0; rep < repeat; ++rep) {
     timer.start();
-    k_naive_transpose<<<grid, block>>>(d_in, d_out, kN, kTransposeReps);
+    for (int i = 0; i < kTransposeReps; ++i) {
+      if ((i & 1) == 0)
+        k_naive_transpose<<<grid, block>>>(d_in, d_out, kN);
+      else
+        k_naive_transpose<<<grid, block>>>(d_out, d_in, kN);
+    }
     transpose_ms += timer.stop();
 
     timer.start();

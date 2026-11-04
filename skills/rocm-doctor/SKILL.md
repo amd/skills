@@ -11,7 +11,8 @@ description: >-
   permission denied on /dev/kfd, "ROCk module is NOT loaded", a missing
   libamdhip64.so / amdhip64_6.dll / hipblas.dll / vcruntime140_1.dll, an
   HSA_OVERRIDE_GFX_VERSION page fault, an iGPU+dGPU crash, a container that can't
-  see the GPU, or an amdgpu-install / DKMS failure. Backed by the `rocm` CLI
+  see the GPU, or a repo-native package-manager install (formerly `amdgpu-install`) / DKMS
+  failure. Backed by the `rocm` CLI
   (`rocm examine` / `rocm diagnose` / `rocm fix`); this skill is a thin driver
   over those commands, not a re-implementation.
 ---
@@ -54,7 +55,8 @@ offered there.
 ## Prerequisites
 
 - **The `rocm` CLI.** This skill is only a driver over it; Phase 0 below installs
-  it with the user's consent if `rocm --version` fails. Nothing else here is
+  it with the user's consent if `rocm --version` fails, and stops if the installed
+  CLI is older than the catalog contract this skill requires. Nothing else here is
   assumed — the CLI does the probing.
 - **Platform:** native Linux (in-tree `amdgpu` module + `/dev/kfd`), Windows
   (HIP SDK), or WSL2 (`/dev/dxg` + the Windows host driver). NVIDIA/Intel/Apple
@@ -78,10 +80,10 @@ passes — the GPU is AMD. Linux, Windows and WSL2 all run the same workflow.
    rocm --version
    ```
 
-   If that succeeds, skip to step 1. If it's not found, install it **with the
-   user's consent** (this fetches and runs an installer that drops the `rocm` and
-   `rocmd` binaries into `~/.local/bin`). Both installers default to the
-   `release` channel, so no channel argument is needed:
+   If that succeeds, go to the contract check below. If it's not found, install
+   it **with the user's consent** (this fetches and runs an installer that drops
+   the `rocm` and `rocmd` binaries into `~/.local/bin`). Both installers default
+   to the `release` channel, so no channel argument is needed:
 
    - **Linux (x86_64 only):**
      ```
@@ -101,6 +103,36 @@ passes — the GPU is AMD. Linux, Windows and WSL2 all run the same workflow.
    If it still isn't available, hand the user the install page
    (https://github.com/ROCm/rocm-cli) and stop.
 
+   **Then check the catalog contract.** Run:
+
+   ```
+   rocm fix --json
+   ```
+
+   It prints the catalog manifest as JSON and applies no fix. Read
+   `contract_version` from that JSON and ignore the rest. Stdout holds only the
+   JSON. Any `rocm:` notice goes to stderr. This skill requires
+   `contract_version` 1 or higher.
+
+   An older CLI rejects `--json` as an unexpected argument and exits with code 2.
+   In [reference.md](reference.md), exit code 2 is a usage error such as an unknown fix id; here
+   it means the CLI is too old. If the command exits with code 2 and an
+   unexpected-argument error, or prints a lower `contract_version`, **stop**. Say
+   that the installed `rocm` CLI is older than this skill requires, so the CLI is
+   the side to update. Do **not** run `rocm examine`, `rocm diagnose`, or
+   `rocm fix <id>`. Offer to update the CLI by re-running the installer above,
+   with the user's consent, then repeat this check. If the user declines, the
+   installer cannot run, or the check still fails afterwards (an older `rocm`
+   earlier on `PATH` can cause that), hand the user the install page
+   (https://github.com/ROCm/rocm-cli) and stop.
+
+   Any other failure, such as a different exit code or output with no
+   `contract_version`, is an error from the CLI and not proof that it is old.
+   Relay the error text and stop, because reinstalling the same version would not
+   clear it. Against a CLI without this contract, the entry ids, the
+   auto-applicable set, and the exit codes this skill documents are guesses, and a
+   guess presented as a fact is the failure this check prevents.
+
 1. **Diagnose.** Pass the user's error text as the symptom:
 
    ```
@@ -118,6 +150,12 @@ passes — the GPU is AMD. Linux, Windows and WSL2 all run the same workflow.
      automatically the end of the question, either: a `diagnose-only` top
      match can clear the gate from host state alone, independent of whatever
      symptom was pasted — see the refinement in step 2.
+   - An **advice-only** entry in `matched[]` (today `fix-22-display-driver-old`)
+     scores below the threshold on purpose and never sets `has_match`. It is
+     not a cause of the symptom. Relay the entry's `title` and `evidence` to
+     the user as advice, and never apply it for them. Keep routing upstream if
+     `has_match` is false. Step 2's rule that a lower cause may be mentioned only
+     if it also clears `min_score_for_match` does not apply to this entry.
    - `matched[]` — ranked causes, each with `id`, `title`, `score` (0–100),
      `evidence[]`, and a `fix` (with `fix_id`, `summary`, `commands`, `verify`,
      `notes`, and the `needs_sudo` / `needs_reboot` / `needs_relogin` /
@@ -162,7 +200,9 @@ passes — the GPU is AMD. Linux, Windows and WSL2 all run the same workflow.
    would if `has_match` were false. You may mention a lower cause only if it
    *also* clears `min_score_for_match` — below that threshold nothing was
    established, which is the same bar the `has_match` paragraph above sets,
-   and a `diagnose-only` top match does not lower it.
+   and a `diagnose-only` top match does not lower it. The one exception is the
+   advice-only `fix-22-display-driver-old` entry described under `has_match`
+   above: relay it as advice, never as a cause.
 
 3. **Apply with consent.** For an auto-applicable fix:
 
@@ -172,7 +212,7 @@ passes — the GPU is AMD. Linux, Windows and WSL2 all run the same workflow.
    rocm fix <fix-id> --yes      # required to apply in a non-interactive shell
    ```
 
-   Only the four auto-applicable fixes are ones the CLI runs itself. The other 23
+   Only the four auto-applicable fixes are ones the CLI runs itself. The other 24
    are **print-only** (bootloader, kernel, reinstall, Windows driver, …): `rocm
    fix <id>` just prints the plan for the user to run themselves — no prompt, and
    the CLI never performs those.

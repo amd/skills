@@ -44,7 +44,7 @@ For each model (DeepSeek-R1, Qwen3-30B-A3B) the fixture ships:
 The runner invokes the **semantic-comparison workflow** (the no-capture,
 name-first + coherence bucketing method) on the DECODE pair, running only
 through its "Generate TraceDiff Output" step — equivalent to the main
-orchestrator through Step 1.S. That produces
+orchestrator through Step 1 pre-processing. That produces
 `analysis_output/tracediff_output/diff_stats.csv`, whose LCA partition is then
 compared to gold.
 

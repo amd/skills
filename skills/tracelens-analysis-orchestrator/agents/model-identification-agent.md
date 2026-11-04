@@ -22,7 +22,6 @@ When invoked by the orchestrator, you will receive the following context:
 
 **Required context provided by orchestrator:**
 - `output_dir`: Base analysis output directory
-- `comparison_scope`: `standalone` or `comparative`
 - `prefix`: Command prefix from `<output_dir>/cache/cmd_prefix.txt` — contains a template with `{CMD}` placeholder; substitute `{CMD}` with the actual command
 
 **Input (produced by script in Step 1):**
@@ -57,7 +56,7 @@ Execute the Python script to extract the **name**, **Input type**, and **Input D
 <prefix> python3 -c "
 import sys
 from TraceLens.Agent.Analysis.utils.report_utils import prepare_model_identification_data
-if not prepare_model_identification_data('<output_dir>', '<comparison_scope>'):
+if not prepare_model_identification_data('<output_dir>'):
     sys.exit(1)
 "
 ```

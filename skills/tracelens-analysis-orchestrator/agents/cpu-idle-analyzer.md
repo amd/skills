@@ -38,7 +38,7 @@ When invoked by the orchestrator, you will receive the following context:
 ## Error Handling
 
 **If category data files are missing:**
-1. Read gpu_utilization directly from category_data/category_manifest.json
+1. Read gpu_utilization from metadata/cpu_idle_metadata.json (focus job only on multi-trace)
 2. Provide analysis based on available data
 3. Note limitations in findings
 
