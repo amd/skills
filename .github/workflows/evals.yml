@@ -432,6 +432,8 @@ jobs:
           ORCHESTRAI_V2_CI_API_URL: ${{ secrets.ORCHESTRAI_V2_CI_API_URL }}
           ORCHESTRAI_V2_OIDC_AUDIENCE: ${{ secrets.ORCHESTRAI_V2_OIDC_AUDIENCE }}
           ORCHESTRAI_V2_WORKSPACE: ${{ secrets.ORCHESTRAI_V2_WORKSPACE }}
+          # Enable only after the authenticated Results execution relay is deployed.
+          ORCHESTRAI_V2_EXECUTION_RESULTS: ${{ vars.ORCHESTRAI_V2_EXECUTION_RESULTS }}
           ORCHESTRAI_V2_LINUX_IMAGE: ${{ vars.ORCHESTRAI_V2_LINUX_IMAGE }}
           ORCHESTRAI_V2_WINDOWS_IMAGE: ${{ vars.ORCHESTRAI_V2_WINDOWS_IMAGE }}
         run: exec python3 .github/scripts/orchestrai_run.py

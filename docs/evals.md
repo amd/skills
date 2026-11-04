@@ -28,13 +28,13 @@ commit: the PR head for pull requests, or the triggering commit for other events
 Discovery does not use GitHub's synthetic PR merge, which could contain skills
 from newer upstream commits that are absent from the tested PR head.
 
-**V2 rollout status:** the current Control Plane CI API supplies status-only test
-results. It does not supply the session identity needed when multiple skills
-share an adapter, or authenticated test-stream access. Those multi-skill selections
-fail before acquiring machines; they are not silently skipped or split into extra
-allocations. Single-skill selections can use the compatibility result endpoint,
-but do not have full log/grader-detail parity. OAI's detailed Results access
-contract is a rollout dependency, not a reason to add executor credentials.
+**V2 rollout status:** multi-skill runs require OAI's authenticated execution-results
+relay and its Results/producer deployment. After that deployment is verified, set
+the Actions variable `ORCHESTRAI_V2_EXECUTION_RESULTS=true`. Until enabled, selections
+that reuse an adapter stop before acquiring machines; single-skill selections
+continue using the compatibility endpoint. This switch is an operator deployment
+confirmation, not automatic capability detection or an authorization grant.
+Test streams and grader detail still need OAI's separate evidence-access contract.
 
 When test streams are available, each GitHub skill/OS report includes a **Test stdout/stderr
 (redacted)** log group and a downloadable `stdout-stderr.log` in its
@@ -87,18 +87,29 @@ the routing room. Expectation-type counts include only retained grader lines
 associated with a recorded case. Missing/redacted lines are excluded and all
 rates are labeled observed; zero denominators are shown as **Not reported**.
 
-The V2 controller reads `GET /ci/v1/runs/{id}/tests` using the same GitHub OIDC
-identity as submission. It validates the run identity, API version, list shape,
-count and execution identities. A planned adapter path must identify exactly one
-skill and one returned execution; row order and a green parent never substitute
-for that identity. Repeated adapter paths are refused before submission. Duplicate,
-unknown, contradictory or incomplete results fail closed. No executor URLs,
-artifact APIs, consoles, Portal login or additional service credentials are used.
+With `ORCHESTRAI_V2_EXECUTION_RESULTS=true`, the controller reads
+`GET /ci/v1/runs/{id}/executions?attempts=all&limit=100` using the same GitHub OIDC
+identity as submission. It requires the `orchestrai.results/v2` response header
+and execution-view fields, and follows opaque pagination cursors with a 20-page /
+1,000-row limit. Each submitted session has an explicit ID. Each returned execution
+must match that exact `plan_session_id`, run, adapter path and level. Exactly one
+non-superseded attempt must count per skill; the newest attempt is not necessarily
+the counting attempt when a retry was cut short. Conflicting identities, retry
+relationships or counting attempts fail closed. Unattributed or missing executions
+can wait for publication but cannot pass on the parent's status.
+
+When the variable is unset or `false`, the compatibility
+`GET /ci/v1/runs/{id}/tests` reader remains available for unique adapter paths.
+Repeated paths are refused before submission in this mode. There is no fallback
+from an unavailable/malformed execution endpoint to ambiguous compatibility results.
+Neither mode uses executor URLs, artifact APIs, consoles, Portal login or additional
+service credentials. Raw Results documents, attributes and machine identities are
+never included in public artifacts.
 
 **V2 log coverage limitation:** the CI API exposes test outcomes, not stdout and
 stderr. Streams and grader details are reported as unavailable, not empty or
 complete. A status-only result cannot reconstruct case counts, expectation detail
-or judge-error reclassification. OAI owns the missing authenticated execution and
+or judge-error reclassification. OAI owns the missing authenticated
 evidence-access contract; this workflow does not invent endpoints, consume raw
 document fields, or distribute broad Results/object-store credentials to CI.
 The existing redaction/reporting code remains for evidence integration and offline
@@ -140,6 +151,14 @@ Keep `ORCHESTRAI_DEVICE_TAGS`, `ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON` and
 secrets used by other workflows. Optional Actions **variables**
 `ORCHESTRAI_V2_LINUX_IMAGE` and `ORCHESTRAI_V2_WINDOWS_IMAGE` override the existing
 `ubuntu` / `windows` aliases, which are resolved by the Control Plane.
+
+Leave the Actions **variable** `ORCHESTRAI_V2_EXECUTION_RESULTS` unset until the OAI
+owner confirms all three parts are deployed: the CI execution-results relay, the
+Results `view=execution` contract, and a producer that records plan-session and retry
+identities. Then set it to the literal `true` and validate a multi-skill live run.
+This does not add scopes or credentials and does not change workflow triggers,
+Instinct jobs or machine allocation. If enabled on an unsupported deployment,
+results fail closed; the switch itself does not probe deployment readiness.
 
 The workspace owner must authorize the intended repository, workflow ref and
 events in **CI access**, with scopes `plans:write`, `plans:publish`, `runs:start`,

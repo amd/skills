@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from orchestrai_control_plane import (
     REQUEST_DIAGNOSTICS,
     SAFE_AUTH_DIAGNOSTICS,
+    ResultsPending,
     ControlPlaneClient,
     ControlPlaneError,
     inline_request,
@@ -1106,6 +1107,12 @@ def main() -> int:
         while True:
             try:
                 latest_live = client.snapshot(run_id, plan)
+            except ResultsPending:
+                if time.monotonic() >= result_deadline:
+                    raise
+                log("Control Plane execution results are still being published; retrying")
+                time.sleep(5)
+                continue
             except ControlPlaneError as exc:
                 if "unavailable after bounded retries" not in str(exc) or time.monotonic() >= result_deadline:
                     raise

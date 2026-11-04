@@ -68,21 +68,27 @@ only in that Environment will not be available. This change does not move
 credentials or modify repository settings, runner groups, branch rules or
 federation rules. Instinct retains its selected Environment.
 
-### Pending OAI reporting capability
+### OAI execution-results rollout
 
-Skills reads status-only results from the existing CI API, not the execution
-backend. This is deliberately different from Playbooks' direct artifact reader.
-The API currently omits plan-session correlation, counting-attempt metadata and
-test streams. A single planned adapter path with one execution can be attributed
-to its skill; multi-skill selections reusing that path stop before any machines
-are requested. Duplicate executions, absent results and unknown outcomes cannot
-pass. The workflow does not guess by row order, copy a parent verdict to every
-skill, or silently change how many machines are requested.
+Skills reads results through the authenticated Control Plane CI API. Once OAI's
+execution relay, Results execution view and session-identity producer are deployed,
+set the repository variable `ORCHESTRAI_V2_EXECUTION_RESULTS=true`. The controller
+then consumes `/ci/v1/runs/{id}/executions`, follows bounded pagination, and maps
+each returned `plan_session_id` to the explicit ID submitted for that skill/OS.
+It counts only the attempt Results marks non-superseded, validates retry links,
+and refuses ambiguous identities. Missing publication gets the existing 90-second
+grace period; a parent pass cannot stand in for missing skill results.
 
-Full multi-skill and log parity is **blocked on OAI's authenticated detailed
-Results/evidence read contract**. OAI keeps canonical evidence in Results/object
-storage, not bulk data in the Control Plane. The read contract must provide
-run-scoped CI authorization, stable plan-session/execution and retry identity,
+Until that variable is enabled, the unique-path compatibility reader stays in
+use and multi-skill selections sharing an adapter stop before machine allocation.
+The switch is a deployment confirmation, not an API capability probe. It must not
+be enabled merely because consumer unit tests pass. No fallback from the new reader
+to ambiguous old results is allowed, and machine allocation is unchanged.
+
+Full log parity remains **blocked on OAI's authenticated evidence read contract**.
+The execution relay provides outcomes and correlation, not test stdout/stderr.
+OAI keeps canonical evidence in Results/object storage, not bulk data in the
+Control Plane. Evidence access must provide run-scoped CI authorization,
 publication completeness and bounded authenticated stream access. Neither a
 Portal login nor a broad Results service key is a substitute. The existing
 redaction code remains but unavailable streams/grader details are reported as

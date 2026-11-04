@@ -29,6 +29,26 @@ RESULT_IDENTITY_GAP = (
     "test adapter. No machines were requested. OAI must provide authenticated "
     "per-session results before this selection can run."
 )
+RESULTS_CONTRACT = "orchestrai.results/v2"
+EXECUTION_CONTRACT_ERROR = (
+    "OrchestrAI V2 did not return the required execution-results contract."
+)
+EXECUTION_IDENTITY_ERROR = (
+    "OrchestrAI V2 execution results had invalid or conflicting session identities."
+)
+EXECUTION_PAGE_ERROR = "OrchestrAI V2 execution results were invalid, incomplete or exceeded pagination limits."
+EXECUTION_PENDING = "OrchestrAI V2 execution results are not fully published."
+EXECUTION_MODE_ERROR = "ORCHESTRAI_V2_EXECUTION_RESULTS must be true, false or unset."
+SAFE_RESULT_DIAGNOSTICS = frozenset(
+    {
+        RESULT_IDENTITY_GAP,
+        EXECUTION_CONTRACT_ERROR,
+        EXECUTION_IDENTITY_ERROR,
+        EXECUTION_PAGE_ERROR,
+        EXECUTION_PENDING,
+        EXECUTION_MODE_ERROR,
+    }
+)
 
 # These are local messages keyed by documented API enums, not remote prose.
 # In particular, never echo error.message, request IDs, rule/project names,
@@ -94,6 +114,10 @@ class ControlPlaneError(RuntimeError):
     """Only locally generated, credential-free messages belong here."""
 
 
+class ResultsPending(ControlPlaneError):
+    """Publication may lag the terminal parent; retry within the result budget."""
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *_args, **_kwargs):
         return None
@@ -117,12 +141,17 @@ def https_url(value: str) -> str:
     return value.rstrip("/")
 
 
-def read_response(request, *, limit=MAX_JSON, timeout=30):
+def read_response(request, *, limit=MAX_JSON, timeout=30, contract=None):
     # Explicitly prohibit redirects so OIDC authentication cannot be sent
     # to a different service. No exception from urllib is printed to the log.
     with urllib.request.build_opener(NoRedirect()).open(
         request, timeout=timeout
     ) as response:
+        if (
+            contract is not None
+            and response.headers.get("X-OrchestrAI-Results-Contract") != contract
+        ):
+            raise ControlPlaneError(EXECUTION_CONTRACT_ERROR)
         body = response.read(limit + 1)
         if len(body) > limit:
             raise ControlPlaneError(
@@ -132,6 +161,7 @@ def read_response(request, *, limit=MAX_JSON, timeout=30):
 
 
 def inline_request(plan: dict) -> dict:
+    planned_sessions(plan)
     document = {
         "sessions": deepcopy(plan["sessions"]),
         "run_settings": deepcopy(plan.get("run_settings", {})),
@@ -139,6 +169,9 @@ def inline_request(plan: dict) -> dict:
     # Generic ubuntu/windows aliases are resolved by the Control Plane. Do not
     # call the retired Portal boot-resources API or choose an arbitrary image.
     for session in document["sessions"]:
+        # This author-supplied ID survives plan compilation as the session's
+        # group_id, which Results returns as plan_session_id. Never use order.
+        session["id"] = session["name"]
         # V2 plan drafts require string test references, as Playbooks submits.
         # Keep the local per-test envelope for result attribution, but move its
         # variables onto the one-test session at the API boundary. Never merge
@@ -191,13 +224,35 @@ def inline_request(plan: dict) -> dict:
     return payload
 
 
-def require_result_identity(plan: dict) -> None:
-    """The current /tests compatibility API identifies tests, not sessions.
+def execution_results_enabled() -> bool:
+    # A deployment switch, not capability discovery: enable only after OAI's
+    # execution relay, Results view and session-identity producer are deployed.
+    value = os.environ.get("ORCHESTRAI_V2_EXECUTION_RESULTS", "")
+    if value not in {"", "false", "true"}:
+        raise ControlPlaneError(EXECUTION_MODE_ERROR)
+    return value == "true"
 
-    Never fan out one adapter outcome to several skills or zip rows to the
-    plan order. Stop before admission when that public contract is ambiguous.
-    OAI's detailed execution/read-access contract must replace this restriction.
-    """
+
+def planned_sessions(plan: dict) -> dict:
+    sessions = {}
+    for session in plan["sessions"]:
+        name = session.get("name")
+        if (
+            not isinstance(name, str)
+            or not ID.fullmatch(name)
+            or name in sessions
+            or session.get("id", name) != name
+        ):
+            raise ControlPlaneError(EXECUTION_IDENTITY_ERROR)
+        sessions[name] = session
+    return sessions
+
+
+def require_result_identity(plan: dict) -> None:
+    """Do not admit shared-adapter plans to a deployment without the relay."""
+    planned_sessions(plan)
+    if execution_results_enabled():
+        return
     paths = [test["path"] for session in plan["sessions"] for test in session["tests"]]
     if len(paths) != len(set(paths)):
         raise ControlPlaneError(RESULT_IDENTITY_GAP)
@@ -216,6 +271,46 @@ def idempotency_key(plan: dict) -> str:
     if not all(identity[:3]):
         raise ControlPlaneError("OrchestrAI V2 requires the GitHub run identity.")
     return "skills-" + hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+
+
+def result_session(session, test):
+    """Project outcome evidence only; private diagnostics are classified later."""
+    outcome = test.get("outcome")
+    status = (
+        outcome
+        if isinstance(outcome, str)
+        and outcome in {"passed", "failed", "error", "skipped", "cancelled", "aborted"}
+        else "error"
+    )
+    error = test.get("error")
+    if error is not None and not isinstance(error, str):
+        raise ControlPlaneError("OrchestrAI V2 returned an invalid test error.")
+    error = error or ""
+    if status != outcome:
+        error = "OrchestrAI did not publish a recognized terminal test outcome."
+    exit_code = test.get("exit_code")
+    if exit_code is not None and type(exit_code) is not int:
+        raise ControlPlaneError("OrchestrAI V2 returned an invalid test exit code.")
+    if status == "passed" and (exit_code not in (None, 0) or error):
+        status, error = (
+            "error",
+            "OrchestrAI published a passing outcome with failure evidence.",
+        )
+    return {
+        "name": session["name"],
+        "status": "completed",
+        "tests": [
+            {"path": session["tests"][0]["path"], "status": status, "error": error}
+        ],
+    }
+
+
+def opaque_identity(value):
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= 512
+        and not any(c.isspace() or ord(c) < 32 for c in value)
+    )
 
 
 class ControlPlaneClient:
@@ -270,7 +365,17 @@ class ControlPlaneClient:
         print("::add-mask::" + token, flush=True)
         return token
 
-    def request(self, method, path, payload=None, *, key="", attempts=5, timeout=30):
+    def request(
+        self,
+        method,
+        path,
+        payload=None,
+        *,
+        key="",
+        attempts=5,
+        timeout=30,
+        contract=None,
+    ):
         body = None if payload is None else json.dumps(payload, sort_keys=True).encode()
         refreshed = False
         for attempt in range(attempts):
@@ -289,6 +394,7 @@ class ControlPlaneClient:
                     ),
                     limit=4 * 1024 * 1024,
                     timeout=timeout,
+                    **({"contract": contract} if contract is not None else {}),
                 )
                 if response is None and path.endswith("/cancel"):
                     return {}
@@ -317,6 +423,10 @@ class ControlPlaneClient:
                     raise ControlPlaneError(
                         authorization_diagnostic(code, scope)
                     ) from None
+                elif status == 404 and contract == RESULTS_CONTRACT:
+                    # The terminal run may not be projected into Results yet.
+                    # This never authorizes a fallback to /tests or a new run.
+                    raise ResultsPending(EXECUTION_PENDING) from None
                 elif status not in {408, 429, 500, 502, 503, 504} and not (
                     status == 409 and code == "idempotency_in_progress"
                 ):
@@ -379,9 +489,9 @@ class ControlPlaneClient:
         return run
 
     def snapshot(self, run_id, plan):
-        """Read the existing CI API's status-only results without inferring IDs.
+        """Read status-only results through the configured CI results contract.
 
-        A unique planned test path can be attributed to its one skill. Multiple
+        In compatibility mode a unique test path identifies one skill. Multiple
         executions of that path (including ambiguous retries) are refused. The
         legacy normalizer envelope here is not a launcher response or proof of
         session/cleanup completion; the controller separately waits for the run.
@@ -390,6 +500,8 @@ class ControlPlaneClient:
         require_result_identity(plan)
         if not isinstance(run_id, str) or not ID.fullmatch(run_id):
             raise ControlPlaneError("OrchestrAI V2 returned an invalid run identity.")
+        if execution_results_enabled():
+            return self.execution_snapshot(run_id, plan)
         response = self.request("GET", f"/runs/{run_id}/tests")
         tests = response.get("tests")
         if (
@@ -430,41 +542,153 @@ class ControlPlaneClient:
                 raise ControlPlaneError(
                     "OrchestrAI V2 returned ambiguous results for a test adapter."
                 )
-            test = matches[0]
-            outcome = test.get("outcome")
             # The compatibility API does not expose attempt/superseded metadata.
             # Never select the last row or use the parent's green status.
-            status = (
-                outcome
-                if isinstance(outcome, str)
-                and outcome
-                in {"passed", "failed", "error", "skipped", "cancelled", "aborted"}
-                else "error"
-            )
-            error = test.get("error")
-            if error is not None and not isinstance(error, str):
-                raise ControlPlaneError("OrchestrAI V2 returned an invalid test error.")
-            error = error or ""
-            if status != outcome:
-                error = "OrchestrAI did not publish a recognized terminal test outcome."
-            exit_code = test.get("exit_code")
-            if exit_code is not None and type(exit_code) is not int:
-                raise ControlPlaneError(
-                    "OrchestrAI V2 returned an invalid test exit code."
-                )
-            if status == "passed" and (exit_code not in (None, 0) or error):
-                status, error = (
-                    "error",
-                    "OrchestrAI published a passing outcome with failure evidence.",
-                )
-            sessions.append(
-                {
-                    "name": session["name"],
-                    "status": "completed",
-                    "tests": [{"path": path, "status": status, "error": error}],
-                }
-            )
+            sessions.append(result_session(session, matches[0]))
         return {"launcher": {"sessions": sessions}}
+
+    def execution_snapshot(self, run_id, plan):
+        """Consume OAI's run-scoped Results execution view, never raw documents.
+
+        Results owns attempt counting. A cut-short retry may be superseded while
+        an older attempt counts, so neither max(attempt) nor row order is valid.
+        Do not return a partial snapshot before pagination/identity validation.
+        """
+        expected = planned_sessions(plan)
+        rows, cursors, cursor = {}, set(), ""
+        attempts, session_owners = set(), {}
+        for _page in range(20):
+            query = {"attempts": "all", "limit": "100"}
+            if cursor:
+                query["cursor"] = cursor
+            response = self.request(
+                "GET",
+                f"/runs/{run_id}/executions?{urllib.parse.urlencode(query)}",
+                contract=RESULTS_CONTRACT,
+            )
+            items = response.get("items")
+            if (
+                not isinstance(items, list)
+                or len(items) > 100
+                or "next_cursor" not in response
+                or len(rows) + len(items) > 1000
+            ):
+                raise ControlPlaneError(EXECUTION_PAGE_ERROR)
+            for item in items:
+                # Presence distinguishes the execution DTO from old Results
+                # deployments that ignore view=execution and expose raw rows.
+                required = {
+                    "run_id",
+                    "execution_id",
+                    "test_id",
+                    "name",
+                    "level",
+                    "session_id",
+                    "plan_session_id",
+                    "plan_session_name",
+                    "attempt",
+                    "retry_of",
+                    "superseded",
+                    "outcome",
+                    "exit_code",
+                    "executor_error",
+                }
+                if not isinstance(item, dict) or not required <= item.keys():
+                    raise ControlPlaneError(EXECUTION_CONTRACT_ERROR)
+                execution_id, group = item["execution_id"], item["plan_session_id"]
+                if (
+                    item["run_id"] != run_id
+                    or not opaque_identity(execution_id)
+                    or execution_id in rows
+                    or (
+                        item["test_id"] is not None
+                        and not opaque_identity(item["test_id"])
+                    )
+                    or not opaque_identity(item["session_id"])
+                    or type(item["attempt"]) is not int
+                    or item["attempt"] < 1
+                    or type(item["superseded"]) is not bool
+                    or (
+                        item["retry_of"] is not None
+                        and not opaque_identity(item["retry_of"])
+                    )
+                ):
+                    raise ControlPlaneError(EXECUTION_IDENTITY_ERROR)
+                if group is None:
+                    # A suite/session event may still be in publication. It
+                    # must arrive; never assign this row to an unmatched skill.
+                    raise ResultsPending(EXECUTION_PENDING)
+                if not isinstance(group, str) or group not in expected:
+                    raise ControlPlaneError(EXECUTION_IDENTITY_ERROR)
+                path = expected[group]["tests"][0]["path"]
+                if (
+                    item["name"] != path
+                    or item["level"] != path.split("/", 1)[0]
+                    or item["plan_session_name"] not in (None, group)
+                    or (group, item["attempt"]) in attempts
+                    or session_owners.get(item["session_id"], group) != group
+                ):
+                    raise ControlPlaneError(EXECUTION_IDENTITY_ERROR)
+                attempts.add((group, item["attempt"]))
+                session_owners[item["session_id"]] = group
+                # Copy only the fields consumed below. No raw response is saved
+                # or logged; machine/storage IDs and unknown fields stay private.
+                rows[execution_id] = {key: item[key] for key in required}
+            cursor = response["next_cursor"]
+            if cursor is None or cursor == "":
+                break
+            if (
+                not isinstance(cursor, str)
+                or len(cursor) > 2048
+                or cursor in cursors
+                or not items
+            ):
+                raise ControlPlaneError(EXECUTION_PAGE_ERROR)
+            cursors.add(cursor)
+        else:
+            raise ControlPlaneError(EXECUTION_PAGE_ERROR)
+
+        counted = {}
+        for row in rows.values():
+            previous_id = row["retry_of"]
+            if previous_id is not None:
+                previous = rows.get(previous_id)
+                if previous is None:
+                    raise ResultsPending(EXECUTION_PENDING)
+                if (
+                    any(
+                        row[key] != previous[key] for key in ("plan_session_id", "name")
+                    )
+                    or (
+                        row["test_id"] is not None
+                        and previous["test_id"] is not None
+                        and row["test_id"] != previous["test_id"]
+                    )
+                    or previous["attempt"] >= row["attempt"]
+                ):
+                    raise ControlPlaneError(EXECUTION_IDENTITY_ERROR)
+            if not row["superseded"]:
+                group = row["plan_session_id"]
+                if group in counted:
+                    raise ControlPlaneError(EXECUTION_IDENTITY_ERROR)
+                counted[group] = row
+        if set(counted) != set(expected):
+            raise ResultsPending(EXECUTION_PENDING)
+        return {
+            "launcher": {
+                "sessions": [
+                    result_session(
+                        session,
+                        {
+                            "outcome": counted[group]["outcome"],
+                            "exit_code": counted[group]["exit_code"],
+                            "error": counted[group]["executor_error"],
+                        },
+                    )
+                    for group, session in expected.items()
+                ]
+            }
+        }
 
     def cancel_and_wait(self, run_id, *, timeout=60):
         deadline = time.monotonic() + timeout
