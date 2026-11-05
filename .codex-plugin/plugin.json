@@ -35,6 +35,9 @@
       "Write"
     ],
     "websiteURL": "https://github.com/amd/skills",
+    "supportURL": "https://github.com/amd/skills/issues",
+    "privacyPolicyURL": "https://www.amd.com/en/legal/privacy.html",
+    "termsOfServiceURL": "https://github.com/amd/skills/blob/main/LICENSE",
     "brandColor": "#ED1C24",
     "logo": "./assets/amd.png",
     "composerIcon": "./assets/amd.png",
