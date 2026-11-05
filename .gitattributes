@@ -3,7 +3,3 @@
 *.py   text eol=lf
 *.yml  text eol=lf
 *.yaml text eol=lf
-
-# Treat SKILL.md and other markdown as text; let git auto-normalize on
-# checkout based on the contributor's platform.
-*.md text
