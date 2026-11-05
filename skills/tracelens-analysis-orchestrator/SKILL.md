@@ -36,13 +36,14 @@ Follow **[reference.md](reference.md)** for every step (user prompts, `<prefix>`
   8.5. Aggregate → priority_data.json::findings[]
 9. Validate Subagent Outputs
 10. load_findings + Model Identification (subagent) → metadata/model_info.json
+    10.2. Analytical Roofline Augmentation (optional; only when <augment_analytical_roofline> is set)
 11. Render performance PNG if agent_extension.py is absent
 12. Generate analysis.md (orchestrator writes via <prefix> tee), optional extension, embed PNG
 ```
 
 ## Rules
 
-- **Subagents:** Use your runner's subagent primitive (the Task tool in Claude Code or Cursor, `spawn_agent` under Codex) **only** where reference.md says “subagent” (Steps **7**, **8**, **10**). The orchestrator runs everything else, including Step 8.5, using the command prefix from `<output_dir>/cache/cmd_prefix.txt` (`{CMD}` substitution).
+- **Subagents:** Use your runner's subagent primitive (the Task tool in Claude Code or Cursor, `spawn_agent` under Codex) **only** where reference.md says “subagent” (Steps **7**, **8**, **10**, and **10.2**). The orchestrator runs everything else, including Step 8.5, using the command prefix from `<output_dir>/cache/cmd_prefix.txt` (`{CMD}` substitution).
 - **Language:** Prefer vendor-agnostic terms (GPU kernels, collective communication, vendor GEMM library, DNN primitives, GPU graph). When quoting trace data, real kernel names are fine.
 - **Subagent prompts:** Point each subagent at the checked-in agent file under `TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/<name>.md` (see reference.md for exact paths and prompt shells).
 

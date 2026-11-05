@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 import yaml
 
+from TraceLens.Agent.Analysis.utils import write_csv
+
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _EVAL_UTILS_DIR = os.path.join(_SCRIPT_DIR, "..", "..", "eval_utils")
 if _EVAL_UTILS_DIR not in sys.path:
@@ -134,13 +136,6 @@ def reaggregate_from_sources(results_root):
                             }
                         )
     return rows
-
-
-def write_csv(path, rows, cols):
-    with open(path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=cols)
-        w.writeheader()
-        w.writerows(rows)
 
 
 def classify_stability(pass_count, total):

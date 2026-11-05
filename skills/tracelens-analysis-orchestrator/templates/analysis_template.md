@@ -60,9 +60,13 @@ section that has STANDALONE / COMPARATIVE variants. Delete the unused variant.
     the library name(s) in parentheses when present in the sub-agent findings. Omit when no
     library is identified. System-Level and Kernel Fusion titles do NOT include a library
     parenthetical.
-13. Multi-trace standalone (`multi_trace` scope): use the STANDALONE
-    blocks. Impact scores are a percent of the combined time of all jobs. Compute P-items carry their
-    phase. Fusion and System sections cover the focus job only and open with a scope line.
+13. Multi-trace standalone (`multi_trace` scope): use the STANDALONE blocks and the MULTI_TRACE
+    blocks. Each job is one node. Impact scores are a percent of the combined time of all nodes
+    (`gpu_utilization.total_time_ms`). Compute and Kernel Fusion P-items carry their node. Fusion and
+    System sections cover the focus node only (`gpu_utilization.nodes[<focus_job>]`) and open with a
+    scope line.
+14. Numbers: never use thousands separators (`1996.42`, not `1,996.42`).
+15. Markers: put a space before the closing `-->` (`node=prefill -->`).
 -->
 
 <!-- === STANDALONE title === -->
@@ -90,7 +94,7 @@ section that has STANDALONE / COMPARATIVE variants. Delete the unused variant.
 ## Executive Summary
 
 <!-- === STANDALONE Executive Summary === -->
-[1 paragraph overview + key metrics table. multi_trace: Total Time is the combined time; add one sentence giving each phase's time, summed over its jobs in `gpu_utilization.jobs`.]
+[1 paragraph overview + key metrics table]
 
 <!-- MANDATORY: This table must contain exactly these 5 rows:
      Total Time | Compute % | Idle % | Exposed Communication % | Top Bottleneck Category
@@ -102,6 +106,17 @@ section that has STANDALONE / COMPARATIVE variants. Delete the unused variant.
 | Idle % | Z% |
 | Exposed Communication % | W% |
 | Top Bottleneck Category | Category (V%) |
+
+<!-- === MULTI_TRACE Executive Summary: replaces the table above; the paragraph adds one sentence giving each node's time, compute % and idle %, from `gpu_utilization.nodes`. Total column = `gpu_utilization`; node columns = `gpu_utilization.nodes[<node>]`, in that order. A node's Top Bottleneck Category V% = its top `categories[].nodes[<node>].gpu_kernel_time_ms` / (`nodes[<node>].total_time_ms * nodes[<node>].computation_time_percent / 100`). Row labels appear only in this table. === -->
+| Metric | Total | <node_0> | <node_1> |
+|--------|-------|----------|----------|
+| Total Time | X ms | X_0 ms | X_1 ms |
+| Compute % | Y% | Y_0% | Y_1% |
+| Idle % | Z% | Z_0% | Z_1% |
+| Exposed Communication % | W% | W_0% | W_1% |
+| Top Bottleneck Category | Category (V%) | Category_0 (V_0%) | Category_1 (V_1%) |
+
+Total is the sum of node times, not wall time.
 
 <!-- === COMPARATIVE Executive Summary === -->
 [1 paragraph comparative overview: summarize which trace is faster overall, by how much, and the dominant gap categories]
@@ -129,10 +144,16 @@ Summaries of recommendations from Step 8 sub-agents, focused on individual kerne
 One row per entry in `priority_data.json::priorities[]`, in array order (no manifest-sort, no extra rows). For row N (= `priorities[N-1]`): `Rank`/`Category` = `rank`/`display_name`; `Time (ms)` = matching `manifest.categories[].gpu_kernel_time_ms` (verbatim); `Ops` = matching `manifest.categories[].ops_count`; `% of Compute Time` = `Time (ms) / (gpu_utilization.total_time_ms * computation_time_percent / 100)`; trailer `low`/`high` = `priorities[N-1].impact_score_low`/`impact_score_high` (use `null` for `source: "manifest_fallback"`). Wrap the whole block (header + separator + rows) in the `kind=top_ops` marker.
 
 <!-- === STANDALONE Top Operations === -->
-<!-- === MULTI_TRACE Top Operations: add this line above the standalone table, outside the marker. Phase names are the distinct `phase` values in gpu_utilization.jobs === -->
-_Times and percentages are summed across all phases (<phase_1> + <phase_2>). See each P-item's Phase field for where the time is spent._
-
 <!-- impact-begin kind=top_ops -->
+| Rank | Category | Time (ms) | % of Compute Time | Ops |
+|------|----------|-----------|-------------------|-----|
+| 1 | ... | ... | ... | ... | <!-- top-ops-row low=<impact_score_low> high=<impact_score_high> -->
+<!-- impact-end -->
+
+<!-- === MULTI_TRACE Top Operations: one table per node in `gpu_utilization.nodes` order, replacing the standalone table; skip a node with no rows. Rows are the `priorities[]` entries whose `node` is that node, in array order; `Rank` = `rank` (global). `Time (ms)` = `categories[].nodes[<node>].gpu_kernel_time_ms`; `Ops` = `categories[].nodes[<node>].ops_count`; `% of Compute Time` divides by `nodes[<node>].total_time_ms * nodes[<node>].computation_time_percent / 100`. The bold line sits outside the marker. === -->
+**<node_0>** (<gpu_utilization.nodes[node_0].total_time_ms> ms)
+
+<!-- impact-begin kind=top_ops node=<node_0> -->
 | Rank | Category | Time (ms) | % of Compute Time | Ops |
 |------|----------|-----------|-------------------|-----|
 | 1 | ... | ... | ... | ... | <!-- top-ops-row low=<impact_score_low> high=<impact_score_high> -->
@@ -155,18 +176,20 @@ _Times and percentages are summed across all phases (<phase_1> + <phase_2>). See
 <!-- Icon mapping by PRIORITY NUMBER (not severity): P1=🔴, P2=🟡, P3+=🟢 -->
 <!-- One card per entry in priority_data.findings[] in array order. Title uses the entry's category and library; Action text is category-appropriate. Do NOT recommend "fuse the SDPA kernel" (already fused — defer upstream/downstream fusion to Kernel Fusion section). -->
 <!-- Skip categories that have empty category_findings[] in category_data/<cat>_metrics.json (no P-items for that category). -->
-<!-- The **Phase** line and `phase=` appear only when the finding has a phase. -->
+<!-- The **Node** line and `node=` appear only when the finding has a node. -->
 <!-- Heuristic findings (priority_data.findings[i].estimate_method == "heuristic") carry a numeric estimated impact and sort by impact_score like any other compute finding; render per sub_agent_spec.md § Heuristic findings. -->
+<!-- === MULTI_TRACE: add this line above the first card === -->
+Ordered by estimated ms saved.
 
 ### 🔴 P1: <Brief Title> (<Library>)
 
-**Phase**: <priority_data.findings[0].phase>
+**Node**: <priority_data.findings[0].node>
 
 **Insight**: [1 sentence - what's wrong]
 
 **Action**: [1-2 sentences - category-appropriate: GEMM fusion/tile/library; SDPA tile/backend; elementwise fusion; etc.]
 
-<!-- impact-begin kind=p_item category=<priority_data.findings[0].category> low=<priority_data.findings[0].impact_score_low> mid=<priority_data.findings[0].impact_score> high=<priority_data.findings[0].impact_score_high> phase=<priority_data.findings[0].phase> -->
+<!-- impact-begin kind=p_item category=<priority_data.findings[0].category> low=<priority_data.findings[0].impact_score_low> mid=<priority_data.findings[0].impact_score> high=<priority_data.findings[0].impact_score_high> node=<priority_data.findings[0].node> -->
 **Impact**: [impact_score: X.X, OR "Not quantifiable from trace data"]
 <!-- impact-end -->
 
@@ -180,7 +203,7 @@ _Times and percentages are summed across all phases (<phase_1> + <phase_2>). See
 
 **Action**: [1-2 sentences]
 
-<!-- impact-begin kind=p_item category=<priority_data.findings[1].category> low=<priority_data.findings[1].impact_score_low> mid=<priority_data.findings[1].impact_score> high=<priority_data.findings[1].impact_score_high> phase=<priority_data.findings[1].phase> -->
+<!-- impact-begin kind=p_item category=<priority_data.findings[1].category> low=<priority_data.findings[1].impact_score_low> mid=<priority_data.findings[1].impact_score> high=<priority_data.findings[1].impact_score_high> node=<priority_data.findings[1].node> -->
 **Impact**: [impact_score: X.X, OR "Not quantifiable from trace data"]
 <!-- impact-end -->
 
@@ -194,7 +217,7 @@ _Times and percentages are summed across all phases (<phase_1> + <phase_2>). See
 
 **Action**: [1-2 sentences]
 
-<!-- impact-begin kind=p_item category=<priority_data.findings[2].category> low=<priority_data.findings[2].impact_score_low> mid=<priority_data.findings[2].impact_score> high=<priority_data.findings[2].impact_score_high> phase=<priority_data.findings[2].phase> -->
+<!-- impact-begin kind=p_item category=<priority_data.findings[2].category> low=<priority_data.findings[2].impact_score_low> mid=<priority_data.findings[2].impact_score> high=<priority_data.findings[2].impact_score_high> node=<priority_data.findings[2].node> -->
 **Impact**: [impact_score: X.X, OR "Not quantifiable from trace data"]
 <!-- impact-end -->
 
@@ -208,7 +231,7 @@ _Times and percentages are summed across all phases (<phase_1> + <phase_2>). See
 <!-- === STANDALONE Kernel Fusion === -->
 > **Note:** Kernel fusion analysis is experimental. impact_score projections estimate the recoverable fraction of E2E with <kernel_fusion_metrics.overlap_efficiency as a percent> memory/compute pipeline overlap. Kernels without perf models use their measured trace time as-is. Candidates are not reported unless at least 50% of their kernels have perf models (75% for candidates of 5 or more kernels). Actual recoverable time depends on implementation feasibility and interaction effects.
 <!-- === MULTI_TRACE scope line (after the note; the same line goes under the System-Level note) === -->
-Scope: <focus_job> only (trace `<focus trace>`, capture `<manifest.capture_folder or raw>`)
+Scope: node <focus_job> (trace `<focus trace>`, capture `<manifest.capture_folder or raw>`)
 <!-- === COMPARATIVE Kernel Fusion === -->
 > **Note:** Kernel fusion analysis is experimental.
 
@@ -216,15 +239,18 @@ Scope: <focus_job> only (trace `<focus trace>`, capture `<manifest.capture_folde
 <!-- Each finding uses Insight / Action / Impact / Confidence format, with Impact from kernel_fusion_metrics.json. -->
 <!-- P1/P2/P3+ ordered by impact_score, highest first. -->
 <!-- Icon mapping by PRIORITY NUMBER (not severity): P1=🔴, P2=🟡, P3+=🟢 -->
+<!-- The **Node** line and `node=` appear only when `kernel_fusion_metrics.node` is set. -->
 <!-- If no findings or kernel_fusion category not in manifest, replace the cards below with: "No kernel fusion opportunities detected." -->
 
 ### 🔴 P1: <Candidate Name>
+
+**Node**: <kernel_fusion_metrics.node>
 
 **Insight**: [1 sentence - what fusion pattern was detected]
 
 **Action**: [1-2 sentences - which kernels to fuse and how]
 
-<!-- impact-begin kind=p_item low=<kernel_fusion_metrics.impact_estimates[0].impact_score_low> mid=<kernel_fusion_metrics.impact_estimates[0].impact_score> high=<kernel_fusion_metrics.impact_estimates[0].impact_score_high> -->
+<!-- impact-begin kind=p_item low=<kernel_fusion_metrics.impact_estimates[0].impact_score_low> mid=<kernel_fusion_metrics.impact_estimates[0].impact_score> high=<kernel_fusion_metrics.impact_estimates[0].impact_score_high> node=<kernel_fusion_metrics.node> -->
 **Impact**: [impact_score: X.X (perf-model coverage Y/Z kernels)]
 <!-- impact-end -->
 
@@ -240,7 +266,7 @@ Scope: <focus_job> only (trace `<focus trace>`, capture `<manifest.capture_folde
 
 **Action**: [1-2 sentences]
 
-<!-- impact-begin kind=p_item low=<kernel_fusion_metrics.impact_estimates[1].impact_score_low> mid=<kernel_fusion_metrics.impact_estimates[1].impact_score> high=<kernel_fusion_metrics.impact_estimates[1].impact_score_high> -->
+<!-- impact-begin kind=p_item low=<kernel_fusion_metrics.impact_estimates[1].impact_score_low> mid=<kernel_fusion_metrics.impact_estimates[1].impact_score> high=<kernel_fusion_metrics.impact_estimates[1].impact_score_high> node=<kernel_fusion_metrics.node> -->
 **Impact**: [impact_score: X.X (perf-model coverage Y/Z kernels)]
 <!-- impact-end -->
 
@@ -256,7 +282,7 @@ Scope: <focus_job> only (trace `<focus trace>`, capture `<manifest.capture_folde
 
 **Action**: [1-2 sentences]
 
-<!-- impact-begin kind=p_item low=<kernel_fusion_metrics.impact_estimates[2].impact_score_low> mid=<kernel_fusion_metrics.impact_estimates[2].impact_score> high=<kernel_fusion_metrics.impact_estimates[2].impact_score_high> -->
+<!-- impact-begin kind=p_item low=<kernel_fusion_metrics.impact_estimates[2].impact_score_low> mid=<kernel_fusion_metrics.impact_estimates[2].impact_score> high=<kernel_fusion_metrics.impact_estimates[2].impact_score_high> node=<kernel_fusion_metrics.node> -->
 **Impact**: [impact_score: X.X (perf-model coverage Y/Z kernels)]
 <!-- impact-end -->
 
@@ -354,12 +380,12 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 <!-- Each block has an HTML anchor: <a id="detailed-analysis-compute-pN"></a> -->
 <!-- If the Compute Kernel Optimizations section rendered the no-opportunities summary, mirror it here: "✅ No compute kernel optimization opportunities identified. All categories are within target performance bounds." -->
 
-<!-- === STANDALONE Compute Kernel Data table === Use this schema for standalone mode ONLY. Use these 10 exact columns (must match sub_agent_spec.md § Operations Table Schema) -->
+<!-- === STANDALONE Compute Kernel Data table === Use this schema for standalone mode ONLY. Use these 10 exact columns (must match sub_agent_spec.md § Operations Table Schema). MULTI_TRACE: the sixth header is `% of Node`. -->
 
 <a id="detailed-analysis-compute-p1"></a>
 <!-- reasoning-candidate tier=compute rank=1 -->
 #### 🔴 P1: <Brief Title> (<Library>)
-**Phase**: <priority_data.findings[0].phase>
+**Node**: <priority_data.findings[0].node>
 **Identification:**
 **Data:**
 
@@ -424,7 +450,7 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 **Identification:**
 
-**Data:**
+**Data:** <!-- MULTI_TRACE: the sixth header is `% of Node` -->
 
 | Operation | Args | Kernel Path | Kernel Name | Time (ms) | %E2E | Count | FLOPS/Byte | Efficiency | Bound |
 |---|---|---|---|---|---|---|---|---|---|
