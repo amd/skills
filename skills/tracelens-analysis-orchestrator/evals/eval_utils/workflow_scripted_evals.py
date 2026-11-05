@@ -20,6 +20,8 @@ import os
 import re
 import sys
 
+from TraceLens.Agent.Analysis.utils import write_csv
+
 CSV_COLUMNS = [
     "index",
     "category",
@@ -932,17 +934,16 @@ def _check_marker_top_ops(output_dir, comparison_scope=None):
         )
 
     errors = []
-    top_ops_begin = None
+    top_ops_begins = []
     for m in _MV_BEGIN_RE.finditer(content):
         inner = m.group(1)
         km = _MV_KIND_ATTR_RE.search(inner)
         if km and km.group(1) == "top_ops":
-            top_ops_begin = m
-            break
+            top_ops_begins.append(m)
 
-    if top_ops_begin is None:
+    if not top_ops_begins:
         errors.append("No <!-- impact-begin kind=top_ops --> marker found")
-    else:
+    for top_ops_begin in top_ops_begins:
         end_after = _MV_END_RE.search(content, top_ops_begin.end())
         if end_after is None:
             errors.append("kind=top_ops marker has no matching <!-- impact-end -->")
@@ -1479,10 +1480,7 @@ def run(
                     "recommended_fix": "Fix pre-check gate failure before running evals",
                 }
             )
-        with open(results_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-            writer.writeheader()
-            writer.writerows(rows)
+        write_csv(results_path, rows, CSV_COLUMNS)
         return rows
 
     for i, (summary, func, rc, fix, mode_aware) in enumerate(EVAL_REGISTRY, start=1):
@@ -1504,10 +1502,7 @@ def run(
     for check_fn in _MULTI_EVAL_CHECKS:
         rows.extend(check_fn(output_dir, comparison_scope))
 
-    with open(results_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
+    write_csv(results_path, rows, CSV_COLUMNS)
     return rows
 
 

@@ -111,6 +111,14 @@ The orchestrator runs:
 - Prints `raw -> stems` counts and per-action tallies. Re-run after editing
   rules until the stem count is within budget.
 
+## Verify
+
+The orchestrator validates `stem_rules.json` (`validate_stem_rules`) before
+applying and returns any errors for you to fix and re-emit: an unknown `action`,
+an uncompilable `pattern`, a `collapse` `replacement` referencing a group the
+pattern does not define, an empty `note`, or a duplicate `pattern` (dead -- the
+first match wins). Keep each `note` a real one-line rationale.
+
 ## Return Value
 
 Return: `status`, `raw_unique_before`, `stem_unique_after`, `action_counts`

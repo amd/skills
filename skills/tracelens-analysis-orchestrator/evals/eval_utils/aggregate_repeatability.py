@@ -13,6 +13,7 @@ import os
 import re
 from collections import defaultdict
 
+from TraceLens.Agent.Analysis.utils import write_csv
 from TraceLens.PerfModel.utils import optional_int
 
 RESULTS_ROOT = os.environ.get(
@@ -577,14 +578,6 @@ EVAL_COLS = [
 ]
 
 
-def write_csv(path, rows, fieldnames):
-    with open(path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
-    print("  Written: {} ({} rows)".format(path, len(rows)))
-
-
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     print("Scanning: {}".format(RESULTS_ROOT))
@@ -593,19 +586,16 @@ def main():
 
     print("Part A: Aggregating eval_summary.csv files...")
     eval_rows = aggregate_eval_summaries(runs)
-    write_csv(os.path.join(OUTPUT_DIR, "aggregated_results.csv"), eval_rows, EVAL_COLS)
+    aggregated_path = os.path.join(OUTPUT_DIR, "aggregated_results.csv")
+    write_csv(aggregated_path, eval_rows, EVAL_COLS, verbose=True)
     summary_rows, summary_cols = build_pass_rate_summary(eval_rows)
-    write_csv(
-        os.path.join(OUTPUT_DIR, "pass_rate_summary.csv"), summary_rows, summary_cols
-    )
+    pass_rate_path = os.path.join(OUTPUT_DIR, "pass_rate_summary.csv")
+    write_csv(pass_rate_path, summary_rows, summary_cols, verbose=True)
 
     print("\nPart A2: Building run-level summary...")
     run_level_rows = build_run_level_summary(eval_rows)
-    write_csv(
-        os.path.join(OUTPUT_DIR, "run_level_summary.csv"),
-        run_level_rows,
-        RUN_LEVEL_COLS,
-    )
+    run_level_path = os.path.join(OUTPUT_DIR, "run_level_summary.csv")
+    write_csv(run_level_path, run_level_rows, RUN_LEVEL_COLS, verbose=True)
     catastrophic = [r for r in run_level_rows if r["is_catastrophic"]]
     if catastrophic:
         print(
@@ -618,27 +608,25 @@ def main():
 
     print("\nPart A3: Building failure nature summary...")
     failure_nature = build_failure_nature_summary(eval_rows, run_level_rows)
+    failure_nature_path = os.path.join(OUTPUT_DIR, "failure_nature_summary.csv")
     write_csv(
-        os.path.join(OUTPUT_DIR, "failure_nature_summary.csv"),
+        failure_nature_path,
         [failure_nature],
         ["catastrophic_pipeline", "stable", "flaky", "total"],
+        verbose=True,
     )
     print("  Failure nature: {}".format(failure_nature))
 
     print("\nPart A4: Building stability classification...")
     stability_rows, stability_cols, class_totals = build_stability_summary(eval_rows)
-    write_csv(
-        os.path.join(OUTPUT_DIR, "stability_summary.csv"),
-        stability_rows,
-        stability_cols,
-    )
+    stability_path = os.path.join(OUTPUT_DIR, "stability_summary.csv")
+    write_csv(stability_path, stability_rows, stability_cols, verbose=True)
     print("  Stability breakdown: {}".format(class_totals))
 
     print("\nPart B: Parsing analysis_stream.ndjson files...")
     stream_rows = aggregate_stream_diagnostics(runs)
-    write_csv(
-        os.path.join(OUTPUT_DIR, "stream_diagnostics.csv"), stream_rows, STREAM_COLS
-    )
+    stream_path = os.path.join(OUTPUT_DIR, "stream_diagnostics.csv")
+    write_csv(stream_path, stream_rows, STREAM_COLS, verbose=True)
 
     print("\n=== Summary ===")
     total_evals = sum(1 for r in eval_rows if r["result"] not in ("MISSING", ""))

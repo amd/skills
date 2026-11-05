@@ -43,10 +43,10 @@ Each P-item maps 1:1 to a `## Detailed Analysis` reasoning candidate at the same
 
 ```markdown
 ### P1: <Brief Title> (<Library>)            <!-- (<Library>) only on compute tier -->
-**Phase**: <phase>                           <!-- only when the finding has a phase -->
+**Node**: <node>                             <!-- only when the finding has a node -->
 **Insight**: [1 sentence — what's wrong]
 **Action**: [1-2 sentences — what to do]
-<!-- impact-begin kind=p_item low=<impact_score_low> mid=<impact_score> high=<impact_score_high> phase=<phase> -->
+<!-- impact-begin kind=p_item low=<impact_score_low> mid=<impact_score> high=<impact_score_high> node=<node> -->
 **Impact**: [impact_score: X.X, OR "Not quantifiable from trace data"]
 <!-- impact-end -->
 ```
@@ -55,7 +55,7 @@ Each P-item maps 1:1 to a `## Detailed Analysis` reasoning candidate at the same
 - **System tier**: omit the `(<Library>)` title suffix. Always emit `**Impact**: Not quantifiable from trace data` wrapped in `kind=p_item` markers with `low=null mid=null high=null`.
 - **Field labels are exact** — `**Insight**`, `**Action**`, `**Impact**`.
 - **`(<Library>)` suffix**: the single `category_findings[i].library` for this card (one library per finding by construction). Omit the parenthetical when the value is `Unknown`.
-- **Phase**: only when `category_findings[i].phase` is present (multi-trace standalone runs), emit the `**Phase**` line on the card and its Detailed Analysis block and the marker's `phase=`; omit all three otherwise. Do not repeat the phase in the title, insight text, or the Operation column.
+- **Node**: only when `category_findings[i].node` is present (multi-trace standalone runs), emit the `**Node**` line on the card and its Detailed Analysis block and the marker's `node=`; omit all three otherwise. Do not repeat the node in the title or the Operation column. In the Insight, quote percentages from `operations[i].percent_of_node` as `% of <node>`.
 - **Marker required** — see § Impact markers (REQUIRED). The `low`/`mid`/`high` attributes carry the raw `impact_score_low/impact_score/impact_score_high` values from `category_findings[i]`. For non-quantifiable cards (system tier) use `low=null mid=null high=null`.
 
 ---
@@ -70,7 +70,7 @@ with an HTML comment and an `####` heading:
 
 <!-- reasoning-candidate tier=<compute|system> rank=<N> -->
 #### <insight_title>
-**Phase**: <phase>                           <!-- only when the finding has a phase -->
+**Node**: <node>                             <!-- only when the finding has a node -->
 
 **Identification:** …
 
@@ -164,7 +164,7 @@ inside `## Detailed Analysis` blocks.
 |-----------|--------|-----------------------------------------|-------------|-----------|------|-------|----------|------------|-------|
 ```
 
-**All ten columns above are mandatory.** Never drop a column because some or all of its values are missing — render `—` in any cell whose value is null/absent and keep the column. The header row of every `**Data:**` table must contain exactly these ten column names in this order. (Agents may append extra columns at the end when needed, e.g. `Sub-Category` in the generic-op analyzer, but must not remove or reorder the ten standard columns.)
+**All ten columns above are mandatory.** Never drop a column because some or all of its values are missing — render `—` in any cell whose value is null/absent and keep the column. The header row of every `**Data:**` table must contain exactly these ten column names in this order (unless a mapping below renames one). (Agents may append extra columns at the end when needed, e.g. `Sub-Category` in the generic-op analyzer, but must not remove or reorder the ten standard columns.)
 
 **Per-row impact marker (REQUIRED).** Immediately after the last row of each compute-tier `**Data:**` table, emit one paired marker carrying the per-row impact scores as a CSV, in table order:
 
@@ -181,7 +181,7 @@ inside `## Detailed Analysis` blocks.
 - **Kernel Path**: `operations[i].launcher_path`. Relative Python path that launched the kernel (e.g. `sglang/srt/layers/quantization/fp8_utils.py(549): aiter_w8a8_block_fp8_linear`). **Copy the value exactly as-is — do NOT truncate, shorten, or extract just the function name.** `—` when absent.
 - **Kernel Name**: `operations[i].kernel_name_trunc`. Truncated GPU kernel name(s) launched by this operation. For multi-kernel ops, formatted as `Kernel 1: <name><br>Kernel 2: <name>`. **Copy the value exactly as-is.** `—` when absent. (The full untruncated name is available in `operations[i].kernel_name` if needed for identification.)
 - **Time (ms)**: `operations[i].time_ms` — kernel time in milliseconds.
-- **%E2E**: `operations[i].percent_of_total` — kernel time as % of E2E GPU time. `—` when null. (`percent_of_category` is still in the JSON for screening thresholds but no longer rendered.)
+- **%E2E**: `operations[i].percent_of_total` — kernel time as % of E2E GPU time. `—` when null. When the finding has a `node`, the header is `% of Node` and the value is `operations[i].percent_of_node`. (`percent_of_category` is still in the JSON for screening thresholds but no longer rendered.)
 - **Count**: `operations[i].count` — total invocations, not unique signatures. `—` when absent.
 - **FLOPS/Byte**: `operations[i].efficiency.flops_per_byte` — note the nested path under `efficiency`, NOT a top-level field. `—` when null.
 - **Efficiency**: `operations[i].efficiency.efficiency_percent`, formatted by `bound_type`:
@@ -254,7 +254,7 @@ The set of P-items is decided by `category_findings[]` alone — `MIN_PITEM_IMPA
 | `rank` | Card order within your category (1 = highest impact). Also the `rank=` value in `<!-- reasoning-candidate -->`. |
 | `bound_type` | `compute` \| `memory`. Selects the matching Action Prose Guidance row. |
 | `library` | One per finding. Drives the `(<Library>)` title suffix. |
-| `phase` | Multi-trace standalone runs only. |
+| `node` | Multi-trace standalone runs only. |
 | `eff_bucket` | Roofline-efficiency band: `"0-30"`, `"30-60"`, `"60-100"`, or `"unknown"` (standalone); `"all"` (comparative). Members within a finding share the same band. |
 | `impact_score` / `_low` / `_high` | Group-summed % of E2E. Render verbatim into `kind=p_item` and `kind=detail_estimate` markers. |
 | `estimate_method` | `"quantified"` (impact from a perf model — standalone roofline gap or comparative t2/t1 ratio) or `"heuristic"` (op has no perf model; impact estimated from E2E share — see below). |
@@ -280,6 +280,9 @@ normal `kind=detail_estimate` bullets) with two additions:
 ```markdown
 > **Warning — estimated:** No performance model for this op; impact is derived from its E2E GPU-time share (<percent_of_total>%), not a gap projection.
 ```
+
+When the finding has a `node`, write `its share of all nodes' GPU time` in place of `its E2E GPU-time share`.
+
 - In the `## Detailed Analysis` `**Data:**` row, render `—` for `Efficiency` and `Bound`.
 
 ### Rendering in `## Detailed Analysis` (compute tier)
@@ -288,7 +291,7 @@ Two bullets — low and high. Wrap in `kind=detail_estimate` markers (see
 § Impact markers).
 
 ```markdown
-<!-- impact-begin kind=detail_estimate low=<impact_score_low> mid=<impact_score> high=<impact_score_high> -->
+<!-- impact-begin kind=detail_estimate low=<impact_score_low> mid=<impact_score> high=<impact_score_high> node=<node> -->
 - Low end impact_score: <impact_score_low>
 - High end impact_score: <impact_score_high>
 <!-- impact-end -->
@@ -309,14 +312,14 @@ block deterministically without re-parsing prose.
 <!-- impact-end -->
 ```
 
-The block between them is exactly the `impact_score`-based markdown you would otherwise emit.
+The block between them is exactly the `impact_score`-based markdown you would otherwise emit. Always put a space before the closing `-->` (`node=prefill -->`).
 
 ### `kind` values you must emit
 
 | `kind` | Where | Required attributes | Optional attributes |
 |--------|-------|--------------------|---------------------|
-| `p_item` | Around every P-item `**Impact**` line in `## Recommendations`. | `low`, `mid`, `high` (all three; use `null` only for system-tier non-quantifiable); `phase` when the finding has one. | `category` is reserved for the orchestrator template; sub-agents do **not** emit it. |
-| `detail_estimate` | Around the two-bullet `Low end ... / High end ...` block under `**Impact estimate:**` in each `## Detailed Analysis` candidate. Skip only for system-tier non-quantifiable estimates. | `low`, `mid`, `high` (impact_score values, % of E2E). | none |
+| `p_item` | Around every P-item `**Impact**` line in `## Recommendations`. | `low`, `mid`, `high` (all three; use `null` only for system-tier non-quantifiable); `node` when the finding has one. | `category` is reserved for the orchestrator template; sub-agents do **not** emit it. |
+| `detail_estimate` | Around the two-bullet `Low end ... / High end ...` block under `**Impact estimate:**` in each `## Detailed Analysis` candidate. Skip only for system-tier non-quantifiable estimates. | `low`, `mid`, `high` (impact_score values, % of E2E); `node` when the finding has one. | none |
 | `op_row` | After the last row of each compute-tier `**Data:**` table (see § Operations Table Schema → Per-row impact marker). | `rank`, `impacts` (CSV of per-row `impact_score`, one per data row in table order; `—` for null). | none |
 
 ### Value-source rule

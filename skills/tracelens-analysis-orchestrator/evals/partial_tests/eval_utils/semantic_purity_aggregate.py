@@ -43,6 +43,8 @@ import re
 import statistics
 import sys
 
+from TraceLens.Agent.Analysis.utils import write_csv
+
 CSV_COLUMNS = [
     "index",
     "category",
@@ -224,10 +226,7 @@ def main():
             continue
         result = aggregate_one(args.results_root, test_id)
         out_path = os.path.join(case_dir, "semantic_purity_aggregate_verdict.csv")
-        with open(out_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-            writer.writeheader()
-            writer.writerow(result)
+        write_csv(out_path, [result], CSV_COLUMNS)
         print(f"[{test_id}] {result['result']}: {result['details']}")
         print(f"  -> {out_path}")
         if result["result"] != "PASS":

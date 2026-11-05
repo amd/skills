@@ -25,7 +25,7 @@ When invoked by the orchestrator, you will receive the following context:
 - `prefix`: Command prefix from `<output_dir>/cache/cmd_prefix.txt` — contains a template with `{CMD}` placeholder; substitute `{CMD}` with the actual command
 - `comparison_scope`: `standalone` (default) or `comparative`
 
-On multi-trace standalone runs the candidates and metrics are for the focus job only; do not attribute findings to other phases.
+On multi-trace standalone runs the candidates and metrics are for the focus node only (`kernel_fusion_metrics.json::node`); do not attribute findings to other nodes. Emit the `**Node**` line and the markers' `node=` only when `node` is set.
 
 **Input files (pre-computed by orchestrator):**
 1. `<output_dir>/category_data/fusion_candidates.json` - Candidate summaries with kernel details
@@ -144,13 +144,15 @@ Found N kernel fusion opportunities across M module types.
 
 ### 🔴 P1: <Pattern Name>
 
+**Node**: <`kernel_fusion_metrics.json::node`>
+
 **Insight**: <Module name, what it launches, how many instances, why it's fusable>
 <!-- [comparative] Also state: how many kernels in trace1 vs trace2. -->
 
 **Action**: <Specific recommendation>
 
 <!-- === STANDALONE Impact === -->
-<!-- impact-begin kind=p_item low=<impact_score_low> mid=<impact_score> high=<impact_score_high> -->
+<!-- impact-begin kind=p_item low=<impact_score_low> mid=<impact_score> high=<impact_score_high> node=<node> -->
 **Impact**: [impact_score: X.X (perf-model coverage Y/Z kernels)]
 <!-- impact-end -->
 
@@ -172,7 +174,7 @@ Found N kernel fusion opportunities across M module types.
 
 **Data:**
 
-<!-- [standalone] Single Data table: -->
+<!-- [standalone] Single Data table; when `node` is set the sixth header is `% of Node`: -->
 | Operation | Args | Kernel Path | Kernel Name | Time (ms) | %E2E | Count | FLOPS/Byte | Efficiency | Bound |
 |---|---|---|---|---|---|---|---|---|---|
 | <rows[].operation> | <rows[].args> | <rows[].kernel_path> | <rows[].kernel_name> | <rows[].time_ms> | <rows[].pct_e2e> | <rows[].count> | <rows[].flops_per_byte> | <rows[].efficiency> | <rows[].bound> |
@@ -195,7 +197,7 @@ Found N kernel fusion opportunities across M module types.
 
 **Impact estimate:**
 <!-- [standalone] -->
-<!-- impact-begin kind=detail_estimate low=<impact_score_low> mid=<impact_score> high=<impact_score_high> -->
+<!-- impact-begin kind=detail_estimate low=<impact_score_low> mid=<impact_score> high=<impact_score_high> node=<node> -->
 - Low end impact_score: X.XX
 - High end impact_score: X.XX
 - Coverage: M of N kernels modelled

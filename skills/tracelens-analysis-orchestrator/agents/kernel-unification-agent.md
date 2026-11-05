@@ -6,7 +6,7 @@ See LICENSE for license information.
 
 ---
 name: kernel-unification-agent
-description: Name-first cross-trace kernel-name unification. Reads kernel_unification_context.json (unique kernel names from both graph-mode traces with per-name stats) and writes kernel_unification_map.json -- a conservative map of names that are certainly the same operation across traces. Establishes matching anchors; does not resolve every ambiguity.
+description: Name-first cross-trace kernel-name unification. Reads kernel_unification_context.json (unique kernel names from both graph-mode traces with per-name stats) and writes kernel_unification_decisions.json -- a conservative, id-referenced set of candidate pairs that are certainly the same operation across traces. Establishes matching anchors; does not resolve every ambiguity.
 model: claude-opus-4-8
 ---
 
@@ -33,9 +33,11 @@ Do NOT re-read it from disk. Key fields:
 - `key_level` -- `raw_name` (map raw kernel names) or `stem` (stem
   preprocessing was already applied; map the stems shown).
 - `only_in_<name_a>`, `only_in_<name_b>` -- names present in only one trace.
-  **These are your unification candidates.** Each entry has `name`,
-  `kernel_count`, `total_dur_us`, `perf_categories`, and a `sample_input_dims`
-  (and `sample_raw_names` when `key_level` is `stem`).
+  **These are your unification candidates.** Each entry has a short `id` (`a0`,
+  `b1`, ...), plus `name`, `kernel_count`, `total_dur_us`, `perf_categories`,
+  and a `sample_input_dims` (and `sample_raw_names` when `key_level` is `stem`).
+  **Reference candidates by their `id` in your output -- never retype the
+  `name`.**
 - `in_both` -- names already identical in both traces. They are unified by
   default; **do not** add map entries for them.
 - `summary` -- counts for orientation.
@@ -68,50 +70,58 @@ in `only_in_<name_b>` when you are **certain** they are the same operation.
 3. **Preserve granularity.** Do not merge two functionally distinct kernels
    because their names look similar. Do not collapse a family that a later
    analysis stage may want to keep separate (e.g. distinct attention variants).
-4. **Same value on both sides.** For a matched pair, use the **same** unified
-   string as the value in both `map_a` and `map_b`. Choose a short, neutral,
-   vendor-agnostic name (e.g. `moe_attn`, `qkv_projection`, `allreduce`).
-5. **Exact keys.** Keys must be copied verbatim from the context lists
-   (`only_in_<name>` entries' `name` field). Every key must exist in that
-   trace's list.
+4. **Shared label per pair.** Give each matched pair a single `label` -- a
+   short, neutral, vendor-agnostic name (e.g. `moe_attn`, `qkv_projection`,
+   `allreduce`). The shared label is what unifies the two kernels.
+5. **Reference ids, never names.** Identify each candidate by its `id` from the
+   context (`a3`, `b7`); every id must exist in that trace's `only_in_<name>`
+   list. Do not retype kernel names.
 6. **perf_category is not yours to change.** You only unify names.
 
-## Output file: `kernel_unification_map.json`
+## Output file: `kernel_unification_decisions.json`
 
-Write to the output directory. Exact shape:
+Write to the output directory. Reference candidates by `id`:
 
 ```json
 {
-  "name_a": "(platform 1 name)",
-  "name_b": "(platform 2 name)",
-  "map_a": {
-    "moe_attn_vllm": "moe_attn",
-    "(vendor1_gemm_name)_(shape1)": "expert_gemm"
-  },
-  "map_b": {
-    "sglang_moe_attention": "moe_attn",
-    "(vendor2_gemm_name)_(shape1)": "expert_gemm"
-  }
+  "pairs": [
+    {"a": "a0", "b": "b3", "label": "moe_attn"},
+    {"a": "a5", "b": "b8", "label": "expert_gemm"}
+  ],
+  "renames_a": [],
+  "renames_b": []
 }
 ```
 
-Using the same `(shape1)` on both sides shows *why* this pairs: two vendors'
+Pairing `a5`/`b8` under `expert_gemm` shows *why* this unifies: two vendors'
 differently-mangled names for the same GEMM tile shape/role -- not license to
-collapse every GEMM in a trace into one bucket; kernels with distinct shapes
-or otherwise clearly serving distinct per-layer roles should stay separate
-keys.
+collapse every GEMM in a trace into one bucket; kernels with distinct shapes or
+otherwise clearly serving distinct per-layer roles should stay separate pairs.
 
-- `map_a` keys are `name_a` names; `map_b` keys are `name_b` names.
-- A pair is unified when a `map_a` value equals a `map_b` value.
-- A one-sided rename (a name you want to relabel but that has no counterpart)
-  is allowed but usually unnecessary -- prefer leaving it unmapped.
-- Either map may be empty if no confident unification exists on that side.
+- `pairs` -- each pairs one `only_in_<name_a>` candidate (`a` id) with one
+  `only_in_<name_b>` candidate (`b` id) under a shared `label`. This is the
+  normal case and establishes the anchor.
+- `renames_a` / `renames_b` -- optional one-sided relabels
+  (`{"id": "a4", "label": "..."}`) for a candidate with no counterpart. Usually
+  unnecessary -- prefer leaving such a candidate unmapped.
+- Each id is used at most once. Omit uncertain candidates entirely; they fall
+  back to their raw name / stem and remain unmatched.
+- `pairs` may be empty if no confident unification exists.
 
 ## Apply + verify
 
-The orchestrator runs:
+The orchestrator validates your decisions, expands the ids back to names, then
+applies the resulting map:
 
 ```bash
+# 1. Validate (retry gate) -- validate_kernel_unification_map(decisions, context).
+#    On failure the orchestrator returns the errors for you to fix and re-emit.
+# 2. Expand ids -> names:
+<prefix> python3 TraceLens/Agent/Analysis/semantic_analyses/kernel_unification.py expand-map \
+    --decisions <output_dir>/work/kernel_unification_decisions.json \
+    --context <output_dir>/work/kernel_unification_context.json \
+    -o <output_dir>/work/kernel_unification_map.json
+# 3. Apply:
 <prefix> python3 TraceLens/Agent/Analysis/semantic_analyses/kernel_unification.py apply-map \
     --labels-a <dir_a>/semantic_labels.json \
     --labels-b <dir_b>/semantic_labels.json \
@@ -120,12 +130,12 @@ The orchestrator runs:
     [--raw-to-stem <output_dir>/work/raw_to_stem.json]   # only if stem preprocessing was used
 ```
 
-This writes the unified name into each kernel's `semantic_block` field (default
-= raw name / stem when the map has no entry) and prints the resulting shared /
+Apply writes the unified name into each kernel's `semantic_block` field (default
+= raw name / stem when no pair covers it) and prints the resulting shared /
 one-sided vocabulary counts.
 
 ## Return Value
 
-Return: `status` (SUCCESS/ERROR), `pairs_unified` (count of matched values),
-`names_mapped_a`, `names_mapped_b`, `shared_blocks_after_apply`, and any names
-you deliberately left unmapped due to uncertainty (with a one-line reason).
+Return: `status` (SUCCESS/ERROR), `pairs_unified` (count of pairs), `renames_a`,
+`renames_b`, and any candidates you deliberately left unmapped due to
+uncertainty (with a one-line reason).
