@@ -49,7 +49,7 @@ also runs the roofline benchmarks.
 - `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
   each kernel, so it only helps when every profiled kernel is dispatched many
   times. Pair it with `-k`. See Iteration multiplexing in
-  [profile mode](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+  [profile mode](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 2. Open the level the chart points at
@@ -83,15 +83,15 @@ architecture with `rocprof-compute --list-blocks <arch>`.
 Each level has its own reference, with the counters, the formulas, and what
 they mean:
 
-- [Vector L1 cache](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/cdna/vector-l1-cache.rst)
-- [L2 cache](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/cdna/l2-cache.rst)
-- [Local Data Share](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/cdna/local-data-share.rst)
-- [Infinity Fabric transactions](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/tutorial/includes/infinity-fabric-transactions.rst)
-- [Vector memory operation counting](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/tutorial/includes/vector-memory-operation-counting.rst)
-- [LDS examples](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/tutorial/includes/lds-examples.rst)
+- [Vector L1 cache](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/conceptual/cdna/vector-l1-cache.rst)
+- [L2 cache](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/conceptual/cdna/l2-cache.rst)
+- [Local Data Share](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/conceptual/cdna/local-data-share.rst)
+- [Infinity Fabric transactions](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/tutorial/includes/infinity-fabric-transactions.rst)
+- [Vector memory operation counting](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/tutorial/includes/vector-memory-operation-counting.rst)
+- [LDS examples](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/tutorial/includes/lds-examples.rst)
 
 Client APUs use a different hierarchy; see the
-[RDNA performance model](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/rdna/rdna-performance-model.rst)
+[RDNA performance model](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/conceptual/rdna/rdna-performance-model.rst)
 for GL0, GL1, and GL2.
 
 Read hit rates and utilizations against the `Percent of Peak` and `Peak`
@@ -114,7 +114,7 @@ What usually follows from what:
 
 A guided breakdown that walks the bandwidth tree and names the limiting level.
 It is experimental and currently shipped for gfx950 only; see
-[memory bandwidth analysis](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/membw_analysis.rst). It needs
+[memory bandwidth analysis](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/how-to/membw_analysis.rst). It needs
 only the memory chart (block 3) and block 30, so profile only those two blocks:
 
 ```bash

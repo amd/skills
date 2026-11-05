@@ -44,7 +44,7 @@ rocprof-compute --specs
 it cannot succeed when they fail.
 
 Supported accelerators are listed in
-[compatible-accelerators.rst](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
+[compatible-accelerators.rst](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
 Not every feature works on every architecture. Check there before promising a
 result, and let the tool's own error message stand when a feature is
 unavailable.
@@ -83,10 +83,10 @@ To restrict which GPU the application uses, set `HIP_VISIBLE_DEVICES`. Under
 Slurm, derive it from `ROCR_VISIBLE_DEVICES`, not from `SLURM_STEP_GPUS`; the
 indices differ.
 
-See [profile mode](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for output layout,
+See [profile mode](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for output layout,
 filtering, and the full option list. To profile a process that is already
 running, see
-[live attach and detach](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/live_attach_detach.rst).
+[live attach and detach](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/how-to/live_attach_detach.rst).
 
 ### Collect only what the question needs
 
@@ -105,7 +105,7 @@ also runs the roofline benchmarks.
 - `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
   each kernel, so it only helps when every profiled kernel is dispatched many
   times. Pair it with `-k`. See Iteration multiplexing in
-  [profile mode](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+  [profile mode](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 4. Find the hot kernel
@@ -174,7 +174,7 @@ table. When theoretical occupancy is itself low, the limit is VGPR, SGPR, or
 LDS allocation. Scratch traffic points at register spilling. Low occupancy is
 not a defect when the kernel already saturates its limiting resource. Worked
 examples are in
-[occupancy-limiters-example.rst](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/tutorial/includes/occupancy-limiters-example.rst).
+[occupancy-limiters-example.rst](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/tutorial/includes/occupancy-limiters-example.rst).
 
 ### Scheduler and pipeline limits
 
@@ -190,7 +190,7 @@ There is no single stall panel. Stall counters sit in the block that owns the
 hardware: LDS stalls in `lds`, cache stalls in `vl1d` and `l2`, fabric stalls
 in `l2_per_channel`. Open the block the Speed-of-Light result points at, and
 read what each counter means in the
-[performance model](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/performance-model.rst). Ground every
+[performance model](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/conceptual/performance-model.rst). Ground every
 recommendation in a number you read from the report.
 
 ## 6. Normalization
@@ -227,7 +227,7 @@ settings without stating that those differ.
 Terminal output is the default. Only choose a format when the user asks to save
 or export. `--output-format` takes `txt`, `csv`, or `db`, each of which
 disables terminal output, and `--output-name` sets the file name. See
-[analysis output format](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst).
+[analysis output format](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst).
 
 ## 9. When something looks wrong
 
@@ -240,4 +240,4 @@ disables terminal output, and `--output-name` sets the file name. See
 | Roofline missing | not collected, or unsupported on this architecture |
 
 Stop and report permission, firmware, and ROCm version failures instead of
-working around them. More in the [FAQ](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/reference/faq.rst).
+working around them. More in the [FAQ](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/reference/faq.rst).

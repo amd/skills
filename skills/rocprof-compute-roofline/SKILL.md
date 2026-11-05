@@ -31,12 +31,12 @@ still succeeds, so a missing roofline there is not a mistake in how the profile
 was run. Never tell an MI100 user to re-profile without `--no-roof`; use
 Speed-of-Light and the `rocprof-compute-memory` skill instead. Confirm support
 for a new architecture against
-[compatible-accelerators.rst](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
+[compatible-accelerators.rst](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
 
 `--device` selects the GPU for the roofline microbenchmarks. It does not
 choose which GPU the application runs on; use `HIP_VISIBLE_DEVICES` for that.
 
-See [standalone roofline](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for `--roof-only`
+See [standalone roofline](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for `--roof-only`
 and `--bench-only`, which run the microbenchmarks without profiling an
 application.
 
@@ -57,7 +57,7 @@ also runs the roofline benchmarks.
 - `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
   each kernel, so it only helps when every profiled kernel is dispatched many
   times. Pair it with `-k`. See Iteration multiplexing in
-  [profile mode](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+  [profile mode](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 2. Read the table
@@ -113,7 +113,7 @@ caches are absorbing the traffic.
 
 `--view table` prints one table for all kernels together instead of one per
 kernel. To compare many kernels, write the
-[analysis database](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst) with
+[analysis database](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst) with
 `--output-format db` and query it with SQL.
 
 ## 4. When roofline data is missing
@@ -125,4 +125,4 @@ kernel. To compare many kernels, write the
 | `roofline.csv` absent from the workload directory | the benchmark did not complete; check the profile log |
 
 The concepts behind the ceilings are in the
-[performance model](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/performance-model.rst).
+[performance model](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/conceptual/performance-model.rst).

@@ -92,7 +92,7 @@ there, and the fix is usually coalescing, prefetching, or more independent work
 between the load and its use.
 
 Stall reasons and what each one implies are listed in
-[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst). Do not interpret a stall
+[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst). Do not interpret a stall
 reason from host-trap data; it does not record one.
 
 ## 5. Export annotated disassembly
@@ -115,4 +115,4 @@ accepts, rather than drawing conclusions from a handful of samples.
 
 For multi-process workloads, keep each process or rank separate; see the
 multi-process sections of
-[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst).
+[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst).

@@ -46,7 +46,7 @@ also runs the roofline benchmarks.
 - `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
   each kernel, so it only helps when every profiled kernel is dispatched many
   times. Pair it with `-k`. See Iteration multiplexing in
-  [profile mode](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+  [profile mode](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 2. Read it
@@ -77,11 +77,11 @@ the neighbouring kernels, and a known-good baseline for the same workload.
 ## 3. Understand the metrics
 
 Each metric's definition and the counters behind it are in
-[system-speed-of-light.rst](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/cdna/system-speed-of-light.rst)
+[system-speed-of-light.rst](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/conceptual/cdna/system-speed-of-light.rst)
 for CDNA accelerators and
-[the RDNA equivalent](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/rdna/system-speed-of-light.rst)
+[the RDNA equivalent](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/conceptual/rdna/system-speed-of-light.rst)
 for client APUs. The whole metric hierarchy is in the
-[performance model](https://github.com/ROCm/rocm-systems/blob/54f50a339bf1a6a07baae93e86461db7a3aad316/projects/rocprofiler-compute/docs/conceptual/performance-model.rst).
+[performance model](https://github.com/ROCm/rocm-systems/blob/eba5fda368e547935de774dbb27d90e9527abbda/projects/rocprofiler-compute/docs/conceptual/performance-model.rst).
 
 ## 4. Compute Speed-of-Light
 
