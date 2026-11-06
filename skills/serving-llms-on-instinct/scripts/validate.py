@@ -39,9 +39,10 @@ def _run(cmd, host, user, port, timeout=20):
                 "-o", "ConnectTimeout=15",
                 "-o", "BatchMode=yes",
                 "-o", "LogLevel=ERROR",
-                "-p", str(port),
                 ssh_target, cmd,
             ]
+            if port:  # an explicit -p would override a Port set in ~/.ssh/config
+                ssh[1:1] = ["-p", str(port)]
             r = subprocess.run(ssh, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
         return r.returncode, r.stdout.strip(), r.stderr.strip()
     except subprocess.TimeoutExpired:
@@ -64,7 +65,7 @@ def main():
 
     host = host or os.environ.get("ROCM_SSH_HOST", "")
     user = user or os.environ.get("ROCM_SSH_USER", "")
-    port = args.port or int(os.environ.get("ROCM_SSH_PORT", "22"))
+    port = args.port or int(os.environ.get("ROCM_SSH_PORT") or 0)
 
     issues = []
     fixes_applied = []
