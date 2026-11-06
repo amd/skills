@@ -62,10 +62,10 @@ jobs:
       skills: ${{ steps.list.outputs.skills }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
       - name: List skills declared in .github/federation.json
         id: list
@@ -88,10 +88,10 @@ jobs:
         skill: ${{ fromJSON(needs.plan.outputs.skills) }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
       # `--only` leaves every other skill untouched, so this job's diff is this
       # skill's alone.
@@ -138,7 +138,7 @@ jobs:
       - name: Open pull request
         id: pr
         if: ${{ steps.changes.outputs.changed == 'true' }}
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           base: ${{ env.BASE_BRANCH }}
           branch: ${{ env.PR_BRANCH_PREFIX }}${{ matrix.skill }}
