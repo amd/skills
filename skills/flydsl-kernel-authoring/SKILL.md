@@ -437,7 +437,7 @@ See [references/environment-and-debugging.md](references/environment-and-debuggi
 2. **Raw `buffer_load` offset**: the `offset` parameter is in ELEMENTS, not bytes.
    The raw intrinsics live in `kernels/common/buffer_ops.py`, not `flydsl.expr`.
 
-3. **Cache stale after code changes**: The disk cache auto-invalidates on source/closure changes. Only set `FLYDSL_RUNTIME_ENABLE_CACHE=0` or clear `~/.flydsl/cache/` if you changed C++ passes or non-closure helpers.
+3. **Cache stale after code changes**: The disk cache is keyed by the traced MLIR and the toolchain fingerprint, so Python edits and rebuilt C++ passes invalidate it. Set `FLYDSL_RUNTIME_ENABLE_CACHE=0` or clear `~/.flydsl/cache/` only when debugging a suspected stale artifact.
 
 4. **LDS overflow**: Check capacity (64KB on gfx942, 160KB on gfx950). `SharedAllocator` sizes the LDS global for you; the compiler errors if a static allocation exceeds the arch limit.
 
