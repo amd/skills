@@ -113,6 +113,15 @@
           "as": "rocprofiler-systems-instrumenting-binaries"
         }
       ]
+    },
+    {
+      "repo": "amd-enterprise-ai/amd-eai-apps",
+      "license": "MIT",
+      "skills": [
+        {
+          "path": ".agents/skills/guided-workbench-install"
+        }
+      ]
     }
   ]
 }
