@@ -6,6 +6,11 @@
       "product_release_owner": "jeffdaily"
     },
     {
+      "repo": "amd-enterprise-ai/aim-build",
+      "engineering_owner": "bjorn-amd",
+      "product_release_owner": "reiserm"
+    },
+    {
       "repo": "amd-enterprise-ai/amd-eai-apps",
       "engineering_owner": "kevinkswSiloAI",
       "product_release_owner": "DavidPSilo"
