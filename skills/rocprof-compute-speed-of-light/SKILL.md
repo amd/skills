@@ -11,6 +11,36 @@ says whether a kernel is near any limit at all.
 
 Run `rocprof-compute analyze --help` before choosing flags.
 
+## Before you start
+
+If `command -v rocprof-compute` finds the tool, skip this section.
+
+Otherwise, check that ROCm and a GPU are present:
+
+```bash
+rocminfo
+amd-smi list
+```
+
+If either command fails, ROCm is not installed or no GPU is visible. Stop and
+point the user to "Install the ROCm Core SDK" in the
+[install guide](https://github.com/ROCm/rocm-systems/blob/ebf465e112ae1ca99a2e6e45de06c0ad84388439/projects/rocprofiler-compute/docs/install/core-install.rst). Installing rocprof-compute
+alone does not help.
+
+Check the GPU against
+[compatible accelerators](https://github.com/ROCm/rocm-systems/blob/ebf465e112ae1ca99a2e6e45de06c0ad84388439/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
+The table lists product families, so match the `Marketing Name` that `rocminfo`
+prints, and use the `gfx` name to confirm. If the GPU is not supported, stop and
+tell the user.
+
+Then follow "Install the analyze mode dependencies" in the
+[install guide](https://github.com/ROCm/rocm-systems/blob/ebf465e112ae1ca99a2e6e45de06c0ad84388439/projects/rocprofiler-compute/docs/install/core-install.rst), which installs
+rocprof-compute in a virtual environment of its own. Use the nightly index so the
+version matches these skills, and confirm with
+`rocprof-compute analyze --verify-deps`. Call that environment's
+`rocprof-compute` by its full path, so the application keeps running with its own
+Python.
+
 ## 1. Get the panel
 
 ```bash
@@ -46,7 +76,7 @@ also runs the roofline benchmarks.
 - `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
   each kernel, so it only helps when every profiled kernel is dispatched many
   times. Pair it with `-k`. See Iteration multiplexing in
-  [profile mode](https://github.com/ROCm/rocm-systems/blob/715f0fc8ddac70422223e60e917621bf98788a8d/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+  [profile mode](https://github.com/ROCm/rocm-systems/blob/ebf465e112ae1ca99a2e6e45de06c0ad84388439/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 2. Read it
@@ -77,11 +107,11 @@ the neighbouring kernels, and a known-good baseline for the same workload.
 ## 3. Understand the metrics
 
 Each metric's definition and the counters behind it are in
-[system-speed-of-light.rst](https://github.com/ROCm/rocm-systems/blob/715f0fc8ddac70422223e60e917621bf98788a8d/projects/rocprofiler-compute/docs/conceptual/cdna/system-speed-of-light.rst)
+[system-speed-of-light.rst](https://github.com/ROCm/rocm-systems/blob/ebf465e112ae1ca99a2e6e45de06c0ad84388439/projects/rocprofiler-compute/docs/conceptual/cdna/system-speed-of-light.rst)
 for CDNA accelerators and
-[the RDNA equivalent](https://github.com/ROCm/rocm-systems/blob/715f0fc8ddac70422223e60e917621bf98788a8d/projects/rocprofiler-compute/docs/conceptual/rdna/system-speed-of-light.rst)
+[the RDNA equivalent](https://github.com/ROCm/rocm-systems/blob/ebf465e112ae1ca99a2e6e45de06c0ad84388439/projects/rocprofiler-compute/docs/conceptual/rdna/system-speed-of-light.rst)
 for client APUs. The whole metric hierarchy is in the
-[performance model](https://github.com/ROCm/rocm-systems/blob/715f0fc8ddac70422223e60e917621bf98788a8d/projects/rocprofiler-compute/docs/conceptual/performance-model.rst).
+[performance model](https://github.com/ROCm/rocm-systems/blob/ebf465e112ae1ca99a2e6e45de06c0ad84388439/projects/rocprofiler-compute/docs/conceptual/performance-model.rst).
 
 ## 4. Compute Speed-of-Light
 

@@ -1,10 +1,10 @@
 {
   "source": "rocm-rocm-systems",
   "repo": "ROCm/rocm-systems",
-  "ref": "develop",
-  "commit": "715f0fc8ddac70422223e60e917621bf98788a8d",
+  "ref": "users/vedithal-amd/rocprof-compute-skills-install-check",
+  "commit": "ebf465e112ae1ca99a2e6e45de06c0ad84388439",
   "path": "projects/rocprofiler-compute/skills/rocprof-compute-speed-of-light",
   "license": "MIT",
-  "content_hash": "6e95144fc27a221b1d6b996425704308ed4d9f8af294f342e12df81e568d2c8e",
-  "imported_at": "2026-11-09T17:50:40Z"
+  "content_hash": "846aeabf5b7cb88a07c742bd4e80646957a10ecb58485888d2e2513b6781638f",
+  "imported_at": "2026-11-09T18:28:59Z"
 }
