@@ -9,6 +9,16 @@
       "id": "rocm-current-cli-carries-on",
       "cli": "current",
       "symptom": "hipErrorNoBinaryForGpu: Unable to find code object for all current devices!"
+    },
+    {
+      "id": "rocm-vllm-oom-at-startup",
+      "cli": "current",
+      "symptom": "vLLM: torch.OutOfMemoryError: HIP out of memory. Tried to allocate 2.00 GiB"
+    },
+    {
+      "id": "rocm-vllm-import-error",
+      "cli": "current",
+      "symptom": "ImportError: libtorch_cuda.so: cannot open shared object file: No such file or directory"
     }
   ]
 }
