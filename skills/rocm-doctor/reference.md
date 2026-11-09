@@ -16,7 +16,7 @@ tooling.
 - It's a general system inspector, so it **always exits 0**. The verdict is the
   `status` field: `ok` · `no-amd-gpu` · `wsl` · `unsupported-os` · `degraded`.
 
-### `rocm diagnose [--symptom "<text>"] [--top N] [--json] [--distro [NAME]] [--model REF]`
+### `rocm diagnose [--symptom "<text>"] [--top N] [--json] [--distro [NAME]] [--model REF [--context-size N] [--kv-cache-type f16|q8_0|q4_0]]`
 
 Match the host + symptom against the closed catalog. **Always exits 0**; read
 the result from `--json`:
@@ -48,14 +48,48 @@ the result from `--json`:
   nothing was checked — not a clean bill of health.
 - `route_when_no_match` — `{ target, url }` upstream tracker to use when `has_match` is false.
 - `model` — set only when `--model <ref>` was passed; otherwise not set. Answers
-  "will this curated model run here" from the recipe catalog and this host's
-  GPU/RAM, without downloading anything: `{ verdict, evidence[], engine,
-  required_gpu_memory_gib, available_gpu_memory_gib, alternatives[],
-  undetermined_reason, fix }`. `verdict` is one of `ready`, `degraded`,
+  "will this model run here", without downloading the weights: for a curated
+  model from the recipe catalog and this host's GPU/RAM, and for a GGUF outside
+  the catalog with an `estimate` from its file header (below). Its fields:
+  `{ verdict, evidence[], engine, required_gpu_memory_gib,
+  available_gpu_memory_gib, alternatives[], undetermined_reason, fix }`. `verdict` is one of `ready`, `degraded`,
   `blocked`, `undetermined` — treat `undetermined` as "the CLI could not find
   out", never as evidence the model is incompatible. `--model` is refused
   together with `--distro`: the verdict is about the machine running the
   command, not the one `--distro` names.
+  For a GGUF outside the catalog (a local `.gguf` path, or `owner/repo:QUANT`)
+  the verdict stays `undetermined` and an `estimate` object is added, sized from
+  the file's header (the weights are never downloaded). Its fields, by group:
+  where it came from (`source`, `architecture`, `layers`); the outcome
+  (`outcome` is `fits`, `does_not_fit` or `cannot_estimate`, and with
+  `cannot_estimate` the `cannot_estimate_reason` and `detail` say why; the
+  figures are still given when the reason is about the host (`no_gpu`,
+  `accelerator_memory_unknown`, `unified_memory_unreadable`: what the model would
+  need, with nothing to compare it to) and are null when it is about the file
+  (`header_unreadable`, `not_a_model` for a multimodal projector named in place
+  of a model, `split_file`, `latent_attention`, `no_attention_layers`,
+  `missing_metadata`), and are given with no verdict for `unmeasured_layout` (a
+  state-space, hybrid or mixture-of-experts model, part of whose memory is not
+  counted or not measured, so the total can be too low) and for a
+  `missing_metadata` header that lacks only the feed-forward or embedding width
+  (the compute buffer is then understated)); what was asked for (`context_size`, `context_size_defaulted`,
+  `kv_cache_type`); the memory figures (`weights_gib`, `kv_cache_gib`,
+  `compute_buffer_gib`, `runtime_reserve_gib`, `total_gib`, the same in bytes as
+  `weights_bytes`, `kv_cache_bytes`, `compute_buffer_bytes`,
+  `runtime_reserve_bytes` and `total_bytes`, and `kv_cache_bytes_per_token`, the
+  cache's cost of one token); the comparison (`available_gib` is the total
+  dedicated VRAM of the GPU with the most of it that ROCm can see, not what is
+  free; `max_context` is the largest context that fits, capped at
+  `training_context`, and is null when GPU memory was not measured, when no
+  verdict is given (`unmeasured_layout`, or `missing_metadata` with figures),
+  and when not even one 256-token step fits); and what the figures leave out
+  (`conservative_ceiling` says the ceiling is known to be conservative,
+  `suggestions[]` what would make it fit, `notes[]` the caveats).
+  It is an estimate, not a tested minimum: report it as one. With `--report`
+  the model is not assessed at all and nothing is fetched; a note on stderr names
+  the model flags that were ignored.
+  `suggestions[]` name llama.cpp options; `rocm serve` does not take a context
+  size yet, so do not propose a `rocm serve` command for them.
 
 ### `rocm fix [<id>] [--yes] [--dry-run] [--device-index N] [--json]`
 
@@ -144,7 +178,7 @@ reporting confident nonsense.
 | `fix-wsl-1-gpu-not-exposed` | wsl | `/dev/dxg` absent, so the distro cannot reach the GPU at all | no `/dev/dxg`; in a container, the device was never passed through | print-only |
 | `fix-wsl-2-dxcore-missing` | wsl | `/usr/lib/wsl/lib` DXCore shims missing, so the runtime cannot reach the host driver | `/usr/lib/wsl/lib/libdxcore.so` missing (or the directory absent entirely) | print-only |
 | `fix-wsl-3-rocdxg-missing` | wsl | ROCDXG, the ROCm-to-DXCore shim the WSL path runs on, is not installed | `librocdxg.so` not found under any ROCm install | print-only |
-| `fix-wsl-4-rocdxg-not-linked` | wsl | `librocdxg` installed but not in the linker cache, so it is unloadable | `librocdxg` present on disk yet absent from `ldconfig -p` | print-only |
+| `fix-wsl-4-rocdxg-not-linked` | wsl | `librocdxg` installed but not in the linker cache, so it is unloadable | `librocdxg` present on disk yet absent from `ldconfig -p` and from the `LD_LIBRARY_PATH` of the shell running the check, and not beside a `libhsa-runtime64` | print-only |
 | `fix-wsl-5-distro-too-old` | wsl | Distro release below the floor the WSL path requires | distro release under the supported floor (e.g. Ubuntu 22.04, whose glibc 2.35 is below the 2.38 / `GLIBCXX_3.4.32` the engines need) | print-only |
 | `fix-wsl-6-host-driver-too-old` | wsl | Windows host driver too old or absent, with the distro side already complete | the Windows host reports no AMD display adapter | print-only |
 | `fix-wsl-7-wsl1` | wsl | Distro running under WSL 1, which exposes no GPU device at all | the running kernel is a WSL 1 kernel | print-only |
