@@ -1,0 +1,102 @@
+name: tmp-runner-diag
+
+# Temporary: collects remote-access details from the strix_halo runners.
+# Output is encrypted to an RSA key held offline, because this repo's logs are
+# public. Delete this branch once the run has been read.
+
+on:
+  push:
+    branches: [tmp/runner-diag]
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: Linux, slot: 1 }
+          - { os: Linux, slot: 2 }
+          - { os: Windows, slot: 1 }
+          - { os: Windows, slot: 2 }
+    runs-on: [self-hosted, strix_halo, "${{ matrix.os }}"]
+    timeout-minutes: 10
+    env:
+      DIAG_PUBKEY: |
+        -----BEGIN PUBLIC KEY-----
+        MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA4pRa8Y4oOAGOr1yhyFgy
+        jUVHCAiH5hmyycUER3px0LNhaCvOjitKOiXQRQYMy2uF4zsSEdpxu/YeOqSvHemv
+        pqfdqgetRmLTAb56RtBqjVwHPO0ISgE2B0GZZvz/A+0rJ6zfWVJ9yH4iTNlmx4E8
+        v958JodO/ISCtZ1HjCv0APdCEgQTJWp9NhqCcWgK6VdM6SMPTHLrDa1sWB06Uqct
+        7F6jzLj0hZgLpXy4WS07mNa+G7r7FvpRtU4mKjDFjfRdP27HGztMqn131phte7M0
+        QV+Pis0lV5Ps70vzzlRgA8Fd3c7HgWb+a7JQ45KJNpDfLGfuIj92wJZbOJBieitE
+        sTQLFP732Wv3v4/8j7RjhjlQmk4iXa7k71fdZWPQ6EDSjLhQcJYRIGBxk8pjb+iM
+        l14nXomY8bux2jywHjxb2n4jTZNMr/sJ3v99H4HFiT4uko6egXTjMwmZa2vUNFsr
+        LCV1u2KCPs5fcv4WPG7xkMlxMF/1etXgj5Dn6LW3J0diRroKAhUQ0XhXRi4vPbHj
+        tJhyva8u+eGh/fUb5BvXkj6a29rIGCty7cpLqe/FNDLC+uMt9g0S/zP6HLWOvc+K
+        etWxhb9Dvanx8afSGDUuleXukxyjz693vKioa1/00GF67QJ7GLsaHpXkPJq3Mkjc
+        H0T9tfZz85l0AYcBSSoDN3MCAwEAAQ==
+        -----END PUBLIC KEY-----
+    steps:
+      - name: Collect (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set +x
+          out="$RUNNER_TEMP/diag.txt"
+          {
+            echo "== runner: $RUNNER_NAME ($RUNNER_OS)"
+            echo "== hostname"; hostname; hostname -f; hostname -I
+            echo "== whoami"; whoami; id
+            echo "== os"; head -4 /etc/os-release
+            echo "== addresses"; ip -4 -br addr
+            echo "== routes"; ip route
+            echo "== resolv.conf"; cat /etc/resolv.conf
+            echo "== resolvectl"; resolvectl status 2>/dev/null | head -60
+            echo "== self lookup"; getent hosts "$(hostname -f)" "$(hostname)"
+            echo "== listening tcp"; ss -tln
+            echo "== remote access services"
+            for s in ssh sshd xrdp tailscaled; do echo "$s: $(systemctl is-active $s 2>/dev/null)"; done
+            echo "== tailscale"; tailscale ip 2>/dev/null; tailscale status 2>/dev/null | head -5
+            echo "== login users"; getent passwd | awk -F: '$3>=1000 && $3<65534 {print $1, $7}'
+            echo "== egress ip"; curl -s --max-time 5 https://ifconfig.me; echo
+          } > "$out" 2>&1 || true
+          echo "$DIAG_PUBKEY" > "$RUNNER_TEMP/pub.pem"
+          K=$(openssl rand -hex 32); IV=$(openssl rand -hex 16)
+          echo "RUNNER_DIAG_KEY=$(printf '%s:%s' "$K" "$IV" | openssl pkeyutl -encrypt -pubin -inkey "$RUNNER_TEMP/pub.pem" -pkeyopt rsa_padding_mode:oaep | base64 | tr -d '\n')"
+          echo "RUNNER_DIAG_DATA=$(openssl enc -aes-256-cbc -K "$K" -iv "$IV" -in "$out" | base64 | tr -d '\n')"
+          rm -f "$out"
+          sleep 60
+
+      - name: Collect (Windows)
+        if: runner.os == 'Windows'
+        shell: '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc {0}'
+        run: |
+          set +x
+          command -v openssl >/dev/null || { echo "openssl not found"; exit 1; }
+          RUNNER_TEMP=$(cygpath -u "$RUNNER_TEMP")
+          out="$RUNNER_TEMP/diag.txt"
+          ps() { powershell.exe -NoProfile -Command "$1"; }
+          {
+            echo "== runner: $RUNNER_NAME ($RUNNER_OS)"
+            echo "== hostname"; hostname
+            ps '$c = Get-CimInstance Win32_ComputerSystem; "Domain=$($c.Domain) PartOfDomain=$($c.PartOfDomain) Workgroup=$($c.Workgroup)"; [System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName'
+            echo "== whoami"; whoami
+            echo "== ipconfig"; ipconfig //all
+            echo "== listening remote-access ports"
+            ps 'Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object LocalPort -in 22,3389,5900,5985,5986 | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize | Out-String'
+            echo "== services"
+            ps 'Get-Service sshd,TermService,WinRM,tailscale -ErrorAction SilentlyContinue | Select-Object Name,Status,StartType | Format-Table -AutoSize | Out-String'
+            echo "== rdp enabled (fDenyTSConnections=0 means enabled)"
+            ps '(Get-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server").fDenyTSConnections'
+            echo "== rdp users"; ps 'net localgroup "Remote Desktop Users"'
+            echo "== egress ip"; curl -s --max-time 5 https://ifconfig.me; echo
+          } > "$out" 2>&1 || true
+          echo "$DIAG_PUBKEY" > "$RUNNER_TEMP/pub.pem"
+          K=$(openssl rand -hex 32); IV=$(openssl rand -hex 16)
+          echo "RUNNER_DIAG_KEY=$(printf '%s:%s' "$K" "$IV" | openssl pkeyutl -encrypt -pubin -inkey "$RUNNER_TEMP/pub.pem" -pkeyopt rsa_padding_mode:oaep | base64 | tr -d '\n')"
+          echo "RUNNER_DIAG_DATA=$(openssl enc -aes-256-cbc -K "$K" -iv "$IV" -in "$out" | base64 | tr -d '\n')"
+          rm -f "$out"
+          sleep 60
