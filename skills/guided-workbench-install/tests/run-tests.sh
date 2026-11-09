@@ -922,6 +922,25 @@ else
   fail=$((fail+1))
 fi
 
+# The stubbed clusters in evals/hooks.py decide what the catalog's behavioral grading
+# actually measures. A stub that drifts into answering healthily, or into answering
+# nothing, turns an expectation into one that cannot fail, and nothing else would notice.
+if hooks_out=$(cd "${here}/../evals" && python3 -I test_hooks.py 2>&1); then
+  printf 'PASS  evaluation hooks: %s\n' "$(printf '%s' "$hooks_out" | grep -E '^Ran [0-9]+ test' || echo 'tests passed')"
+  pass=$((pass+1))
+else
+  printf 'FAIL  evaluation hooks\n%s\n' "$hooks_out"
+  fail=$((fail+1))
+fi
+
+if fixture_out=$(python3 "${here}/check-fixture-runbook.py" 2>&1); then
+  printf 'PASS  %s\n' "$fixture_out"
+  pass=$((pass+1))
+else
+  printf 'FAIL  evaluation fixture runbook has drifted\n      %s\n' "$fixture_out"
+  fail=$((fail+1))
+fi
+
 echo
 echo "passed=${pass} failed=${fail}"
 [ "$fail" -eq 0 ]

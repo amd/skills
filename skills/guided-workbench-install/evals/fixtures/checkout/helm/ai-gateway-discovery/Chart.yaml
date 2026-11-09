@@ -1,0 +1,13 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+---
+apiVersion: v2
+name: ai-gateway-discovery
+description: Kubernetes controller that auto-discovers KServe InferenceServices and syncs Envoy AI Gateway resources
+
+type: application
+
+version: 0.1.0
+appVersion: "0.1.0"

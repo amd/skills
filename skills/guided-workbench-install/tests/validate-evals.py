@@ -14,7 +14,8 @@ if not __debug__:
     raise RuntimeError("run validate-evals.py without python -O / PYTHONOPTIMIZE")
 
 
-evals_path = Path(__file__).parents[1] / "evals" / "evals.json"
+skill_root = Path(__file__).parents[1]
+evals_path = skill_root / "evals" / "evals.json"
 data = json.loads(evals_path.read_text(encoding="utf-8"))
 assert isinstance(data, dict), "evaluation dataset root must be an object"
 evaluations = data.get("evaluations")
@@ -50,6 +51,17 @@ for case in evaluations:
         assert isinstance(value, list) and value, f"{case_id}: {field} must be a non-empty array"
         assert all(isinstance(item, str) and item for item in value), f"{case_id}: {field} entries must be strings"
         behavioral += field in ("expected_behavior", "unexpected_behavior")
+
+    # A `workspace` naming a directory that is not there fails the case at
+    # stage time, deep inside the harness, where it reads as the harness being
+    # broken rather than this dataset.
+    workspace = case.get("workspace")
+    if workspace is not None:
+        assert isinstance(workspace, str) and workspace, f"{case_id}: workspace must be a path"
+        assert should_trigger, f"{case_id}: workspace is only valid for triggering cases"
+        staged = skill_root / workspace
+        assert staged.is_dir(), f"{case_id}: workspace {workspace} is not a directory"
+        assert any(staged.rglob("*")), f"{case_id}: workspace {workspace} is empty"
 
 assert triggering >= 3, "evaluation dataset needs at least three triggering cases"
 assert non_triggering >= 2, "evaluation dataset needs at least two non-triggering cases"

@@ -3,7 +3,7 @@
     {
       "id": "install-aiwb-combined",
       "skill_should_trigger": true,
-      "prompt": "Guide me through installing the full AI Workbench and Resource Manager stack on my Kubernetes cluster.",
+      "prompt": "Guide me through installing the full AI Workbench and Resource Manager stack on my Kubernetes cluster. Combined mode, a real GPU cluster, chart-managed CNPG for the databases, and OpenBao for secrets. The domain is aiwb.example.com and the image tag is v2.1.0. You have everything you need, so work through it without stopping to check back with me.",
       "expected_behavior": [
         "Establish the deployment, cluster, database, and secrets modes before installing",
         "Run the read-only preflight and require a ready result before any install command",
@@ -14,7 +14,8 @@
         "Start installing charts before preflight passes",
         "Claim the installation is healthy without running verification",
         "Copy a replacement set of install commands instead of grounding exact commands in helm/INSTALL.md"
-      ]
+      ],
+      "workspace": "evals/fixtures/checkout"
     },
     {
       "id": "install-aiwb-standalone",
@@ -24,7 +25,18 @@
     {
       "id": "troubleshoot-aiwb-install",
       "skill_should_trigger": true,
-      "prompt": "My aiwb-api pod never becomes ready after the Helm install. Help me find and fix the failed installation."
+      "prompt": "My aiwb-api pod never becomes ready after the Helm install. Help me find and fix the failed installation.",
+      "expected_behavior": [
+        "Find out how far the install actually got before suggesting a fix",
+        "Name what is wrong in plain language and give a concrete fix for it",
+        "Check the cluster again before calling it resolved, rather than concluding from reasoning alone"
+      ],
+      "unexpected_behavior": [
+        "Declare the install healthy without verifying it",
+        "Leave a partial install in place without saying so",
+        "Start over with a fresh install before establishing what failed"
+      ],
+      "workspace": "evals/fixtures/checkout"
     },
     {
       "id": "onboard-model-to-aim",
