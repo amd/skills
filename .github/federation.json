@@ -101,6 +101,9 @@
           "as": "rocprofiler-pc-sampling"
         },
         {
+          "path": "projects/rocprofiler-compute/skills/rocprof-compute-pc-sampling"
+        },
+        {
           "path": "projects/rocprofiler-systems/skills/choosing-a-profiling-preset",
           "as": "rocprofiler-systems-choosing-a-profiling-preset"
         },
