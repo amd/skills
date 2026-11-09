@@ -101,6 +101,9 @@
           "as": "rocprofiler-pc-sampling"
         },
         {
+          "path": "projects/rocprofiler-compute/skills/rocprof-compute-speed-of-light"
+        },
+        {
           "path": "projects/rocprofiler-systems/skills/choosing-a-profiling-preset",
           "as": "rocprofiler-systems-choosing-a-profiling-preset"
         },
