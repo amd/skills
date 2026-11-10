@@ -129,7 +129,8 @@
       "license": "MIT",
       "skills": [
         {
-          "path": ".agents/skills/guided-workbench-install"
+          "path": ".agents/skills/guided-workbench-install",
+          "as": "aiwb-guided-install"
         }
       ]
     }

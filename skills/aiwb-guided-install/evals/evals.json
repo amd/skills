@@ -49,14 +49,9 @@
       "prompt": "Show me how to inspect the logs for a Kubernetes Deployment with kubectl."
     },
     {
-      "id": "diagnose-installed-cluster",
+      "id": "upgrade-the-kubernetes-control-plane",
       "skill_should_trigger": false,
-      "prompt": "Our workbench is already installed but model downloads keep hanging and the GPU metrics are missing. Check the cluster for known platform problems."
-    },
-    {
-      "id": "pre-install-cluster-health-check",
-      "skill_should_trigger": false,
-      "prompt": "Before we install anything, check this cluster for silent platform bugs like an unpinned Cilium MTU or a dead storage provisioner."
+      "prompt": "Upgrade this cluster's Kubernetes control plane from 1.31 to 1.32 and drain the nodes one at a time."
     }
   ]
 }

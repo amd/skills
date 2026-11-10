@@ -2,8 +2,8 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 #
 # SPDX-License-Identifier: MIT
-name: guided-workbench-install
-description: Guides a user through installing the AI Workbench (AIWB) onto a Kubernetes cluster end-to-end — preflight cluster readiness (access, StorageClass, GPU operator, required operators/CRDs), install the Helm charts in the correct order, and verify the deployment is healthy with plain-language failure triage. Use when a user wants to install, deploy, or stand up AIWB / the AI Workbench / the enterprise AI stack on a K8s cluster, or asks why their install failed partway. Use PROACTIVELY when a user is following helm/INSTALL.md by hand. Do NOT activate for onboarding models to AIM, general kubectl/helm usage unrelated to installing AIWB, or authoring/running the repo's Robot Framework E2E tests. For an established cluster that is not mid-install — hung model downloads, missing GPU metrics, or a pre-install or pre-E2E health sweep — use cluster-environment-check instead; this skill owns the install itself, including verifying it and triaging a component that never becomes ready during it.
+name: aiwb-guided-install
+description: Guides a user through installing the AI Workbench (AIWB) onto a Kubernetes cluster end-to-end — preflight cluster readiness (access, StorageClass, GPU operator, required operators/CRDs), install the Helm charts in the correct order, and verify the deployment is healthy with plain-language failure triage. Use when a user wants to install, deploy, or stand up AIWB / the AI Workbench / the enterprise AI stack on a K8s cluster, or asks why their install failed partway. Use PROACTIVELY when a user is following helm/INSTALL.md by hand. Do NOT activate for onboarding models to AIM, general kubectl/helm usage unrelated to installing AIWB, or authoring/running the repo's Robot Framework E2E tests. Do NOT activate for diagnosing an established cluster that is not mid-install, such as hung model downloads, missing GPU metrics, or a pre-install or pre-E2E health sweep. This skill owns the install itself, including verifying it and triaging a component that never becomes ready during it.
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
@@ -20,10 +20,12 @@ failures into plain language and a concrete fix. **Never report success you did 
 verify, and never leave a silent partial install** — when you cannot confirm health, say
 so explicitly and name what to fix.
 
-The sibling `cluster-environment-check` skill diagnoses an already-installed cluster and is
-read-only; this skill owns installing. They assert some of the same facts (StorageClass, the
-OpenBao `ClusterSecretStore`, `amd.com/gpu` capacity), so when a chart or default changes,
-check whether both need the correction.
+This skill owns installing. Diagnosing a cluster that is already up belongs elsewhere: if a
+read-only `cluster-environment-check` skill is installed, hand over to it rather than
+re-deriving its checks, and if it is not, say what you cannot determine instead of guessing.
+The two assert some of the same facts (StorageClass, the OpenBao `ClusterSecretStore`,
+`amd.com/gpu` capacity), so when a chart or default changes, check whether both need the
+correction.
 
 ## Golden rule: preflight → install in order → verify → triage
 
