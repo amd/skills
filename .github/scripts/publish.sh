@@ -8,6 +8,8 @@
 #   ./.github/scripts/publish.sh -h|--help  Print this help.
 #
 # Currently regenerates:
+#   - skills/.claude-plugin/plugin.json (bundle entry of
+#                                        .claude-plugin/marketplace.json)
 #   - .cursor-plugin/marketplace.json   (mirror of .claude-plugin/marketplace.json
 #                                        + plugin-metadata.json)
 #   - .codex-plugin/plugin.json         (Codex plugin manifest)
@@ -31,11 +33,13 @@ usage() {
 
 case "${1:-}" in
   "")
+    uv run .github/scripts/generate_claude_plugin.py
     uv run .github/scripts/generate_cursor_marketplace.py
     uv run .github/scripts/generate_codex_plugin.py
     echo "Publish artifacts generated successfully."
     ;;
   --check)
+    uv run .github/scripts/generate_claude_plugin.py --check
     uv run .github/scripts/generate_cursor_marketplace.py --check
     uv run .github/scripts/generate_codex_plugin.py --check
     ;;
