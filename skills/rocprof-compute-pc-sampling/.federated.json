@@ -1,0 +1,10 @@
+{
+  "source": "rocm-rocm-systems",
+  "repo": "ROCm/rocm-systems",
+  "ref": "users/vedithal-amd/rocprof-compute-skills-install-check",
+  "commit": "ebf465e112ae1ca99a2e6e45de06c0ad84388439",
+  "path": "projects/rocprofiler-compute/skills/rocprof-compute-pc-sampling",
+  "license": "MIT",
+  "content_hash": "7fd2991d07998c9a635dfd1c2f1fea004040817fe875ca3d52073430a4b907e0",
+  "imported_at": "2026-11-09T18:28:45Z"
+}
