@@ -45,12 +45,10 @@ advice for a stack this skill does not cover is worse than no advice.
 A fresh install on a clean machine is out of scope too: that is a setup task,
 not a diagnosis. Exit cleanly and say so.
 
-If the user names no GPU vendor, treat ROCm / HIP wording as AMD and continue.
-Should `rocm examine` then report `no-amd-gpu`, the CLI found no AMD GPU: say so,
-ask which GPU the machine has, and propose no fix until that is settled. That
-status alone does not prove the GPU is not AMD.
-
-Only continue past this gate when the GPU is AMD.
+If the user names no GPU vendor, treat ROCm / HIP wording as AMD and continue to
+step 1, which checks what the machine has. Continue when the GPU is AMD or no
+vendor is named. If the user then says it is NVIDIA, Intel or Apple, decline as
+above.
 
 **WSL2 is in scope** and does not stop this gate. It is a platform family of its
 own, with its own catalog entries covering `/dev/dxg`, the DXCore handoff,
@@ -76,7 +74,7 @@ offered there.
 ## Workflow
 
 Only start here once the [Scope gate](#scope-gate--check-before-anything-else)
-passes — the GPU is AMD.
+passes — the GPU is AMD or no vendor was named.
 
 0. **Ensure the `rocm` CLI is present.** Everything below shells out to it, so
    check first and install it if missing:
@@ -134,11 +132,23 @@ passes — the GPU is AMD.
    Any other failure, such as a different exit code or output with no
    `contract_version`, is an error from the CLI and not proof that it is old.
    Relay the error text and stop, because reinstalling the same version would not
-   clear it. Against a CLI without this contract, the entry ids, the
-   auto-applicable set, and the exit codes this skill documents are guesses, and a
-   guess presented as a fact is the failure this check prevents.
+   clear it. Against a CLI without this contract, the entry ids, which fixes have
+   a runner, and the exit codes this skill documents are guesses, and a guess
+   presented as a fact is the failure this check prevents.
 
-1. **Diagnose.** Pass the user's error text as the symptom:
+1. **Diagnose.** If the user named no GPU vendor, run `rocm examine --json`
+   first. Status `no-amd-gpu` means the CLI found no AMD GPU. On WSL2 the status
+   is `wsl` whatever the GPU, so read `has_amd_gpu` there: false means the same.
+   Either way, say so, ask which GPU the machine has, and propose no fix until
+   that is settled. That result alone does not prove the GPU is not AMD: a
+   container without GPU passthrough, or the very failure being diagnosed, can
+   hide it. If the user confirms AMD or cannot say, continue with `rocm diagnose`
+   below, which only reads; if the answer is NVIDIA, Intel or Apple, the scope
+   gate declines. Any other result: go on. If `rocm examine` itself fails (it
+   exits 0 whenever it ran, so a non-zero exit is an error from the CLI), relay
+   the error text and stop, as the contract check does.
+
+   Pass the user's error text as the symptom:
 
    ```
    rocm diagnose --symptom "<paste the exact error>" --json
@@ -228,7 +238,9 @@ passes — the GPU is AMD.
    Only four fixes have a runner the CLI executes itself. The other 24 are
    **print-only** (bootloader, kernel, reinstall, Windows driver, …): `rocm fix
    <id>` just prints the plan for the user to run themselves — no prompt, and the
-   CLI never performs those.
+   CLI never performs those. In a diagnosis, `fix.auto_applicable` is true only
+   for a fix whose `fix.class` is auto on this host, so it is false for
+   `fix-9-igpu-dgpu` and for `fix-2-unset-override` on Linux and WSL2.
 
    One entry is in neither group. `info-20-gpu-no-rocm-support` is
    **diagnose-only**: `rocm fix` takes the id, names the problem, says there is
@@ -236,11 +248,11 @@ passes — the GPU is AMD.
 
    Of the four, two do not always mutate:
 
-   - **`fix-2-unset-override` mutates on Windows only.** On Linux it reports
-     where the override is set and which rc files carry it, then stops — it
-     will not edit the user's dotfiles. So there is no prompt to answer and
-     nothing for `--dry-run` to preview. Tell the Linux user what to edit; do
-     not describe it as a change the CLI made or previewed.
+   - **`fix-2-unset-override` mutates on Windows only.** On Linux and WSL2 it
+     reports where the override is set and which rc files carry it, then stops
+     — it will not edit the user's dotfiles. So there is no prompt to answer and
+     nothing for `--dry-run` to preview. Tell the user what to edit; do not
+     describe it as a change the CLI made or previewed.
    - **`fix-9-igpu-dgpu` mutates only when `--device-index N` is passed.**
      Without it — on either platform — the runner just prints the
      `rocminfo`/`hipInfo` query that identifies the discrete GPU's index and
@@ -308,5 +320,5 @@ start of the reply, before relaying a multi-step plan.
   first. New failure modes are added to the CLI catalog, not improvised here.
 
 Read [reference.md](reference.md) when `rocm fix` exits non-zero (its exit codes
-are listed there), and before telling the user which platforms a fix id applies
-to.
+are listed there), before telling the user which platforms a fix id applies to,
+and for the full closed catalog.
