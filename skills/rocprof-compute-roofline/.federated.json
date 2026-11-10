@@ -1,0 +1,10 @@
+{
+  "source": "rocm-rocm-systems",
+  "repo": "ROCm/rocm-systems",
+  "ref": "users/vedithal-amd/rocprof-compute-skills-install-check",
+  "commit": "ebf465e112ae1ca99a2e6e45de06c0ad84388439",
+  "path": "projects/rocprofiler-compute/skills/rocprof-compute-roofline",
+  "license": "MIT",
+  "content_hash": "1ee00e7c742bc2e2d8600078409c61e3634524a214db4fee8cd3ba6dd76bab99",
+  "imported_at": "2026-11-09T18:28:52Z"
+}
