@@ -2,9 +2,9 @@
   "source": "rocm-rocm-cli",
   "repo": "ROCm/rocm-cli",
   "ref": "main",
-  "commit": "3dc4a31aad079e1ee0e875c208f1c346a3032235",
+  "commit": "bf8c334c13b80c41f002521630a5be6609e90326",
   "path": "skills/rocm-doctor",
   "license": "MIT",
-  "content_hash": "58d8f31f4464eb9b0cacd2448a95321f542c935212be11a273ad769c1a80f13e",
-  "imported_at": "2026-11-09T06:40:07Z"
+  "content_hash": "3f4b17193d7d72672c4ba60606905d8f2bcb32fecf0dbcaf10be3d1652432452",
+  "imported_at": "2026-11-10T06:30:53Z"
 }
