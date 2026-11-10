@@ -470,3 +470,155 @@ concept covering different vocabulary, register, and specificity. Phrases that
 are too similar to each other (all formal, all the same length) produce a
 tight cluster that fails on paraphrases. Include at least one informal and one
 technical phrasing per concept.
+
+## 8. Zero-shot topic routing with a fail-closed privacy guard
+
+> Use the LFM2.5 prompt router to send hard reasoning or coding to
+> fireworks.kimi-k2p6 and keep everyday chat on Qwen3.5-9B-GGUF. Anything with
+> personal information must never leave the machine, even if the classifier
+> can't read the whole prompt.
+
+Topics are named in words with no example phrases → `zero_shot` (the user
+named the model). The labels are descriptive phrases because the model reads
+them with every request. The PII guard comes first, routes to the **local**
+candidate, and pairs `on_truncation: fail` with `on_error: match_true`, so a
+prompt the model only partly read (or an outright failure) still stays local.
+The topic classifier keeps the defaults - a cut text is fine for topic
+routing.
+
+```json
+{
+  "version": "1",
+  "model_name": "user.Qwen3.5-9B-GGUF-ZeroShot-Router",
+  "recipe": "collection.router",
+  "components": ["Qwen3.5-9B-GGUF", "fireworks.kimi-k2p6", "LFM2.5-Encoder-350M-Prompt-Router-ONNX"],
+  "routing": {
+    "candidates": ["Qwen3.5-9B-GGUF", "fireworks.kimi-k2p6"],
+    "default_model": "Qwen3.5-9B-GGUF",
+    "classifiers": [
+      {
+        "id": "pii",
+        "type": "zero_shot",
+        "model": "LFM2.5-Encoder-350M-Prompt-Router-ONNX",
+        "labels": ["contains personal identifiable information", "general question"],
+        "on_truncation": "fail",
+        "on_error": "match_true"
+      },
+      {
+        "id": "topic",
+        "type": "zero_shot",
+        "model": "LFM2.5-Encoder-350M-Prompt-Router-ONNX",
+        "labels": ["everyday chit-chat", "hard reasoning or coding"],
+        "on_error": "match_false"
+      }
+    ],
+    "rules": [
+      {
+        "id": "pii-stays-local",
+        "match": { "classifier": "pii", "label": "contains personal identifiable information", "min_score": 0.5 },
+        "route_to": "Qwen3.5-9B-GGUF",
+        "outputs": { "reason": "privacy" }
+      },
+      {
+        "id": "hard-to-cloud",
+        "match": { "classifier": "topic", "label": "hard reasoning or coding", "min_score": 0.5 },
+        "route_to": "fireworks.kimi-k2p6"
+      }
+    ]
+  }
+}
+```
+
+Tell the user: `LFM2.5-Encoder-350M-Prompt-Router-ONNX` is a prompt router,
+not a validated PII detector - its PII score depends on how the label is
+worded, so test it with `/v1/classify` (Step 8b #1b) and swap in a dedicated
+PII classifier for production. This policy is JSON-only (the desktop editor
+can't import `zero_shot` or `on_truncation`).
+
+## 9. Decision model: typed questions on a support queue
+
+> For our support bot, billing questions and angry customers go to
+> Qwen3.5-9B-GGUF; anything that needs an answer right now goes to
+> fireworks.kimi-k2p6; everything else stays on Qwen3.5-2B-GGUF. Use Laya to
+> decide.
+
+"Which team", "is the customer angry", and "how urgent" are questions about
+the prompt → `systemone`, one classifier per question, all backed by the same
+decision model. Each question's options become its labels: the `choice`
+options, `"true"`/`"false"` for the `noul`, the level strings for the `score`.
+The `choice` criteria is an **array** (order changes the scores) and uses a
+one-key object to describe an option. Urgency is tested on its top level only
+because a rule reads one level's probability at a time.
+
+```json
+{
+  "version": "1",
+  "model_name": "user.Support-Decision-Router",
+  "recipe": "collection.router",
+  "components": ["Qwen3.5-2B-GGUF", "Qwen3.5-9B-GGUF", "fireworks.kimi-k2p6", "Laya-GGUF"],
+  "routing": {
+    "candidates": ["Qwen3.5-2B-GGUF", "Qwen3.5-9B-GGUF", "fireworks.kimi-k2p6"],
+    "default_model": "Qwen3.5-2B-GGUF",
+    "classifiers": [
+      {
+        "id": "urgency",
+        "type": "systemone",
+        "model": "Laya-GGUF",
+        "question": {
+          "type": "score",
+          "instructions": "How urgently does this customer need an answer?",
+          "criteria": ["can wait", "this week", "today", "right now"]
+        },
+        "on_error": "match_false"
+      },
+      {
+        "id": "team",
+        "type": "systemone",
+        "model": "Laya-GGUF",
+        "question": {
+          "type": "choice",
+          "instructions": "Which team should handle this message?",
+          "criteria": [
+            { "billing": "charges, refunds, invoices, payment methods" },
+            "shipping",
+            "technical"
+          ]
+        },
+        "default_label": "billing",
+        "on_error": "match_false"
+      },
+      {
+        "id": "angry",
+        "type": "systemone",
+        "model": "Laya-GGUF",
+        "question": { "type": "noul", "instructions": "Is the customer angry?" },
+        "on_error": "match_false"
+      }
+    ],
+    "rules": [
+      {
+        "id": "urgent-to-cloud",
+        "match": { "classifier": "urgency", "label": "right now", "min_score": 0.5 },
+        "route_to": "fireworks.kimi-k2p6",
+        "outputs": { "reason": "urgent" }
+      },
+      {
+        "id": "billing-or-angry-to-9b",
+        "match": {
+          "any": [
+            { "classifier": "team", "label": "billing", "min_score": 0.5 },
+            { "classifier": "angry", "label": "true", "min_score": 0.6 }
+          ]
+        },
+        "route_to": "Qwen3.5-9B-GGUF"
+      }
+    ]
+  }
+}
+```
+
+To try a question before relying on its threshold, send it to
+`/v1/systemone` - where a `choice` question's `criteria` is written as an
+object (`{"billing": "charges, ...", "shipping": null, "technical": null}`),
+the reverse of the policy. On an NPU machine, swap `Laya-GGUF` for a
+`d3-*-FLM` model; nothing else changes.

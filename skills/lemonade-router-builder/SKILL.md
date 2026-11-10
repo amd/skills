@@ -8,8 +8,10 @@ description: >-
   queries to X and everything else to Y"), generate a router/hybrid-router
   config or policy, author a collection.router JSON, split traffic between a
   small local model and a big/cloud model, add PII/jailbreak/topic classifiers
-  to routing, or mentions Lemonade Router, routing rules, routing.router,
-  candidates/default_model, keywords_any, semantic_similarity, or LLM-as-router.
+  to routing, route on a yes/no or graded question about the prompt using a
+  decision model, or mentions Lemonade Router, routing rules, routing.router,
+  candidates/default_model, keywords_any, semantic_similarity, zero_shot,
+  systemone, decision models (Laya, Julia-1, d3), or LLM-as-router.
   Fills every field the user did not specify with safe defaults.
 ---
 
@@ -19,7 +21,9 @@ Generate a **`collection.router` policy JSON** from a plain-English description
 of how requests should be routed. The skill produces and validates the JSON
 only - it does not call the live server, register the policy, or run requests
 through it. The JSON is accepted by the strict server-side parser on the first
-try and stays editable in the desktop app's Hybrid Router editor.
+try and stays editable in the desktop app's Hybrid Router editor - except
+policies using `zero_shot` / `systemone` classifiers or `on_truncation`, which
+the editor can't import yet (JSON-only; tell the user when you generate one).
 
 ## Prerequisites
 
@@ -57,7 +61,9 @@ exist, and choosing the right one is the first decision:
 - **Signals**: every condition mentioned (keywords, patterns, length, images,
   tools, topics, PII, safety) and which model each one routes to.
 - **Classifier models**: models named for *detection* rather than answering
-  (BERT-style encoders, embedding models, an LLM used as judge).
+  (BERT-style encoders, embedding models, zero-shot routers, decision models,
+  an LLM used as judge). Pick the classifier **type** from the table in
+  Step 5 - the model's kind decides which types it can back.
 
 ## Step 2 - Scaffold
 
@@ -137,17 +143,41 @@ chat-capable LLMs - not embedding, classification, or image models.
 
 ## Step 5 - Mode B: classifiers
 
-Only declare classifiers the rules actually reference. Three types:
+Only declare classifiers the rules actually reference. Choose the type from
+what the user describes:
+
+| User describes | Type | Model kind (checked at `/pull`) |
+|---|---|---|
+| A fixed-label detector (PII, phishing, jailbreak encoder) | `classifier` | onnxruntime sequence/token classifier, e.g. `Bert-Phishing-ONNX` |
+| Topics/categories named in words, no example phrases ("coding vs chit-chat") | `zero_shot` | zero-shot router `LFM2.5-Encoder-350M-Prompt-Router-ONNX`, or a decision model |
+| A question about the prompt: yes/no ("is the customer angry?"), graded ("how urgent?"), or options with their own descriptions | `systemone` | decision model: `Laya-GGUF`, `Julia-1-GGUF` (CPU/GPU), `d3-lite/nano/mini/turbo/ultra-FLM` (NPU) |
+| Concepts with example phrases | `semantic_similarity` | embedding model, e.g. `nomic-embed-text-v1-GGUF` |
+| A judgment that needs reasoning or a rationale | `llm` | chat LLM |
+
+`zero_shot` and `systemone` are the cheap model-backed options: one forward
+pass, no generation, no reply-format failure mode. Prefer them over `llm` for
+plain topic or yes/no routing when the user hasn't named a chat judge. If the
+user asks for one but names no model, use the registry model from the table
+(`LFM2.5-Encoder-350M-Prompt-Router-ONNX` for `zero_shot`, `Laya-GGUF` for
+`systemone`; a `d3-*-FLM` model when they mention the NPU) and say so.
 
 ```json
 { "id": "clf-1", "type": "classifier", "model": "<classification model>",
   "labels": ["PII", "Jailbreak"], "default_label": "PII", "on_error": "match_false" }
 
-{ "id": "clf-2", "type": "semantic_similarity", "model": "<embedding model>",
+{ "id": "clf-2", "type": "zero_shot", "model": "LFM2.5-Encoder-350M-Prompt-Router-ONNX",
+  "labels": ["everyday chit-chat", "hard reasoning or coding"], "on_error": "match_false" }
+
+{ "id": "clf-3", "type": "systemone", "model": "Laya-GGUF",
+  "question": { "type": "choice", "instructions": "Which team should handle this?",
+                "criteria": ["billing", {"shipping": "where an order is"}, "technical"] },
+  "default_label": "billing", "on_error": "match_false" }
+
+{ "id": "clf-4", "type": "semantic_similarity", "model": "<embedding model>",
   "reference_phrases": { "shopping": ["I want to shop for pants", "add to cart"] },
   "default_label": "shopping", "on_error": "match_false" }
 
-{ "id": "clf-3", "type": "llm", "model": "<chat LLM>",
+{ "id": "clf-5", "type": "llm", "model": "<chat LLM>",
   "prompt": "Classify the request into only labels SAFE, RISKY",
   "labels": ["SAFE", "RISKY"], "default_label": "SAFE", "on_error": "match_false" }
 ```
@@ -175,7 +205,42 @@ Hard constraints (parser-enforced - see `reference.md` for the full matrix):
   label; leave the reply format to the engine. If it still never fires after
   that, see Step 4's judge-capability note above - the same fix applies here
   (Step 9 shows how to catch it).
-- `default_label`, when present, must be one of the labels/concepts.
+- `zero_shot`: `labels` required (≥ 1, unique, no blanks or control
+  characters). **You** write them and they are sent to the model with every
+  request, so word them as descriptive phrases (`"hard reasoning or coding"`,
+  not `"LABEL_1"`); the scores depend on the wording. `prompt` and
+  `reference_phrases` are rejected. The model must carry the `zero-shot`
+  label or be a decision model; a fixed-label `classifier` model or a chat
+  LLM is refused at `/pull` (there is no LLM fallback). Conversely, a
+  `classifier` entry refuses a zero-shot or decision model.
+- `systemone`: `question` required; `labels`, `prompt` and
+  `reference_phrases` are rejected - **the labels are the question's
+  options**:
+  - `choice` → `criteria` is an **array** of option names and one-key
+    `{option: description}` objects, ≥ 2 options; the labels are the option
+    names. Never an object: `/v1/systemone` itself takes
+    `{"billing": null, ...}`, but the router refuses that form because a
+    stored policy sorts object keys and option order changes the scores.
+  - `noul` → the labels are `"true"` and `"false"` (`false` = 1 − `true`);
+    optional `criteria: {"true": "...", "false": "..."}` descriptions.
+  - `score` → `criteria` is 2–10 distinct level strings, lowest first; each
+    level string is a label holding the probability of that level. A rule
+    tests one level at a time, so for "today or sooner" use `any` over the
+    levels, or ask a `noul` question instead.
+  - `instructions` is non-blank text (or a non-empty object/array). Phrase it
+    as the question itself - wording and option order change the scores.
+  The model must be a decision model (registry labels `classification` +
+  `systemone`).
+- `on_truncation` (`"score"` default | `"fail"`) - only on `classifier`,
+  `zero_shot` and `systemone`. When the input overflows the model's token
+  window the backend scores the cut text, which still counts as a success,
+  so `on_error` never sees it. `"fail"` turns the cut into a failure so
+  `on_error` decides. Omit it for topic routing. For a **privacy rule** that
+  routes to a local model, pair `"on_truncation": "fail"` with
+  `"on_error": "match_true"` (fail-closed) and keep that rule above every
+  cloud rule.
+- `default_label`, when present, must be one of the labels/concepts (for
+  `systemone`, one of the question's options).
 - Defaults when unspecified: `id` = `clf-1`, `clf-2`, …; `on_error` =
   `"match_false"` (fail-open: a broken classifier doesn't match, so requests
   fall through - use `"match_true"` only when the user wants fail-closed
@@ -220,11 +285,17 @@ any referenced model that is not declared here.
 
 These two actions are a single mandatory step. Do not stop between them.
 
-**8a. Run the offline validator** before presenting anything to the user:
+**Write the policy to `router.json` in the user's current working directory**
+(unless they named another path) - never inside this skill's folder. Do not
+`cd` into the skill folder; call the validator by its path instead.
+
+**8a. Run the offline validator** before presenting anything to the user,
+from the working directory, with `<skill-dir>` = the folder holding this
+`SKILL.md`:
 
 ```bash
-python scripts/validate.py router.json    # Windows
-python3 scripts/validate.py router.json   # macOS/Linux
+python <skill-dir>/scripts/validate.py router.json    # Windows
+python3 <skill-dir>/scripts/validate.py router.json   # macOS/Linux
 ```
 
 It exits 0 with `"ready": true` when there are no errors. If it reports
@@ -240,6 +311,12 @@ Lemonade docs support, the copy is stale - run
 (fetches from GitHub) and re-validate, rather than editing the policy around
 it. A `schema_drift` warning means the schema has a constraint the validator
 can't check; rely on the server-side check in 8b.
+
+**If the policy has a `zero_shot` or `systemone` classifier, or any
+`on_truncation` field, your reply to the user must say in plain words that
+the desktop app's Hybrid Router editor cannot import this policy** - it is
+JSON-only, so register it with `/pull` and edit the file directly. This is
+mandatory; don't leave it to the reference docs.
 
 **8b. Immediately after validation passes, print these curl commands**
 as plain text for the user to copy and run. This is not optional. Fill in
@@ -262,6 +339,18 @@ curl -X POST http://localhost:13305/api/v1/routing/validate \
 
 # 1. Check a model exists before registering
 curl http://localhost:13305/api/v1/models/<model-id>
+
+# 1b. zero_shot / systemone only: score the test prompt against the exact
+#     labels or question first - the wording decides the scores. On
+#     /v1/systemone a choice question's criteria is an OBJECT {"opt": null, ...}
+#     (the reverse of the policy, which needs an array).
+curl -X POST http://localhost:13305/api/v1/classify \
+     -H "Content-Type: application/json" \
+     -d '{"model": "<zero_shot model>", "input": "<test prompt>", "labels": [<labels>]}'
+curl -X POST http://localhost:13305/api/v1/systemone \
+     -H "Content-Type: application/json" \
+     -d '{"model": "<decision model>", "state": "<test prompt>",
+          "questions": {"q": <question>}}'
 
 # 2. Register the policy (idempotent - re-POST to update)
 curl -X POST http://localhost:13305/api/v1/pull \
@@ -304,6 +393,11 @@ instructions immediately after:
   `trace[]`.** A score stuck at `0.0` on the request designed to clearly hit
   that label means the declared `labels` entry doesn't match the model's real
   output categories (Step 5) - not that the input failed to match.
+- **For `classifier` / `zero_shot` / `systemone` conditions, also read
+  `error` and `truncated` in that trace entry.** `error` present means the
+  condition failed (so `on_error` decided it) rather than scored low;
+  `truncated: true` means the model read only part of the prompt; the key
+  absent means the backend can't tell.
 - If either check fails, the fix is a more capable `router.model` for Mode A
   misroutes, or a corrected `labels` entry for classifier mismatches - tell
   the user to report the result back so you can revise and re-validate.
@@ -317,7 +411,9 @@ instructions immediately after:
 | mode | rules if any concrete signal is named, else LLM-as-router |
 | classifier `id` / rule `id` | `clf-N` / `rule-N` |
 | `on_error` | `match_false` |
-| `default_label` | first label / concept |
+| `default_label` | first label / concept / option (`systemone`) |
+| classifier type | `zero_shot` / `systemone` over `llm` for plain topic or yes/no signals when no chat judge is named (Step 5) |
+| `on_truncation` | omit (= `score`); `fail` + `on_error: match_true` for a local privacy rule |
 | `min_score` | `0.5` |
 | `outputs` | omit |
 | router prompt | intent only - no reply-format instruction (Step 4) |
