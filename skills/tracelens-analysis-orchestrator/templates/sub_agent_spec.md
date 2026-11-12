@@ -33,7 +33,7 @@ Applies to both tiers (compute → `category_findings/`, system → `system_find
 `[]`. In that case emit **empty** `## Recommendations` and **empty**
 `## Detailed Analysis` exactly as in § Empty category_findings.
 
-**System tier:** Follow the structured output your analyzer JSON supports.
+**System tier:** The same when `category_data/<category>_metrics.json::system_findings` is `[]`. Emit no placeholder card.
 
 ---
 
@@ -52,7 +52,7 @@ Each P-item maps 1:1 to a `## Detailed Analysis` reasoning candidate at the same
 ```
 
 - **Compute tier**: include all three fields. Pull `**Impact**` from `category_data/<category>_metrics.json::category_findings[i]`, ordered by `rank` (one card per entry).
-- **System tier**: omit the `(<Library>)` title suffix. Always emit `**Impact**: Not quantifiable from trace data` wrapped in `kind=p_item` markers with `low=null mid=null high=null`.
+- **System tier**: one card per `system_findings[i]` of `category_data/<category>_metrics.json`, ordered by `rank`. The title is `title` verbatim, with no `(<Library>)` suffix, and is also the `####` heading of the card's Detailed Analysis block. Always emit `**Impact**: Not quantifiable from trace data`. Put sub-mechanisms (long-tail waits, implicit syncs, launch overhead) in the prose, not in extra cards. Emit only the marker's `node=`, and only when `<category>_metrics.json::node` is set.
 - **Field labels are exact** — `**Insight**`, `**Action**`, `**Impact**`.
 - **`(<Library>)` suffix**: the single `category_findings[i].library` for this card (one library per finding by construction). Omit the parenthetical when the value is `Unknown`.
 - **Node**: only when `category_findings[i].node` is present (multi-trace standalone runs), emit the `**Node**` line on the card and its Detailed Analysis block and the marker's `node=`; omit all three otherwise. Do not repeat the node in the title or the Operation column. In the Insight, quote percentages from `operations[i].percent_of_node` as `% of <node>`.
@@ -88,7 +88,7 @@ with an HTML comment and an `####` heading:
 | Field | Values | Meaning |
 |-------|--------|---------|
 | `tier` | `compute` \| `system` | Must match the findings directory (`category_findings/` → compute, `system_findings/` → system). |
-| `rank` | Integer ≥ 1 | Compute tier: `category_findings[i].rank`. System tier: agent-local priority within this file (1 = highest). |
+| `rank` | Integer ≥ 1 | Compute tier: `category_findings[i].rank`. System tier: `system_findings[i].rank`. |
 
 ### Required labels
 
@@ -98,8 +98,8 @@ Fusion tier (`tier=fusion`): the same labels except **Reasoning for Slowdown:**,
 
 | Label | Purpose |
 |-------|---------|
-| `**Identification:**` | Why these operations were flagged. Body text must be plain language — JSON keys, dotted paths, and internal variable names belong **only** in the closing `(source: \`artifact\` → \`keys\`)` parenthetical (artifact + keys backticked, e.g. `(source: \`<cat>_metrics.json\` → \`operations[].efficiency.efficiency_percent\` < 70)`). When any flagged op has a non-null `library` (e.g. `Tensile`, `CK`, `AITER`, `Triton`, `rocBLAS`), state the backend in prose and include `operations[].library` in the `(source:)` parenthetical. When `operations[i].module_chain` is non-empty, name the model layer the ops belong to. When `operations[i].call_chain` is present, use it for deeper context. |
-| `**Data:**` | **Compute** (`tier=compute`): exactly one trace-grounded kernel breakdown table (see § Operations Table Schema). **All columns in the schema are mandatory — never drop a column.** Use `—` for any individual cell whose value is missing or null. **System** (`tier=system`): **must not** include kernel breakdown tables. include metric table (see § Metric Table Schema). |
+| `**Identification:**` | Why these operations were flagged. Body text must be plain language — JSON keys, dotted paths, and internal variable names belong **only** in the closing `(source: \`artifact\` → \`keys\`)` parenthetical (artifact + keys backticked, e.g. `(source: \`<cat>_metrics.json\` → \`operations[].efficiency.efficiency_percent\` < 70)`). When any flagged op has a non-null `library` (e.g. `Tensile`, `CK`, `AITER`, `Triton`, `rocBLAS`), state the backend in prose and include `operations[].library` in the `(source:)` parenthetical. When `operations[i].module_chain` is non-empty, name the model layer the ops belong to. When `operations[i].call_chain` is present, use it for deeper context. System tier: open by naming each threshold that tripped, with its value. |
+| `**Data:**` | **Compute** (`tier=compute`): exactly one trace-grounded kernel breakdown table (see § Operations Table Schema). **All columns in the schema are mandatory — never drop a column.** Use `—` for any individual cell whose value is missing or null. **System** (`tier=system`): the metric table (see § Metric Table Schema), no kernel breakdown table. |
 | `**Reasoning for Slowdown:**` | Why the workload is slow *as the trace shows*: **Standalone:** low % of roofline, low arithmetic intensity, unfused patterns, etc. **Comparative:** how Trace 1 is slower than Trace 2 for these operations — express speed differences as "X% faster" or "X% slower", plus absolute time gaps. Never use raw efficiency ratios or `efficiency_percent` values in prose. **Forbidden:** micro-architecture speculation (bank conflicts, L1 miss rates, etc.). |
 | `**Resolution:**` | **Why** the suggested optimization helps — not merely restating *what* to do. Must align with the P-item **Action** on the card. **Forbidden tautologies:** Do not restate the roofline definition (e.g. "raising bandwidth toward the roofline reduces kernel time"). Instead, explain the **mechanism** (e.g. "fusion eliminates the intermediate write-back, cutting bytes moved per invocation in half"). If the mechanism is not inferable from the trace, state only the action. |
 | `**Impact estimate:**` | Compute tier: rendered from `category_findings[i]` (matched by `rank`), two-bullet low/high `impact_score` format (see § Impact estimate rendering). System tier: `Impact estimate is not quantifiable from trace data.` |
@@ -214,17 +214,12 @@ Agents may add extra columns when needed (e.g. `Sub-Category` in the generic-op 
 
 ## Metric Table Schema (system tier)
 
-Standard schema for the `**Data:**` table inside system-tier `## Detailed Analysis` blocks. In comparative mode, report Trace 1 metrics only — do not add Trace 2 columns or comparisons.
+The `**Data:**` table of a system block has the header below and one row per `members[j]` of its `system_findings` entry, in order. Metric is `metric` verbatim. Value is `<value> ms`, `<value>%` or `<value>` for `unit` `ms`, `%` or `count`, and `—` when `value` is null. In comparative mode, report Trace 1 only.
 
 ```markdown
-| Metric | Value | Flagged |
-|--------|-------|---------|
+| Metric | Value |
+|--------|-------|
 ```
-
-**Column rules:**
-- **Metric**: Copy metric label directly from earlier findings sections — do not rename or reformat.
-- **Value**: `X.X ms` or `X.X%` or `X.X ms (X.X%)`
-- **Flagged**: `true` when the metric's threshold is exceeded (issue present); `false` otherwise.
 
 ---
 
@@ -237,7 +232,7 @@ When citing peak performance for a bottleneck, select the correct peak based on
 - **memory-bound**: Use `operations[i].efficiency.resolved_peak_mem_bw` (TB/s).
   Report achieved TB/s vs peak TB/s.
 
-Do not look up peaks independently from the metadata dict.
+Do not look up peaks independently.
 
 ---
 
@@ -252,7 +247,7 @@ The set of P-items is decided by `category_findings[]` alone — `MIN_PITEM_IMPA
 | Field | Use |
 |-------|-----|
 | `rank` | Card order within your category (1 = highest impact). Also the `rank=` value in `<!-- reasoning-candidate -->`. |
-| `bound_type` | `compute` \| `memory`. Selects the matching Action Prose Guidance row. |
+| `bound_type` | `compute`, `memory`, or `unmodeled`. `compute` and `memory` select the matching Action Prose Guidance row; `unmodeled` has none. |
 | `library` | One per finding. Drives the `(<Library>)` title suffix. |
 | `node` | Multi-trace standalone runs only. |
 | `eff_bucket` | Roofline-efficiency band: `"0-30"`, `"30-60"`, `"60-100"`, or `"unknown"` (standalone); `"all"` (comparative). Members within a finding share the same band. |

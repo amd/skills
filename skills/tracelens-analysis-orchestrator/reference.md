@@ -28,12 +28,12 @@ Use vendor-agnostic terminology throughout such as GPU kernels, collective commu
 0. Query User Inputs (interactive answers or a run YAML, Environment Setup) → cache/run_config.yaml
 1. Generate Performance Report (one wrapper call on cache/run_config.yaml; semantic pre-processing first)
 2. Trace-Quality Gate (deterministic fallback branch for graph-under-recorded traces)
-3-6. Prepare Category Data (GPU Util, Top Ops, Tree Data, Multi-Kernel Data, Category Filtering)
+3-6. Prepare Category Data (GPU Util, Top Ops, Multi-Kernel Data, Category Filtering)
 7. System-Level Analysis (PARALLEL, CPU/Idle + Kernel Fusion + Multi-Kernel) → system_findings/
 8. Invoke Compute Kernel Subagents (PARALLEL, read category_findings[] from _metrics.json) → category_findings/
-   8.5. Aggregate per-category category_findings[] → priority_data.json::findings[] (globally sorted)
+   8.5. Aggregate per-category category_findings[] → priority_data.json::findings[] (globally sorted) and the system metrics' system_findings[] → priority_data.json::system_findings (globally ranked)
 9. Validate Subagent Outputs (system_findings/ + category_findings/)
-10. Prepare Report Data (load_findings) + Model Identification (subagent) → metadata/model_info.json
+10. Prepare Report Data (load_findings) + Model Identification (subagent) → cache/model_info.json
     10.2. Analytical Roofline Augmentation (optional; only when <augment_analytical_roofline> is set)
 11. Render performance PNG IF agent_extension.py is absent
 12. Generate Final Report (composable System + Compute sections), validate it,
@@ -323,13 +323,12 @@ Pass `--platform2` only for comparative and `--capture-folder` only if `config_u
 This script performs:
 - **Step 3:** Assess GPU utilization (computation, idle, communication times)
 - **Step 4:** Identify top 10 operations by GPU time
-- **Step 5:** Pre-compute tree data for bottleneck operations (load trace ONCE)
+- **Step 5:** Load the trace tree once (shared by Steps 5.5 and 5b)
 - **Step 5.5:** Pre-compute multi-kernel issue data (memcpy by direction, NCCL events, overlap metrics)
 - **Step 6:** Filter and export category-specific data
 
 **Outputs:**
 - `category_data/<category>_ops.csv` - Filtered operations per category
-- `metadata/<category>_metadata.json` - Platform specs, GPU utilization, config
 - `category_data/multi_kernel_data.json` - Memcpy/NCCL/overlap pre-computed data
 - `category_data/category_manifest.json` - Workflow metadata with categories (includes `tier` field: `system` or `compute_kernel`)
 - `system_findings/` - Directory for system-level analysis outputs
@@ -480,8 +479,7 @@ Read and follow the FULL instructions in:
   TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/{agent_file}
 
 - Category: {category}
-- Input files: category_data/{category}_ops.csv, metadata/{category}_metadata.json,
-  category_data/{category}_metrics.json (P-items come from `category_findings[]`; `operations[i].module_chain` provides model layer context)
+- Input files: category_data/{category}_ops.csv, category_data/{category}_metrics.json (P-items come from `category_findings[]`; `operations[i].module_chain` provides model layer context)
 - Output file: category_findings/{category}_findings.md
 
 Execute every step in the agent file. Return "DONE" when complete.
@@ -506,7 +504,7 @@ After all compute kernel subagents complete:
 
 ### 8.5 Aggregate findings → priority_data.json
 
-After all compute sub-agent `_metrics.json` files exist (each carrying its own `category_findings[]`), concatenate them into a globally-sorted `priority_data.json::findings[]` for the report template.
+Once all compute sub-agent `_metrics.json` files exist, this call writes the globally sorted `priority_data.json::findings[]` from their `category_findings[]` and `priority_data.json::system_findings`, the system metrics' `system_findings[]` ranked globally by share.
 
 ```bash
 <prefix> python3 -c \"
@@ -552,33 +550,29 @@ load_findings(sys.argv[1])
 
 Launch a Task subagent (generalPurpose) that reads and follows `TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/model-identification-agent.md` with context: <output_dir>. Wait for completion.
 
-**On failure (subagent error, timeout, or `model_info.json` not written):**
-1. **Retry exactly once** by re-launching the same subagent with the same prompt.
-2. If the retry also fails, write fallback `metadata/model_info.json` with all four fields set to `"Cannot be inferred from trace"`.
+**On failure (subagent error or timeout), retry exactly once** by re-launching the same subagent with the same prompt.
 
-Assign <Model> to model value in `<output_dir>/metadata/model_info.json` or "Workload" if model is "Cannot be inferred from trace".
+Assign <Model> to model value in `<output_dir>/cache/model_info.json` or "Workload" if model is "Cannot be inferred from trace".
 
 ---
 
 ## Step 10.2: Analytical Roofline Augmentation (optional) → `<augment_analytical_roofline>`
 
-Skip this step unless `<augment_analytical_roofline>` is set. It runs after Step 8.5 and Step 10.1.
+Skip this step unless `<augment_analytical_roofline>` is set.
 
 ### 10.2.1 Derive projection arguments (subagent)
 
 Launch a Task subagent (generalPurpose) that reads and follows `TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/roofline-augment-agent.md` with context: `<output_dir>`, `<platform>`, `<prefix>`. Wait for completion.
 
-On failure (subagent error, timeout, or `metadata/roofline_augment_args.json` not written), retry once. If the file is still missing, or its `source` is null, or its `phases` is empty, skip the rest of this step.
+On failure (subagent error, timeout, or `cache/roofline_augment_args.json` not written), retry once. If the file is still missing, skip the rest of this step.
 
 ### 10.2.2 Project and merge
 
 ```bash
 <prefix> python3 -m TraceLens.Visualizer.model_explorer_export.roofline_augment \
   --output-dir <output_dir> \
-  --args-json <output_dir>/metadata/roofline_augment_args.json
+  --args-json <output_dir>/cache/roofline_augment_args.json
 ```
-
-Writes `<output_dir>/metadata/roofline_augmentation.json` and merges an additive `roofline` block onto the matching `priority_data.json` finding. Leave every other finding field unchanged.
 
 ---
 
@@ -629,7 +623,7 @@ If the plot fails (extension-absent branch), retry once. If still failing, proce
       - `multi_trace`: add the template's scope line.
 
    d. **System-Level** — append `## System-Level Optimizations`. Use `<prefix> tee -a <output_dir>/analysis.md << 'SECTION_EOF'`.
-      - Data sources: remaining `system_findings/*.md` (cpu_idle, multi_kernel).
+      - Data source: `priority_data.json::system_findings`, one card per entry in array order. Copy each card and its Detailed Analysis block from `system_findings/cpu_idle_findings.md` or `multi_kernel_findings.md`, matched by title.
       - `multi_trace`: add the template's scope line.
 
    e. **Detailed Analysis** — append `## Detailed Analysis` with `### Compute Kernel Insights`, `### Kernel Fusion Insights`, `### System-Level Insights` subsections. Use `<prefix> tee -a <output_dir>/analysis.md << 'SECTION_EOF'`.
@@ -638,8 +632,8 @@ If the plot fails (extension-absent branch), retry once. If still failing, proce
       - When a finding has `roofline.note`, emit it as a blockquote under that finding's `**Identification:**` line, and rephrase any "no performance model" or "cannot compute a roofline" wording for that finding (including its Executive Summary line and card Insight) to "no trace-based perf model".
 
    f. **Appendix** — append `## Appendix` with `### Model Architecture` and `### Hardware Reference`. Use `<prefix> tee -a <output_dir>/analysis.md << 'SECTION_EOF'`.
-      - `metadata/model_info.json` — substitute `<model>`, `<architecture>`, `<scale>`, `<precision>` with the four field values.
-      - Platform arch file — read `platform` from `category_manifest.json`, then read `TraceLens/Agent/Analysis/utils/arch/<platform>.json`. For `### Hardware Reference`: substitute `<platform>`, Peak Memory BW = `mem_bw_gbps / 1000` TB/s, Peak MAF (BF16) = `max_achievable_tflops.matrix_bf16` TFLOPS, Peak MAF (FP8) = `max_achievable_tflops.matrix_fp8` TFLOPS if present.
+      - `cache/model_info.json` — substitute `<model>`, `<architecture>`, `<scale>`, `<precision>` with the four field values.
+      - Hardware peaks — read `platform` and `platform_specs` from `category_manifest.json`. For `### Hardware Reference`: substitute `<platform>`, Peak Memory BW = `platform_specs.peak_mem_bw_tbs` TB/s, Peak MAF (BF16) = `platform_specs.max_achievable_tflops.matrix_bf16` TFLOPS, Peak MAF (FP8) = `platform_specs.max_achievable_tflops.matrix_fp8` TFLOPS if present.
 
 **Failure exclusion:** Skip any category listed in `load_findings()` output as `failed_system` or `failed_compute`; emit one top `kind=warning` marker per failure and per `high_variance` operation (CoV > 1.0 in `*_metrics.json`) instead. No mid-document `## Warnings` section — validation rejects it.
 
@@ -678,10 +672,10 @@ a. Check if the report contains similar but incorrectly named headers and rename
 b. If sections are entirely absent, add them with the correct `##` headers, keeping existing content.
 c. For "Missing metrics row" errors: add the row to the Executive Summary table using values from `category_data/category_manifest.json` (`gpu_utilization` keys) and `priority_data.json` (top bottleneck).
 d. For placeholder values (`X ms`, `Y%`, `Z%`, `W%`) in the Executive Summary metrics table: replace each with the actual value from `category_manifest.json` -> `gpu_utilization`.
-e. For unfilled `<Brief Title>` / `<Library>` / `<platform>` placeholders: substitute the real title/backend/platform from the corresponding findings file or `metadata/*_metadata.json`.
+e. For unfilled `<Brief Title>` / `<Library>` / `<platform>` placeholders: substitute the real title/backend/platform from the corresponding findings file or `category_manifest.json`.
 f. For Args cell mismatches: copy the matching `operations[].args` value verbatim (preserving `<br>`) from the corresponding `category_data/<cat>_metrics.json` and string-replace the bad cell.
 g. For marker errors: restore or add the missing/broken marker in place — never delete a card or block to silence an error. Source numeric values from `priority_data.json` (P-items) or `<cat>_metrics.json::impact_estimates[]` (detail estimates); use `null` or the sentinel `not quantifiable from trace data` for non-quantifiable items.
-h. For priority-consistency errors (R1 P-item count mismatch, R2 P-item category-order mismatch, R3 marker numeric mismatch, R4 Top Ops row-count mismatch, R6 node mismatch): re-render the affected card(s) by re-reading `priority_data.json::findings[N-1]` for `category`, `node` (fusion markers: `kernel_fusion_metrics.json::node`), `low` (impact_score_low), `mid` (impact_score), `high` (impact_score_high), and `priorities[]` for the Top Operations table rows (one row per entry, in array order; under `multi_trace`, each node's table takes the entries with that `node`).
+h. For priority-consistency errors (R1 P-item count mismatch, R2 P-item category-order mismatch, R3 marker numeric mismatch, R4 Top Ops row-count mismatch, R6 node mismatch, R7 System-Level card mismatch): re-render the affected card(s) by re-reading `priority_data.json::findings[N-1]` for `category`, `node` (fusion and system markers: the `node` of that analyzer's `<cat>_metrics.json`), `low` (impact_score_low), `mid` (impact_score), `high` (impact_score_high), and `priorities[]` for the Top Operations table rows (one row per entry, in array order; under `multi_trace`, each node's table takes the entries with that `node`). For R7, re-render the System-Level cards from `priority_data.json::system_findings` in array order.
 2. Run validation again.
 3. Maximum 2 retry attempts. If still failing after retry, proceed with a warning.
 

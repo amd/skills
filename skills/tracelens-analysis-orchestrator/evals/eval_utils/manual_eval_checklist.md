@@ -39,7 +39,7 @@ Run these against every generated `analysis.md` after the programmatic validator
 
 ## Metadata Integrity
 
-- [ ] `impact_estimates` in each `metadata/*.json` is an **array** (not a bare object) with exactly one entry per `reasoning-candidate` block, ordered by ascending `rank`. Each entry sums only the operations that its candidate covers — not the entire category
+- [ ] `impact_estimates` in each `category_data/*_metrics.json` is an **array** (not a bare object) with exactly one entry per `reasoning-candidate` block, ordered by ascending `rank`. Each entry sums only the operations that its candidate covers — not the entire category
 - [ ] Reasoning candidate blocks (`<!-- reasoning-candidate tier=... rank=... -->`) are present in the corresponding findings files under `category_findings/` or `system_findings/`
 
 ## Sentence Quality

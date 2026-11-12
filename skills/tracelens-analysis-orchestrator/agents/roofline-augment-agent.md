@@ -12,7 +12,7 @@ model: claude-opus-4-7-high
 
 # Roofline Augment Subagent
 
-Derive the arguments for `roofline_augment` from artifacts already on disk. You do not compute a roofline and you do not edit findings. The orchestrator runs the projection script on the file you write.
+Derive the arguments for `roofline_augment` from artifacts already on disk.
 
 Use a value only when one of the sources below states it. When a required field cannot be derived, write `null` and set `skipped` to `"Cannot be inferred from trace"`. Do not guess, and do not use a CLI default (batch 1, sequence 2048, tp 1 on a multi-rank trace) as if it had been measured.
 
@@ -26,8 +26,8 @@ Use a value only when one of the sources below states it. When a required field 
 - `prefix`: command prefix from `<output_dir>/cache/cmd_prefix.txt` — substitute the command for `{CMD}`
 
 **Inputs:**
-- `<output_dir>/metadata/model_info.json` — `model`, `architecture`, `scale`, `precision`
-- `<output_dir>/metadata/condensed_op_info.csv` — columns `name`, `Input type`, `Input Dims`. If the file is missing, produce it and then read it:
+- `<output_dir>/cache/model_info.json` — `model`, `architecture`, `scale`, `precision`
+- `<output_dir>/cache/condensed_op_info.csv` — columns `name`, `Input type`, `Input Dims`. If the file is missing, produce it and then read it:
 
 ```bash
 <prefix> python3 -c "
@@ -38,13 +38,13 @@ if not prepare_model_identification_data('<output_dir>'):
 "
 ```
 
-- `<output_dir>/metadata/nn_modules.txt` — nn.Module class names, when present
+- `<output_dir>/cache/nn_modules.txt` — nn.Module class names, when present
 - `<output_dir>/cache/run_config.yaml` — `analysis_mode`, and each job's `name` and `phase`
-- `<output_dir>/category_data/category_manifest.json` — `focus_csv_dir`, and `gpu_utilization.jobs` (each entry has a `phase`)
-- The perf CSVs in `focus_csv_dir` (or `<output_dir>/perf_report_csvs` when the manifest has no `focus_csv_dir`). Read headers and the rows you need; do not load a trace JSON.
+- `<output_dir>/category_data/category_manifest.json` — `focus_csv_dir`
+- The perf CSVs in `<output_dir>/<focus_csv_dir>`. Read headers and the rows you need; do not load a trace JSON.
 
 **Output file you must write:**
-- `<output_dir>/metadata/roofline_augment_args.json`
+- `<output_dir>/cache/roofline_augment_args.json`
 
 ---
 
@@ -75,7 +75,7 @@ if not prepare_model_identification_data('<output_dir>'):
 
 ### source
 
-Read `model` from `metadata/model_info.json`.
+Read `model` from `cache/model_info.json`.
 
 - Use it as `source` when it is a Hugging Face id: exactly one `/`, no spaces, both sides non-empty (`org/name`).
 - Use it as `source` when it is an absolute path to a directory that contains `config.json`.
@@ -106,7 +106,7 @@ Look for an explicit degree, in this order:
 
 ### phases
 
-Collect candidate phase names from `cache/run_config.yaml` `jobs[].phase` and from `category_manifest.json` `gpu_utilization.jobs.*.phase`. Keep `prefill` and `decode` only (case-insensitive; write them in lowercase). A job phase with any other name is not a roofline phase.
+Collect candidate phase names from `cache/run_config.yaml` `jobs[].phase`. Keep `prefill` and `decode` only (case-insensitive; write them in lowercase). A job phase with any other name is not a roofline phase.
 
 For each kept phase, read `batch_size` and `seq_len` from `condensed_op_info.csv` `Input Dims` on attention-like ops (`attention`, `sdpa`, `bmm` with a 4D shape):
 
@@ -116,7 +116,7 @@ For each kept phase, read `batch_size` and `seq_len` from `condensed_op_info.csv
 
 When a trace has no job phase, infer the phase from those shapes: query length `1` with a cached context is `decode`; a query length equal to the context is `prefill`. When both patterns occur, emit both phases.
 
-When `Input Dims` is empty for every op that could supply `batch_size` and `seq_len` for a phase, drop that phase. When no phase remains, set `phases` to `[]` and `skipped` to `"Cannot be inferred from trace"`. Do not fill in batch `1` or sequence `2048`.
+When `Input Dims` is empty for every op that could supply `batch_size` and `seq_len` for a phase, drop that phase. When no phase remains, set `phases` to `[]` and `skipped` to `"Cannot be inferred from trace"`.
 
 A `multi_trace` run projects each resolved phase once. Do not collapse prefill and decode into one phase.
 
@@ -124,5 +124,5 @@ A `multi_trace` run projects each resolved phase once. Do not collapse prefill a
 
 ## Error Handling
 
-- If `model_info.json` is missing or `source` cannot be resolved, still write the file with `source: null`, `phases: []`, and `skipped: "Cannot be inferred from trace"`.
-- Always leave `metadata/roofline_augment_args.json` in place before returning. Do not write `priority_data.json` or `roofline_augmentation.json`.
+- If `model_info.json` is missing, `source` is unresolved.
+- Always leave `cache/roofline_augment_args.json` in place before returning. Do not write `priority_data.json` or `roofline_augmentation.json`.

@@ -12,7 +12,7 @@ model: claude-opus-4-7-high
 
 # GEMM Analysis Subagent
 
-Analyze GEMM operations (`mm`, `bmm`, `addmm`) for performance bottlenecks. Renders P-items from the per-category findings the analyzer script has already grouped and gated.
+Analyze GEMM operations (`mm`, `bmm`, `addmm`, grouped and quantized variants) for performance bottlenecks. Renders P-items from the per-category findings the analyzer script has already grouped and gated.
 
 ---
 
@@ -24,13 +24,13 @@ When invoked by the orchestrator, you will receive the following context:
 - `output_dir`: Base analysis output directory
 - `prefix`: Command prefix from `<output_dir>/cache/cmd_prefix.txt` — contains a template with `{CMD}` placeholder; substitute `{CMD}` with the actual command
 - `comparison_scope`: `standalone` (default) or `comparative`
+- `cat`: GEMM category from the manifest (e.g. `gemm`, `groupedgemm_fwd`, `groupedgemm_bwd`)
 
 **Input files (pre-computed by orchestrator):**
-1. `<output_dir>/category_data/gemm_ops.csv` - Filtered GEMM operations
-2. `<output_dir>/metadata/gemm_metadata.json` - Hardware specs, platform info, GPU utilization
+1. `<output_dir>/category_data/<cat>_ops.csv` - Filtered GEMM operations
 
 **Output file you must write:**
-- `<output_dir>/category_findings/gemm_findings.md`
+- `<output_dir>/category_findings/<cat>_findings.md`
 
 ---
 
@@ -64,19 +64,20 @@ Use vendor-agnostic terminology:
 ```bash
 <prefix> python3 \
   TraceLens/Agent/Analysis/category_analyses/gemm_analysis.py \
-  --output-dir <output_dir>
+  --output-dir <output_dir> \
+  --category <cat> \
   --comparison_scope <comparison_scope>
 ```
 
 ### Step 2: Read Metrics
 
 ```bash
-cat <output_dir>/category_data/gemm_metrics.json
+cat <output_dir>/category_data/<cat>_metrics.json
 ```
 
 ### Step 3: Render P-items from `category_findings`
 
-Read `category_data/gemm_metrics.json::category_findings`. Per [`templates/sub_agent_spec.md`](../templates/sub_agent_spec.md), emit one P-item per entry in ascending `rank` order; ground **Insight** / **Action** / **Reasoning for Slowdown** in the `members[]` rows (their `operation`, `efficiency_pct`, `time_ms`, `library`) using the Action Prose Guidance and Common Patterns below. If `category_findings[]` is empty, emit empty `## Recommendations` and `## Detailed Analysis` sections.
+Read `category_data/<cat>_metrics.json::category_findings`. Per [`templates/sub_agent_spec.md`](../templates/sub_agent_spec.md), emit one P-item per entry in ascending `rank` order; ground **Insight** / **Action** / **Reasoning for Slowdown** in the `members[]` rows (their `operation`, `efficiency_pct`, `time_ms`, `library`) using the Action Prose Guidance and Common Patterns below. If `category_findings[]` is empty, emit empty `## Recommendations` and `## Detailed Analysis` sections.
 
 **Markers required:** wrap every `**Impact**` line in `<!-- impact-begin kind=p_item ... --> ... <!-- impact-end -->` and every Detailed Analysis `**Impact estimate:**` two-bullet block in `kind=detail_estimate` markers per spec § Impact markers (REQUIRED), with `low` / `mid` / `high` taken verbatim from `category_findings[i].impact_score{,_low,_high}`.
 
@@ -116,6 +117,18 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 - **Issue:** GPU can't efficiently parallelize; per-launch overhead dominates.
 - **Algorithmic:** Batch GEMMs together (`torch.bmm`, grouped operations).
 
+### Grouped GEMMs (`groupedgemm_*`)
+- **Symptoms:** Expert GEMMs with small, uneven M per expert, or one launch per expert.
+- **Reasoning:** The kernel finishes when its busiest expert does, and tiles padded to the block size do wasted work on near-empty experts. A looped implementation also pays a launch and an activation re-read per expert.
+- **Algorithmic:** Use one fused grouped kernel over all experts.
+- **Kernel:** Match the M tile to the typical per-expert token count so padding stays small.
+
+### Quantized GEMMs (FP8, MXFP4, block-scale)
+- **Symptoms:** `classification.is_quantized` is true, usually memory-bound at small M.
+- **Reasoning:** Narrow weights cut bytes, but block scales (one scale per 32 or 128 elements) and the wider output still add traffic.
+- **Algorithmic:** Do not recommend narrower precision for a member already at FP4.
+- **Kernel:** Check for a skinny-M kernel variant and a pre-shuffled weight layout.
+
 ---
 
 ## Trace observability (category-specific)
@@ -126,6 +139,7 @@ The universal CANNOT Infer rows in [`sub_agent_spec.md`](../templates/sub_agent_
 |----------------|-----|----------------|
 | Split-K / stream-K decomposition | Only the final kernel name + duration are in the trace; the GEMM library's partitioning choice is not exposed | "Decomposition strategy not visible — profile the kernel for tiling layout." |
 | Autotuned tile / block size | Selected tile is internal to the GEMM library | "Tile size not visible — profile the kernel for tile-size tuning." |
+| Per-expert token counts | Grouped GEMM events do not carry the routing | "Cannot assess expert load balance from trace data." |
 
 ---
 
@@ -144,7 +158,7 @@ if not passed:
         print('  - ' + e)
     sys.exit(1)
 print('PASS: Findings file is valid')
-" '<output_dir>/category_findings/gemm_findings.md' 'compute' '<comparison_scope>'
+" '<output_dir>/category_findings/<cat>_findings.md' 'compute' '<comparison_scope>'
 ```
 
 If validation fails, fix the findings file and re-run. Max 2 retries.

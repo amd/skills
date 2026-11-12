@@ -6,13 +6,13 @@ See LICENSE for license information.
 
 ---
 name: cpu-idle-analyzer
-description: Report GPU idle time percentage and utilization breakdown. Invoked when idle_time_percent exceeds 15%.
+description: Report high GPU idle time with actionable recommendations. Use when the orchestrator flags high GPU idle time.
 model: claude-opus-4-7-high
 ---
 
 # CPU/Idle Analysis Subagent
 
-Report GPU idle time percentage and utilization breakdown. When idle time exceeds 15%, provide actionable recommendations for reducing GPU underutilization.
+Explain high GPU idle time and recommend how to reduce GPU underutilization.
 
 ---
 
@@ -26,9 +26,8 @@ When invoked by the orchestrator, you will receive the following context:
 - `comparison_scope`: `standalone` (default) or `comparative`
 
 **Input files (pre-computed by orchestrator):**
-1. `<output_dir>/category_data/cpu_idle_ops.csv` - Timeline data for idle analysis
-2. `<output_dir>/metadata/cpu_idle_metadata.json` - GPU utilization breakdown
-3. `<output_dir>/category_data/category_manifest.json` - Contains gpu_utilization metrics
+1. `gpu_timeline.csv` and `ops_summary.csv` in the perf report CSV directory - Timeline and kernel data for idle analysis
+2. `<output_dir>/category_data/category_manifest.json` - gpu_utilization metrics
 
 **Output file you must write:**
 - `<output_dir>/system_findings/cpu_idle_findings.md`
@@ -37,15 +36,7 @@ When invoked by the orchestrator, you will receive the following context:
 
 ## Error Handling
 
-**If category data files are missing:**
-1. Read gpu_utilization from metadata/cpu_idle_metadata.json (focus job only on multi-trace)
-2. Provide analysis based on available data
-3. Note limitations in findings
-
-**If analysis script fails:**
-1. Write a findings file with Status: ERROR
-2. **CRITICAL: Do NOT skip idle time recommendations**
-3. Provide basic recommendations based on idle percentage alone
+If the analysis script fails, write a findings file with `Status: ERROR` and the error message, then stop. Write no recommendations and run no validation.
 
 ---
 
@@ -59,10 +50,8 @@ Use vendor-agnostic terminology:
 
 ## Cross-Analyzer Boundary (Required)
 
-- CPU/Idle owns recommendations rooted in idle bubbles, launch overhead, host-side synchronization, and pipeline stalls.
-- Multi-Kernel owns recommendations rooted in communication overlap, collective scheduling, and memcpy direction patterns.
-- If a candidate recommendation's primary action is communication overlap (for example, overlap collectives with compute or reduce collective payload/frequency), do not emit a separate CPU/Idle P-item. Keep CPU/Idle focused on idle/launch mechanisms and let Multi-Kernel carry the communication recommendation.
-- If communication evidence helps explain an idle issue, reference it briefly inside the CPU/Idle reasoning without creating a second card with the same action mechanism.
+- CPU/Idle owns idle bubbles, launch overhead, host-side synchronization, and pipeline stalls.
+- Multi-Kernel owns communication overlap, collective scheduling, and memcpy direction patterns. Mention communication evidence only briefly in the reasoning when it explains idle time.
 
 ---
 
@@ -88,14 +77,14 @@ After the script completes, read the JSON metrics file:
 cat <output_dir>/category_data/cpu_idle_metrics.json
 ```
 
-Key metrics to analyze:
-- `idle_flagged`: Boolean -- whether idle time exceeds 15%
-- `gpu_utilization.idle_time_percent`: Percentage of total time GPU is idle
-- `gpu_utilization.idle_time_ms`: Absolute idle time in milliseconds
+Key fields:
+- `system_findings`: one High GPU Idle Time entry, or `[]` when idle time is within the threshold
+- `node`: the focus node on multi-trace runs, else null
+- `gpu_utilization`: the full time breakdown, as evidence for the prose
 
 ### Step 3: Write Findings
 
-Write `<output_dir>/system_findings/cpu_idle_findings.md` using the command prefix:
+Write `<output_dir>/system_findings/cpu_idle_findings.md` using the command prefix. Write one card and one Detailed Analysis block per `system_findings` entry, as specified in [`templates/sub_agent_spec.md`](../templates/sub_agent_spec.md). Use the Common Recommendations table below as guidance for the Action.
 
 ```markdown
 # CPU/Idle Time Analysis Findings
@@ -103,35 +92,11 @@ Write `<output_dir>/system_findings/cpu_idle_findings.md` using the command pref
 > **Note:** This analysis is exploratory. The patterns and recommendations below are under active development and may be refined as system-level analysis matures.
 
 **Status**: SUCCESS
-**Idle Time**: X% (Y ms out of Z ms total)
-
-## Utilization Breakdown
-
-| Metric | Value |
-|--------|-------|
-| Computation | X% |
-| Idle | Y% |
-| Communication | Z% |
-| MemCpy | W% |
 
 ## Recommendations
 
-[If idle > 15%, provide actionable recommendations based on utilization data and
-cross-category system evidence.
-Use the Common Recommendations table below as guidance. If idle <= 15%, state that
-idle time is within acceptable range and no action is needed.]
-
-Avoid duplicate cards: if two candidate recommendations prescribe the same mechanism/action,
-emit one merged recommendation card with combined evidence.
-
-### [Recommendation Title]
-**Insight**: [1 sentence description]
-**Action**: [Specific steps to take]
+## Detailed Analysis
 ```
-
-**Detailed Analysis block:** Follow [`templates/sub_agent_spec.md`](../templates/sub_agent_spec.md) for the full block schema.
-
-**Impact markers (system tier):** This analyzer emits non-quantifiable impact only. Per § Impact markers (REQUIRED) in the spec, wrap any `**Impact**` line you emit on a P-item card in `<!-- impact-begin kind=p_item low=null mid=null high=null -->` ... `<!-- impact-end -->`. Do not emit `kind=detail_estimate` markers — system-tier findings are not quantifiable.
 
 ### Step 3.1: Validate Findings
 
@@ -157,7 +122,7 @@ If validation fails, fix the findings file and re-run. Max 2 retries.
 
 ## Key Principles
 
-1. **Report factual data** - Idle percentage and utilization breakdown from the metrics JSON
+1. **Report factual data** - Idle time and share from `system_findings`
 2. **Provide actionable solutions** - Specific steps, not vague suggestions
 3. **Vendor-agnostic recommendations** - Focus on patterns and solutions
 4. **Consider trade-offs** - Some solutions have costs (memory, complexity)
