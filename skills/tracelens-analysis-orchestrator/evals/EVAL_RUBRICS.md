@@ -18,20 +18,18 @@ root-cause categories, and where the implementation lives.
 
 | Range | Type | Count | Engine |
 |-------|------|:-----:|--------|
-| workflow\_eval\_1–8 | Scripted (file/dir existence) | 8 | `workflow_scripted_evals.py` |
-| workflow\_eval\_9 | Scripted (per-header) | 7 sub-indices | `workflow_scripted_evals.py` |
-| workflow\_eval\_10 | Scripted (per-row + CSV cross-check) | 5 sub-indices | `workflow_scripted_evals.py` |
-| workflow\_eval\_11 | Scripted (per-P-item) | Dynamic | `workflow_scripted_evals.py` |
-| workflow\_eval\_12 | LLM (multi-dimensional scoring) | 1 | `skills/workflow-llm-eval/` |
-| workflow\_eval\_13 | Scripted (per-category) | Dynamic | `workflow_scripted_evals.py` |
+| workflow\_eval\_1–7 | Scripted (file/dir existence) | 7 | `workflow_scripted_evals.py` |
+| workflow\_eval\_8 | Scripted (per-header) | 7 sub-indices | `workflow_scripted_evals.py` |
+| workflow\_eval\_9 | Scripted (per-row + CSV cross-check) | 5 sub-indices | `workflow_scripted_evals.py` |
+| workflow\_eval\_10 | Scripted (per-P-item) | Dynamic | `workflow_scripted_evals.py` |
+| workflow\_eval\_11 | LLM (multi-dimensional scoring) | 1 | `skills/workflow-llm-eval/` |
+| workflow\_eval\_12 | Scripted (per-field) | 4 sub-indices | `workflow_scripted_evals.py` |
 | quality\_eval\_1 | Scripted (CSV alignment) | 1 (standalone) / 2 (comparative) | `quality_scripted_evals.py` |
 | quality\_eval\_2 | LLM (multi-dimensional scoring) | 1 | `skills/quality-llm-eval/` |
 | quality\_eval\_3 | LLM (multi-dimensional scoring) | 1 | `skills/quality-llm-eval/` |
 | marker\_eval\_1 | Scripted (structural) | 1 | `workflow_scripted_evals.py` |
 | marker\_eval\_2 | Scripted (per-P-item) | Dynamic | `workflow_scripted_evals.py` |
 | marker\_eval\_3 | Scripted (per-P-item) | Dynamic | `workflow_scripted_evals.py` |
-
-**Total:** 15 scripted evals (expanding to ~30+ sub-indices) + 3 LLM evals = 18 logical evals.
 
 ---
 
@@ -51,24 +49,23 @@ workflow evals are set to FAIL with `root_cause=pipeline`.
 
 ---
 
-## Workflow Evals 1–8: File & Directory Existence
+## Workflow Evals 1–7: File & Directory Existence
 
 All binary PASS/FAIL. Root cause is always `pipeline`.
 
 | Index | Summary | Pass Criteria | Key Details |
 |-------|---------|---------------|-------------|
-| `workflow_eval_1` | Directory structure created | `metadata/`, `category_data/`, `system_findings/`, `category_findings/` all exist | — |
-| `workflow_eval_2` | Metadata files exist on disk | Every `metadata_file` listed in `category_manifest.json` exists on disk | Requires manifest |
-| `workflow_eval_3` | Model info JSON exists and valid | `metadata/model_info.json` exists, is valid JSON, has keys `{model, architecture, scale, precision}`, none empty | — |
+| `workflow_eval_1` | Directory structure created | `category_data/`, `system_findings/`, `category_findings/` all exist | — |
+| `workflow_eval_2` | Platform specs recorded | `category_manifest.json` has `platform_specs` with `peak_mem_bw_tbs`, `max_achievable_tflops`, `memory_gb` | Requires manifest |
+| `workflow_eval_3` | Model info JSON exists and valid | `cache/model_info.json` exists, is valid JSON, has keys `{model, architecture, scale, precision}`, none empty | — |
 | `workflow_eval_4` | Unified perf report exists | `perf_report_csvs/unified_perf_summary.csv` exists (standalone) or `perf_report_trace1_csvs/unified_perf_summary.csv` (comparative) | — |
-| `workflow_eval_5` | Tree data files exist on disk | Every `tree_data_file` listed in `category_manifest.json` exists on disk | Requires manifest |
-| `workflow_eval_6` | Categorical findings .md files exist | For every category in manifest (except `cpu_idle` when idle ≤ 15%), the corresponding `*_findings.md` exists in the correct tier directory | — |
-| `workflow_eval_7` | All findings correctly placed | No findings file is in the wrong tier directory (`system_findings/` vs `category_findings/`) | — |
-| `workflow_eval_8` | Plot generated on disk | `perf_improvement.png` exists **OR** no kernel tuning recommendations exist (legitimately skipped) | Checks `plot_data.json` and `*_metrics.json` for zero recommendations |
+| `workflow_eval_5` | Categorical findings .md files exist | For every category in manifest (except `cpu_idle` when idle ≤ 15%), the corresponding `*_findings.md` exists in the correct tier directory | — |
+| `workflow_eval_6` | All findings correctly placed | No findings file is in the wrong tier directory (`system_findings/` vs `category_findings/`) | — |
+| `workflow_eval_7` | Plot generated on disk | `perf_improvement.png` exists **OR** no kernel tuning recommendations exist (legitimately skipped) | Checks `priority_data.json` and `*_metrics.json` for zero recommendations |
 
 ---
 
-## Workflow Eval 9: Report Template Rendering
+## Workflow Eval 8: Report Template Rendering
 
 **Type:** Scripted, per-header. **Root cause on fail:** `template`.
 
@@ -76,17 +73,17 @@ Checks `analysis.md` for required `##` section headers and a metrics table.
 
 | Sub-index | Pass Criteria |
 |-----------|---------------|
-| `workflow_eval_9_executive_summary` | `## Executive Summary` header present (regex: `^## Executive Summary`) |
-| `workflow_eval_9_compute` | `## Compute Kernel Optimizations` header present |
-| `workflow_eval_9_system` | `## System-Level Optimizations` header present |
-| `workflow_eval_9_detailed` | `## Detailed Analysis` header present |
-| `workflow_eval_9_appendix` | `## Appendix` header present |
-| `workflow_eval_9_metrics_table` | Executive Summary section contains at least one markdown table row (`\|.*\|`) |
-| `workflow_eval_9_kernel_fusion` | `## Kernel Fusion Opportunities (Experimental)` header present |
+| `workflow_eval_8_executive_summary` | `## Executive Summary` header present (regex: `^## Executive Summary`) |
+| `workflow_eval_8_compute` | `## Compute Kernel Optimizations` header present |
+| `workflow_eval_8_system` | `## System-Level Optimizations` header present |
+| `workflow_eval_8_detailed` | `## Detailed Analysis` header present |
+| `workflow_eval_8_appendix` | `## Appendix` header present |
+| `workflow_eval_8_metrics_table` | Executive Summary section contains at least one markdown table row (`\|.*\|`) |
+| `workflow_eval_8_kernel_fusion` | `## Kernel Fusion Opportunities (Experimental)` header present |
 
 ---
 
-## Workflow Eval 10: Executive Summary Metrics Table
+## Workflow Eval 9: Executive Summary Metrics Table
 
 **Type:** Scripted, per-row + CSV cross-check. **Root cause on fail:** `template`.
 
@@ -98,11 +95,11 @@ Cross-checks against `perf_report_csvs/gpu_timeline.csv`.
 
 | Sub-index | Row Labels (synonyms) | CSV Cross-Check | Tolerance |
 |-----------|----------------------|-----------------|-----------|
-| `workflow_eval_10_total_time` | "Total Compute Time", "Total Time" | — | — |
-| `workflow_eval_10_compute_pct` | "Computation", "Compute %", "Compute" | `computation_time` percent | ±1.0% absolute |
-| `workflow_eval_10_idle_pct` | "Idle Time", "Idle %", "Idle" | `idle_time` percent | ±1.0% absolute |
-| `workflow_eval_10_comm_pct` | "Exposed Communication", "Exposed Communication %" | — | — |
-| `workflow_eval_10_bottleneck` | "Top Bottleneck Category", "Top Bottleneck" | — | — |
+| `workflow_eval_9_total_time` | "Total Compute Time", "Total Time" | — | — |
+| `workflow_eval_9_compute_pct` | "Computation", "Compute %", "Compute" | `computation_time` percent | ±1.0% absolute |
+| `workflow_eval_9_idle_pct` | "Idle Time", "Idle %", "Idle" | `idle_time` percent | ±1.0% absolute |
+| `workflow_eval_9_comm_pct` | "Exposed Communication", "Exposed Communication %" | — | — |
+| `workflow_eval_9_bottleneck` | "Top Bottleneck Category", "Top Bottleneck" | — | — |
 
 ### Comparative (4-column table: Metric | T1 | T2 | Difference)
 
@@ -115,7 +112,7 @@ Additionally, for every numeric row: verifies `|reported_diff − (T1 − T2)| /
 
 ---
 
-## Workflow Eval 11: Issue Template Rendering
+## Workflow Eval 10: Issue Template Rendering
 
 **Type:** Scripted, per-P-item. **Root cause on fail:** `template`.
 
@@ -123,8 +120,8 @@ Finds every priority item (`### ...P{N}:` headers) and checks for required bold 
 
 | Section | Required Fields | Example Sub-index |
 |---------|----------------|-------------------|
-| `## Compute Kernel Optimizations` | `**Insight**` or `**Issue**`, `**Action**`, `**Impact**` | `workflow_eval_11_compute_P1` |
-| `## System-Level Optimizations` | `**Insight**` or `**Issue**`, `**Action**` (no Impact) | `workflow_eval_11_system_P1` |
+| `## Compute Kernel Optimizations` | `**Insight**` or `**Issue**`, `**Action**`, `**Impact**` | `workflow_eval_10_compute_P1` |
+| `## System-Level Optimizations` | `**Insight**` or `**Issue**`, `**Action**` (no Impact) | `workflow_eval_10_system_P1` |
 
 **Pass:** All required bold fields present in the P-item block.
 **Fail:** Any required field missing. Details list which fields are absent.
@@ -133,7 +130,7 @@ Finds every priority item (`### ...P{N}:` headers) and checks for required bold 
 
 ---
 
-## Workflow Eval 12: Hardware Reference in Appendix
+## Workflow Eval 11: Hardware Reference in Appendix
 
 **Type:** LLM, multi-dimensional weighted scoring. **Root cause on fail:** `template`.
 
@@ -165,19 +162,19 @@ overall_score = correctness × 0.50 + completeness × 0.50
 
 ---
 
-## Workflow Eval 13: Model Identification in Report
+## Workflow Eval 12: Model Identification in Report
 
 **Type:** Scripted, per-field. **Root cause on fail:** `template`.
 
-Reads `metadata/model_info.json` and checks that each field value appears
+Reads `cache/model_info.json` and checks that each field value appears
 (case-insensitive substring match) in the `## Appendix` section of the report.
 
 | Sub-index | JSON Field | Pass Criteria |
 |-----------|-----------|---------------|
-| `workflow_eval_13_model` | `model` | Value appears in Appendix text |
-| `workflow_eval_13_architecture` | `architecture` | Value appears in Appendix text |
-| `workflow_eval_13_scale` | `scale` | Value appears in Appendix text |
-| `workflow_eval_13_precision` | `precision` | Value appears in Appendix text |
+| `workflow_eval_12_model` | `model` | Value appears in Appendix text |
+| `workflow_eval_12_architecture` | `architecture` | Value appears in Appendix text |
+| `workflow_eval_12_scale` | `scale` | Value appears in Appendix text |
+| `workflow_eval_12_precision` | `precision` | Value appears in Appendix text |
 
 **Special case:** If a field value is empty or `"Cannot be inferred from trace"`,
 the check is **skipped (PASS)** with a note in details.
@@ -378,7 +375,7 @@ index,category,issue_summary,result,details,root_cause,recommended_fix
 
 | Column | Description |
 |--------|-------------|
-| `index` | Eval identifier (e.g., `workflow_eval_9_compute`, `quality_eval_2`) |
+| `index` | Eval identifier (e.g., `workflow_eval_8_compute`, `quality_eval_2`) |
 | `category` | `Workflow`, `Quality`, or `Marker Identification` |
 | `issue_summary` | Human-readable name of the check |
 | `result` | `PASS` or `FAIL` |

@@ -39,10 +39,7 @@ When invoked by the orchestrator, you will receive the following context:
 
 ## Error Handling
 
-**If analysis script fails:**
-1. Write a findings file with Status: ERROR
-2. Include the error message and traceback
-3. Do NOT attempt manual analysis of raw trace data
+If the analysis script fails, write a findings file with `Status: ERROR` and the error message, then stop. Write no recommendations and run no validation.
 
 ---
 
@@ -56,10 +53,8 @@ Use vendor-agnostic terminology:
 
 ## Cross-Analyzer Boundary (Required)
 
-- Multi-Kernel owns recommendations rooted in communication overlap, collective scheduling, and memcpy direction patterns.
-- CPU/Idle owns recommendations rooted in idle bubbles, launch overhead, host-side synchronization, and pipeline stalls.
-- Do not emit a Multi-Kernel card when the primary mechanism/action is launch-overhead reduction or host-pipeline tuning unless there is distinct communication/memcpy evidence that changes the action.
-- If two candidate Multi-Kernel cards prescribe the same mechanism/action, merge into one card and combine evidence instead of emitting near-duplicates.
+- Multi-Kernel owns communication overlap, collective scheduling, and memcpy direction patterns.
+- CPU/Idle owns idle bubbles, launch overhead, host-side synchronization, and pipeline stalls.
 
 ---
 
@@ -85,25 +80,16 @@ After the script completes, read the JSON metrics file:
 cat <output_dir>/category_data/multi_kernel_metrics.json
 ```
 
-Key metrics to analyze:
-- `memcpy_assessment`: Boolean `flagged` and per-direction breakdown of memory copy issues
-- `nccl_blocking_assessment`: Boolean `flagged` for communication blocking compute
-- `overlap_assessment`: Boolean `flagged` for compute/communication overlap quality
-- `patterns_detected`: List of detected patterns with description (no recommendations -- you generate those)
+Key fields:
+- `system_findings`: the findings to write up; `[]` when nothing fires
+- `node`: the focus node on multi-trace runs, else null
+- `memcpy_assessment`, `nccl_blocking_assessment`, `overlap_assessment`: per-direction and communication detail, as evidence for the prose
 
-### Step 2.1: Recommendation Decision Gates
-
-Before drafting recommendations, map each candidate to a specific gate:
-
-- **Overlap gate:** Recommend overlap tuning only when `overlap_assessment.flagged == true` or exposed communication is clearly on the critical path.
-- **Blocking gate:** Recommend communication-blocking fixes only when `nccl_blocking_assessment.flagged == true` and exposed communication is material in absolute or percentage terms.
-- **Memcpy gate:** Recommend direction-specific transfer fixes only when that direction has clear evidence (time share and/or count pattern) in `memcpy_assessment`.
-- **Synchronization gate:** Recommend sync cleanup only when metrics or detected patterns indicate barrier-like behavior; do not speculate.
-- **Merge gate:** If two candidates prescribe the same mechanism/action, emit one merged card with combined evidence.
+**Gates.** The script emits a finding when a direction's memcpy share exceeds 5% or its transfer count exceeds 10 (D2D: share only), or when exposed communication exceeds 5% of GPU time or compute/communication overlap is below 70%.
 
 ### Step 3: Analyze Memory Copy Patterns
 
-Examine `memcpy_assessment` for D2H and H2D issues. `memcpy_assessment.flagged` is `true` when any direction exceeds thresholds (>5% of total time or >10 transfers).
+Examine `memcpy_assessment` for D2H, H2D and D2D issues.
 
 **D2H (Device-to-Host) Issues:**
 - Frequent D2H copies suggest unnecessary data movement back to host
@@ -120,30 +106,13 @@ Examine `memcpy_assessment` for D2H and H2D issues. `memcpy_assessment.flagged` 
 - Common causes: Explicit `.to(device)` on already-resident tensors, contiguous() calls, format conversions
 - Solution: Eliminate redundant copies; use in-place operations or aliased tensors where possible
 
-### Step 4: Analyze Communication Blocking and Synchronization
+### Step 4: Analyze Communication Blocking
 
-Examine `nccl_blocking_assessment`. `nccl_blocking_assessment.flagged` is `true` when exposed communication exceeds 5% of total GPU time.
-
-**Blocking indicators:**
-- High `exposed_comm_time_ms` means communication is on the critical path
-- This time is NOT overlapped with compute -- GPU is waiting
-
-**Synchronization barriers:**
-- Explicit device-level synchronization or stream-level syncs stall the GPU pipeline
-- Common causes: Debug synchronization left in production code, unnecessary sync between independent operations
-- Solution: Remove unnecessary device/stream syncs; use stream events for fine-grained ordering instead of full device sync
-
-**Redundant collective operations:**
-- Multiple allreduce/allgather on the same or overlapping data within a single iteration
-- Common causes: Framework layers issuing separate collectives that could be fused, duplicate gradient syncs
-- Solution: Deduplicate or fuse collectives; reduce collective frequency per iteration
-
-**Selection rule for this step:**
-- If `nccl_blocking_assessment.flagged` is false and exposed communication is not material, do not emit a standalone "communication blocking" recommendation.
+Examine `nccl_blocking_assessment`. High `exposed_comm_time_ms` means communication is on the critical path: that time is not overlapped with compute and the GPU is waiting.
 
 ### Step 5: Analyze Compute/Communication Overlap
 
-Examine `overlap_assessment`. `overlap_assessment.flagged` is `true` when overlap ratio is below 70%.
+Examine `overlap_assessment`.
 
 **Overlap improvement strategies (choose based on analysis mode):**
 
@@ -161,78 +130,25 @@ For **inference** workloads (vLLM / SGLang / ATOM):
 
 ### Step 6: Write System Findings
 
-Write `<output_dir>/system_findings/multi_kernel_findings.md` using the command prefix:
+Write `<output_dir>/system_findings/multi_kernel_findings.md` using the command prefix. Write one card and one Detailed Analysis block per `system_findings` entry, as specified in [`templates/sub_agent_spec.md`](../templates/sub_agent_spec.md).
 
 Recommendation quality requirements (apply before writing):
-- Each recommendation must cite a concrete evidence points from metrics or detected patterns in `Insight` or `Detailed Analysis`.
+- Each recommendation must cite concrete evidence points from the metrics in `Insight` or `Detailed Analysis`.
 - Each `Action` must name one concrete mechanism (for example, bucket sizing, stream split, collective fusion, async staging) and avoid generic advice.
 - For each recommendation, include a clear expected metric movement in prose (for example, lower exposed communication time, higher overlap ratio, lower D2H/H2D count).
-- Do not emit two recommendations with effectively the same action mechanism; merge them.
 
 ```markdown
 # Multi-Kernel Issue Analysis Findings
 
 > **Note:** This analysis is exploratory. The patterns and recommendations below are under active development and may be refined as system-level analysis matures.
 
-**Status**: [SUCCESS/ERROR]
+**Status**: SUCCESS
 **Analysis Tier**: System-Level
-
-## Summary
-
-| Metric | Value | Flagged |
-|--------|-------|---------|
-| Total Memcpy Events | X | true/false |
-| D2H Transfers | X (Y ms) | true/false |
-| H2D Transfers | X (Y ms) | true/false |
-| Exposed Communication | X% of total | true/false |
-| Compute/Comm Overlap | X% | true/false |
-
-## Memory Copy Analysis
-
-### D2H (Device-to-Host) Transfers
-- **Count**: X transfers
-- **Total Time**: Y ms (Z% of total GPU time)
-- **Flagged**: true/false
-- **Root Cause**: [analysis based on count and time patterns]
-
-### H2D (Host-to-Device) Transfers
-- **Count**: X transfers
-- **Total Time**: Y ms (Z% of total GPU time)
-- **Flagged**: true/false
-- **Root Cause**: [analysis]
-
-## Communication Blocking Analysis
-
-### Communication Blocking Compute
-- **Exposed Communication Time**: X ms (Y% of total)
-- **Total Communication Time**: X ms
-- **Flagged**: true/false
-
-### Compute/Communication Overlap
-- **Overlap Ratio**: X% (target > 70%)
-- **Flagged**: true/false
-
-## Detected Patterns
-
-1. **[Pattern Name]**
-   - Evidence: [metrics]
-   - Recommendation: [specific action]
 
 ## Recommendations
 
-### System P<N>: [Highest Priority Multi-Kernel Issue]
-**Insight**: [1 sentence]
-**Action**: [1-2 sentences]
-
-### System P<N+1>: [Next Issue]
-**Insight**: [1 sentence]
-**Action**: [1-2 sentences]
-
+## Detailed Analysis
 ```
-
-**Detailed Analysis block:** Follow [`templates/sub_agent_spec.md`](../templates/sub_agent_spec.md) for the full block schema.
-
-**Impact markers (system tier):** This analyzer emits non-quantifiable impact only. Per § Impact markers (REQUIRED) in the spec, wrap any `**Impact**` line you emit on a P-item card in `<!-- impact-begin kind=p_item low=null mid=null high=null -->` ... `<!-- impact-end -->`. Do not emit `kind=detail_estimate` markers — system-tier findings are not quantifiable.
 
 ### Step 7.1: Validate Findings
 
@@ -261,5 +177,4 @@ If validation fails, fix the findings file and re-run. Max 2 retries.
 1. **System-level focus** - These are pipeline/framework issues, NOT individual kernel issues
 2. **Provide actionable solutions** - Specific steps, not vague suggestions
 3. **Vendor-agnostic recommendations** - Focus on patterns and solutions
-4. **Priority numbering is sequential** - The orchestrator assigns final P-numbers. Use P<N> placeholders; if CPU/Idle is below threshold, multi-kernel issues start at P1
-5. **Do NOT duplicate category analysis** - This analysis is about cross-cutting patterns, not individual op efficiency
+4. **Do NOT duplicate category analysis** - This analysis is about cross-cutting patterns, not individual op efficiency

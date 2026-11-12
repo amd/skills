@@ -64,7 +64,7 @@ Run the deterministic fusion analysis script to produce `kernel_fusion_metrics.j
 
 ```bash
 <prefix> python TraceLens/Agent/Analysis/category_analyses/kernel_fusion_analysis.py \
-  --output-dir <output_dir>
+  --output-dir <output_dir> \
   --comparison-scope <comparison_scope>
 ```
 

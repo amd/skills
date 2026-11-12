@@ -219,16 +219,14 @@ generate_single_ref() {
         rm -rf "$REF_DIR"
         cp -r "$OUTPUT_DIR" "$REF_DIR"
 
-        # Remove unwanted files from reference dir (keep only analysis.md + perf_report_csvs/)
+        # Remove unwanted files from reference dir (keep analysis.md, the perf report CSV folders and run_config.resolved.yaml)
         rm -rf "$REF_DIR/category_data" \
                "$REF_DIR/category_findings" \
                "$REF_DIR/system_findings" \
-               "$REF_DIR/metadata" \
                "$REF_DIR/cache" \
                "$REF_DIR/perf_improvement.png" \
                "$REF_DIR/perf_improvement_base64.txt" \
-               "$REF_DIR/plot_data.json" \
-               "$REF_DIR/perf_report.xlsx" \
+               "$REF_DIR"/perf_report*.xlsx \
                "$REF_DIR/priority_data.json"
 
         # Remove intermediate analysis output (docker-owned files need container cleanup)

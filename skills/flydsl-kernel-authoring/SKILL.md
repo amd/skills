@@ -42,10 +42,10 @@ Python (@flyc.kernel/@flyc.jit)
 
 ### Key Passes
 Pipeline is built by `RocmBackend._pipeline_parts()` and split into three stages — see `docs/architecture_guide.md` §3 for the per-pass table. Highlights:
-1. `fly-rewrite-func-signature` - Rewrite DSL types at function / SCF boundaries to packed LLVM structs
+1. `fly-canonicalize` + `fly-rocdl-expand-ops` - Canonicalize Fly ops and expand target-specific operations
 2. `fly-layout-lowering` - Lower layout algebra (`fly.crd2idx`, partitions, divides) to arithmetic
 3. `fly-convert-atom-call-to-ssa-form` + `fly-promote-regmem-to-vectorssa` - Lift copy/MMA atom calls and register memory to vector SSA
-4. `convert-fly-to-rocdl` - Fly ops -> ROCDL intrinsics
+4. `convert-fly-to-rocdl` - Convert Fly values (signatures, calls, launches and control flow alike) to the nested packed ABI, and Fly ops to ROCDL intrinsics
 5. `gpu-module-to-binary{format=fatbin}` - Emit HSACO binary via LLVM AMDGPU backend
 
 ### Key Source Paths

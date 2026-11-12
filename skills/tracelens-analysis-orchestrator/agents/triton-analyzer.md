@@ -27,7 +27,6 @@ When invoked by the orchestrator, you will receive the following context:
 
 **Input files (pre-computed by orchestrator):**
 1. `<output_dir>/category_data/triton_ops.csv` - Filtered Triton operations (includes `call_stack` column for architecture context)
-2. `<output_dir>/metadata/triton_metadata.json` - Hardware specs
 
 **Output file you must write:**
 - `<output_dir>/category_findings/triton_findings.md`
@@ -63,7 +62,7 @@ Use vendor-agnostic terminology:
 ```bash
 <prefix> python3 \
   TraceLens/Agent/Analysis/category_analyses/triton_analysis.py \
-  --output-dir <output_dir>
+  --output-dir <output_dir> \
   --comparison_scope <comparison_scope>
 ```
 

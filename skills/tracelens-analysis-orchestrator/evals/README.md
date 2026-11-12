@@ -82,7 +82,7 @@ Environment variables:
 | `REPORT_DIR` | `<RESULTS_ROOT>/../reports` | Where reports and reproducers are written |
 | `SUITE_NAME` | `eval` | Suite label used in reports (e.g. `unit`, `e2e`) |
 | `TEST_IDS` | (empty = all) | Space-separated trace IDs to run (filter) |
-| `SKIP_GENERATE_REF` | (empty) | Set to `1` to skip golden reference generation |
+| `SKIP_GENERATE_REF` | (empty) | Set to `1` to skip golden reference generation and reuse references already generated locally |
 | `SKIP_POST_PROCESSING` | (empty) | Set to `1` to skip report generation after the eval loop |
 
 Example (subset of traces, 3 repeats, 5 parallel):
@@ -201,10 +201,9 @@ agent --model claude-opus-4-8-thinking-medium --print --force --trust \
 
 ### 1. Create the test case directory
 
-Each test case lives under `TraceLens/Agent/Analysis/skills/analysis-orchestrator/evals/analysis_tests/<unit_tests_standalone|unit_tests_comparative|e2e_tests_standalone|e2e_tests_comparative>/<test_id>/` and must contain:
+Each test case lives under `TraceLens/Agent/Analysis/skills/analysis-orchestrator/evals/analysis_tests/<unit_tests_standalone|unit_tests_comparative|e2e_tests_standalone|e2e_tests_comparative>/<test_id>/` and contains only the profiling trace file(s).
 
-- The profiling trace JSON file.
-- `analysis_output_ref/` -- a reference analysis output to compare against (used by quality evals). Should include `analysis.md` and `perf_report_csvs/`. Generate this with `generate_ref.sh`.
+The reference output the quality evals compare against (`analysis_output_ref/`, with `analysis.md` and `perf_report_csvs/`) is not shipped. `generate_ref.sh` creates it locally, and `run_repeatability_parallel.sh` runs that step automatically.
 
 ### 2. Add a row to `analysis_tests/combined_traces_standalone.csv` (or `combined_traces_comparative.csv`)
 
@@ -232,7 +231,7 @@ For each test case in the traces CSV, the scripts run two phases:
 
 1. **Phase 1 -- Analysis:** Invokes the Analysis agent on the trace file. Output is written to `analysis_output/`. Agent output is logged as stream JSON (`.ndjson`). The orchestrator includes targeted subagent retry (1 retry per failed subagent in Steps 6, 7, and 9) to reduce flaky pipeline failures.
 2. **Phase 2 -- Workflow + Quality Evals (4 parallel tasks):** Launches four tasks concurrently:
-   - Scripted workflow evals — 13 evals with per-item sub-scoring (via `docker exec`)
+   - Scripted workflow evals — 11 evals with per-item sub-scoring (via `docker exec`)
    - LLM workflow eval — 1 eval with multi-dimensional weighted scoring (via `agent`)
    - Scripted quality evals — 1 eval (via `docker exec`)
    - LLM quality evals — 2 evals with multi-dimensional weighted scoring (via `agent`)
@@ -246,18 +245,18 @@ Three Cursor agent skills under `TraceLens/Agent/Analysis/skills/analysis-orches
 
 The remaining two skills define the per-case eval logic:
 
-**workflow-eval** -- 14 evals (13 scripted + 1 LLM):
+**workflow-eval** -- 12 evals (11 scripted + 1 LLM):
 
 | Eval | Type | What it checks |
 |------|------|---------------|
-| 1–8 | Scripted | Directory structure, metadata files, model info, perf report, tree data, findings existence, plot |
-| 9 | Scripted | Report template rendering — all required `##` headers present. Per-header sub-indices (`_executive_summary`, `_compute`, `_system`, `_detailed`, `_appendix`, `_metrics_table`) |
-| 10 | Scripted | Executive Summary metrics — values match `gpu_timeline.csv` within 1%. Per-metric sub-indices (`_compute_pct`, `_idle_pct`, `_comm_pct`, `_total_time`, `_bottleneck`) |
-| 11 | Scripted | Issue template rendering — each P-item has Insight/Action/Impact fields. Per-P-item sub-indices (`_compute_P1`, `_system_P2`, etc.) |
-| 12 | LLM | Hardware Reference in Appendix — platform, memory BW, MAF values. Multi-dimensional weighted scoring: correctness (50%) + completeness (50%), pass threshold ≥ 7.0 |
-| 13 | Scripted | Model identification in Appendix — all 4 `model_info.json` fields present. Per-field sub-indices (`_model`, `_architecture`, `_scale`, `_precision`) |
+| 1–7 | Scripted | Directory structure, platform specs, model info, perf report, findings existence, plot |
+| 8 | Scripted | Report template rendering — all required `##` headers present. Per-header sub-indices (`_executive_summary`, `_compute`, `_system`, `_detailed`, `_appendix`, `_metrics_table`) |
+| 9 | Scripted | Executive Summary metrics — values match `gpu_timeline.csv` within 1%. Per-metric sub-indices (`_compute_pct`, `_idle_pct`, `_comm_pct`, `_total_time`, `_bottleneck`) |
+| 10 | Scripted | Issue template rendering — each P-item has Insight/Action/Impact fields. Per-P-item sub-indices (`_compute_P1`, `_system_P2`, etc.) |
+| 11 | LLM | Hardware Reference in Appendix — platform, memory BW, MAF values. Multi-dimensional weighted scoring: correctness (50%) + completeness (50%), pass threshold ≥ 7.0 |
+| 12 | Scripted | Model identification in Appendix — all 4 `model_info.json` fields present. Per-field sub-indices (`_model`, `_architecture`, `_scale`, `_precision`) |
 
-Scripted evals (1–11, 13–14) run via `eval_utils/workflow_scripted_evals.py`. LLM eval (12) runs via `skills/workflow-llm-eval/` (`SKILL.md` + `reference.md`).
+Scripted evals (1–10, 12) run via `eval_utils/workflow_scripted_evals.py`. LLM eval (11) runs via `skills/workflow-llm-eval/` (`SKILL.md` + `reference.md`).
 
 All scripted evals include **pre-check gates** that immediately FAIL all evals with a clear message if the output directory is missing, `analysis.md` is absent/garbled, or other fundamental prerequisites are unmet.
 
@@ -292,7 +291,7 @@ index,category,issue_summary,result,details,root_cause,recommended_fix
 
 | Column | Description |
 |--------|-------------|
-| `index` | Eval identifier (e.g., `workflow_eval_9_compute`, `quality_eval_2`) |
+| `index` | Eval identifier (e.g., `workflow_eval_8_compute`, `quality_eval_2`) |
 | `category` | `Workflow` or `Quality` |
 | `issue_summary` | Human-readable name of the check |
 | `result` | `PASS` or `FAIL` |

@@ -6,13 +6,13 @@ See LICENSE for license information.
 
 ---
 name: sdpa-analyzer
-description: Analyze Scaled Dot Product Attention operations (forward and backward) for performance bottlenecks. Supports Flash Attention and Paged Attention (vLLM) analysis. Handles both sdpa_fwd and sdpa_bwd categories.
+description: Analyze attention operations for performance bottlenecks. Covers training SDPA (sdpa_fwd, sdpa_bwd) and inference attention (inferenceattention: paged, MLA, sparse decode, KV-cache writes).
 model: claude-opus-4-7-high
 ---
 
 # SDPA Analysis Subagent
 
-Analyze SDPA (Scaled Dot Product Attention) operations for performance bottlenecks. Supports forward (`sdpa_fwd`) and backward (`sdpa_bwd`), Flash Attention, and Paged Attention (vLLM). Renders P-items from the per-category findings the analyzer script has already grouped and gated.
+Analyze attention operations for performance bottlenecks: training SDPA (`sdpa_fwd`, `sdpa_bwd`) and inference attention (`inferenceattention`). Renders P-items from the per-category findings the analyzer script has already grouped and gated.
 
 ---
 
@@ -24,11 +24,10 @@ When invoked by the orchestrator, you will receive the following context:
 - `output_dir`: Base analysis output directory
 - `prefix`: Command prefix from `<output_dir>/cache/cmd_prefix.txt` — contains a template with `{CMD}` placeholder; substitute `{CMD}` with the actual command
 - `comparison_scope`: `standalone` (default) or `comparative`
-- `sdpa`: Either `sdpa_fwd` (forward pass) or `sdpa_bwd` (backward pass)
+- `sdpa`: `sdpa_fwd`, `sdpa_bwd`, or `inferenceattention`
 
 **Input files (pre-computed by orchestrator):**
 1. `<output_dir>/category_data/<sdpa>_ops.csv` - Filtered SDPA operations (includes `call_stack` column for architecture context)
-2. `<output_dir>/metadata/<sdpa>_metadata.json` - Hardware specs, GPU utilization
 
 **Output file you must write:**
 - `<output_dir>/category_findings/<sdpa>_findings.md`
@@ -81,14 +80,14 @@ Check `category_specific` for the attention implementation:
 | Field | Meaning |
 |-------|---------|
 | `flash_attention_detected` | Standard Flash Attention (PyTorch SDPA). |
-| `paged_attention_detected` | vLLM Paged Attention. Operation names contain `unified_attention` or `paged`; per-op `classification.kernel_breakdown` (typical components: `reshape_and_cache`, `_fwd_kernel`, `kernel_paged_attention_2d`) and `classification.workload_profile` (`n_q`, `n_kv`, `sum_ctx_tokens`, `sum_gen_tokens`, `ctx_ratio`, `attention_pattern`, `gqa_ratio`) qualify the workload. |
-| Neither | Unfused attention (typically a major opportunity to migrate to Flash Attention). |
+| `paged_attention_detected` | vLLM Paged Attention. Operation names contain `unified_attention` or `paged`; per-op `classification.kernel_breakdown` (typical components: `reshape_and_cache`, `_fwd_kernel`, `kernel_paged_attention_2d`) and `classification.workload_profile` (`n_q`, `n_kv`, `workload_type`, `attention_pattern`, `gqa_ratio`) qualify the workload. |
+| Neither | `sdpa_fwd` / `sdpa_bwd`: unfused attention (typically a major opportunity to migrate to Flash Attention). `inferenceattention`: MLA, sparse-decode, indexer or KV-write kernels, which are already purpose-built. |
 
-Reference the detected implementation in the **Identification** prose of every finding. For Paged Attention, also reference the kernel-breakdown component that dominates and the workload profile (prefill-heavy when `ctx_ratio > 0.8`, decode-heavy when `ctx_ratio < 0.2`).
+Reference the detected implementation in the **Identification** prose of every finding. For inference attention, also reference `classification.workload_profile.workload_type` (`prefill_heavy`, `decode_heavy` or `mixed`) and, when `classification.kernel_breakdown` is present, its dominant component.
 
 ### Step 3: Render P-items from `category_findings`
 
-Read `category_data/<sdpa>_metrics.json::category_findings`. Per [`templates/sub_agent_spec.md`](../templates/sub_agent_spec.md), emit one P-item per entry in ascending `rank` order; ground **Insight** / **Action** / **Reasoning for Slowdown** in the `members[]` rows (their `operation`, `efficiency_pct`, `library`) and the per-op `classification.kernel_breakdown` / `classification.workload_profile` (Paged) using the Action Prose Guidance, Expected Efficiency, and Common Patterns below. For Paged Attention, extend the **Data:** operations table with kernel-breakdown component, workload type, and attention pattern columns when populated. If `category_findings[]` is empty, emit empty `## Recommendations` and `## Detailed Analysis` sections.
+Read `category_data/<sdpa>_metrics.json::category_findings`. Per [`templates/sub_agent_spec.md`](../templates/sub_agent_spec.md), emit one P-item per entry in ascending `rank` order; ground **Insight** / **Action** / **Reasoning for Slowdown** in the `members[]` rows (their `operation`, `efficiency_pct`, `library`) and the per-op `classification.kernel_breakdown` / `classification.workload_profile` (inference attention) using the Action Prose Guidance, Expected Efficiency, and Common Patterns below. For inference attention, extend the **Data:** operations table with kernel-breakdown component, workload type, and attention pattern columns when populated. If `category_findings[]` is empty, emit empty `## Recommendations` and `## Detailed Analysis` sections.
 
 **efficiency_percent semantics:**
 - **Standalone:** Treat `efficiency_percent` as **% of roofline**.
@@ -128,7 +127,7 @@ Short sequences naturally show lower efficiency — do NOT call low efficiency a
 
 ## Common Patterns
 
-### Standard / Flash Attention
+### Training SDPA (`sdpa_fwd`, `sdpa_bwd`)
 
 #### Unfused attention
 - **Symptoms:** Multiple ops (`softmax`, `bmm`, `mul`, `copy_`) appear together, no Flash kernel detected.
@@ -143,29 +142,53 @@ Short sequences naturally show lower efficiency — do NOT call low efficiency a
 - **Cause:** Framework SDPA wrapper unconditionally calls `.contiguous()` on Q/K/V/output even when the Flash backend supports strided tensors.
 - **Algorithmic:** If the Flash backend supports strided inputs, remove the `.contiguous()` calls from the SDPA wrapper.
 
-### Backward pass (`sdpa_bwd`)
+#### Causal masking
+- **Symptoms:** `causal` members at about half the efficiency of comparable non-causal ones.
+- **Reasoning:** A kernel that skips fully masked tiles does about half the non-causal FLOPs; one that does not shows roughly half the expected efficiency.
+- **Kernel:** Confirm the backend implements causal tile skipping.
 
-#### Flash Attention backward
+#### Backend choice
+- **Symptoms:** Efficient-attention or math backend ops (`_scaled_dot_product_efficient_attention`, `_efficient_attention_*`) where a flash backend exists.
+- **Reasoning:** An arbitrary `attn_mask`, unsupported head dim or dtype disqualifies the flash backend. The math backend also materializes the full `N x N` score matrix.
+- **Algorithmic:** Make the call flash-eligible (causal flag instead of an explicit mask, supported head dim and dtype).
+
+#### Flash Attention backward (`sdpa_bwd`)
 - **Op name:** `flash_attn::_flash_attn_backward`.
-- **Reasoning:** Generally lower efficiency than forward (recomputation of attention weights, more memory bandwidth).
-- **Kernel:** Profile backward kernel for tile/block tuning.
+- **Reasoning:** Generally lower efficiency than forward (recomputation of attention weights, more memory bandwidth). It runs as several kernels (dQ accumulator fill, dO·O preprocess, main backward, dQ convert); only the main kernel is the roofline target.
+- **Kernel:** Profile the main backward kernel for tile/block tuning.
 
-### Paged Attention (vLLM)
+### Inference attention (`inferenceattention`)
 
 #### Decode-heavy workload
-- **Symptoms:** High `kernel_paged_attention_2d` %, low `_fwd_kernel` %, `ctx_ratio < 0.2`.
+- **Symptoms:** High `kernel_paged_attention_2d` %, low `_fwd_kernel` %, `workload_type` is `decode_heavy`.
 - **Algorithmic:** Increase batch size; speculative decoding.
 - **Kernel:** Optimize paged attention kernel if well below the resolved memory roofline.
 
 #### Prefill bottleneck
-- **Symptoms:** High `_fwd_kernel` %, large `sum_ctx_tokens`, `ctx_ratio > 0.8`.
+- **Symptoms:** High `_fwd_kernel` %, `workload_type` is `prefill_heavy`.
 - **Algorithmic:** Enable chunked prefill; reduce `max_model_len` if memory-constrained.
 - **Kernel:** Profile `_fwd_kernel` for tile-size optimization.
 
+#### Mixed batches
+- **Symptoms:** `workload_type` is `mixed`.
+- **Reasoning:** Decode rows are memory-bound and prefill rows compute-bound, so the blended efficiency understates the lever for each. Name both in **Identification**.
+- **Algorithmic:** Cap prefill tokens per step (chunked prefill) so prefill does not stall the decode rows in the same batch.
+
 #### KV-cache overhead
-- **Symptoms:** `reshape_and_cache` > 10% of operation time.
-- **Algorithmic:** Tune KV cache `block_size` (test 16, 32, 64).
-- **Kernel:** Check memory access patterns in the reshape kernel.
+- **Symptoms:** `reshape_and_cache` or `concat_and_cache_mla` > 10% of operation time.
+- **Algorithmic:** Tune KV cache `block_size` (test 16, 32, 64). Fuse the cache write into the RoPE kernel that produces K.
+- **Kernel:** Check memory access patterns in the write kernel.
+
+#### MLA
+- **Symptoms:** MLA decode plus small metadata and index builders (`get_mla_metadata`, `kv_indices_generate`).
+- **Reasoning:** MLA decode reads a compressed latent KV cache and is memory-bound on that read. The builders depend on sequence lengths, not the layer.
+- **Algorithmic:** If the builder count scales with layer count, build once per step and share across layers.
+
+#### Sparse attention and indexer
+- **Symptoms:** Sparse decode partial and reduce kernels, indexer score and top-k kernels (`indexer_score_topk`, `top_k_per_row_decode`).
+- **Reasoning:** Each decode step scores all cached keys, then attends over the selected tokens only. At long context the indexer scan dominates, not the attention.
+- **Algorithmic:** Keep the indexer key cache in a narrow dtype so the scan reads fewer bytes. Fuse top-k selection into the score kernel.
+- **Kernel:** Tune the split count of the partial/reduce pair; the reduce is a fixed cost that matters when splits are few.
 
 #### GQA (Grouped Query Attention)
 - **Detection:** `gqa_ratio > 1` (e.g. 8:1 means 8 query heads per KV head).
@@ -183,7 +206,7 @@ The universal CANNOT Infer rows in [`sub_agent_spec.md`](../templates/sub_agent_
 |----------------|-----|----------------|
 | Internal block / tile size of the Flash kernel | Tile selection is internal to the Flash backend | "Flash tile size not visible — profile the kernel for tile-size tuning." |
 
-**Paged Attention (vLLM):**
+**Inference attention:**
 
 | NOT observable | Why | Fallback prose |
 |----------------|-----|----------------|
