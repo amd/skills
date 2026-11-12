@@ -9,8 +9,9 @@ Accumulated across many real ports. This file is the index and the decision-crit
 everything else is in `references/`, loaded only when you need it.
 
 **Most porting bugs are not in symbol names.** Hipify handles the renaming. The bugs are
-semantic differences where AMD is strict and CUDA is lenient, and they surface at runtime
-on a build that compiled cleanly. Read the fault-class index below before concluding a
+semantic differences where AMD is strict and CUDA is lenient, and most surface at runtime
+on a build that compiled cleanly, though some, like a 32-bit `*_sync` mask, fail to
+compile even after hipify runs clean. Read the fault-class index below before concluding a
 port works.
 
 ## Naming: ROCm or HIP?
