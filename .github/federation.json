@@ -130,7 +130,7 @@
       "skills": [
         {
           "path": ".agents/skills/guided-workbench-install",
-          "as": "aiwb-guided-install"
+          "as": "eaiapps-guided-install"
         }
       ]
     }

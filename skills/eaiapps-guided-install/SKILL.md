@@ -2,7 +2,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 #
 # SPDX-License-Identifier: MIT
-name: aiwb-guided-install
+name: eaiapps-guided-install
 description: Guides a user through installing the AI Workbench (AIWB) onto a Kubernetes cluster end-to-end — preflight cluster readiness (access, StorageClass, GPU operator, required operators/CRDs), install the Helm charts in the correct order, and verify the deployment is healthy with plain-language failure triage. Use when a user wants to install, deploy, or stand up AIWB / the AI Workbench / the enterprise AI stack on a K8s cluster, or asks why their install failed partway. Use PROACTIVELY when a user is following helm/INSTALL.md by hand. Do NOT activate for onboarding models to AIM, general kubectl/helm usage unrelated to installing AIWB, or authoring/running the repo's Robot Framework E2E tests. Do NOT activate for diagnosing an established cluster that is not mid-install, such as hung model downloads, missing GPU metrics, or a pre-install or pre-E2E health sweep. This skill owns the install itself, including verifying it and triaging a component that never becomes ready during it.
 allowed-tools: Bash, Read, Grep, Glob
 ---
