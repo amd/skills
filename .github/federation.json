@@ -113,6 +113,16 @@
           "as": "rocprofiler-systems-instrumenting-binaries"
         }
       ]
+    },
+    {
+      "repo": "AMD-Ecosystem/moat",
+      "license": "MIT",
+      "skills": [
+        {
+          "path": ".claude/skills/cuda-to-rocm",
+          "as": "moat-cuda-to-rocm"
+        }
+      ]
     }
   ]
 }
