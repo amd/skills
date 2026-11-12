@@ -293,6 +293,17 @@ The reliance is a latent upstream bug, not a ROCm defect: zero explicitly
 (`hipMemsetAsync`) before the partial-write kernel, and audit any kernel whose write set is
 smaller than its output allocation. (opencv_contrib: cudastereo census_transform border.)
 
+The commonest instance is a counter or accumulator: `cudaMalloc(&count, sizeof(unsigned))`
+followed directly by a kernel that `atomicAdd`s into it. On CUDA the page is usually zero,
+so the count is right by luck; on ROCm it starts from whatever the last owner of that memory
+left, and the result is wrong by a varying offset that depends on what ran before -- easy
+to mistake for a race. Audit rule, for porting and for review alike: for each fresh
+allocation, find its first access. If that access is a read-modify-write (an atomic, `+=`,
+`|=`, a histogram bin increment) rather than a plain store, a `cudaMemset`/`hipMemsetAsync`
+or an initializing kernel must precede it on the same stream. This is easy to miss in a
+review that is focused on warp-size or mask bugs, because nothing about the kernel itself
+looks wrong.
+
 **Bitwise and min/max atomics on `hipMallocManaged` memory are silently dropped on a
 discrete xnack- card.** There, managed memory is host-resident fine-grained memory, and
 the device reaches it over PCIe, whose AtomicOps cover only add, swap and CAS. A native
