@@ -7,15 +7,15 @@ See LICENSE for license information.
 ---
 name: workflow-llm-eval
 description: >-
-  Runs LLM-based workflow eval 12 only: checks the analysis.md Appendix for plausible
+  Runs LLM-based workflow eval 11 only: checks the analysis.md Appendix for plausible
   hardware reference values (platform, memory BW, MAF) and writes a one-row results CSV.
-  Use when the user asks for a workflow LLM eval, eval 12, or Appendix hardware
-  reference scoring. Scripted evals 9–11, 13–14 live in workflow_scripted_evals.py.
+  Use when the user asks for a workflow LLM eval, eval 11, or Appendix hardware
+  reference scoring. Scripted evals 8–10, 12 live in workflow_scripted_evals.py.
 ---
 
 # Workflow LLM eval
 
-Semantic check of **`## Appendix`** hardware facts in `analysis.md` (Gaia-style weighted **correctness** + **completeness**). Produces a single CSV row for `workflow_eval_12`.
+Semantic check of **`## Appendix`** hardware facts in `analysis.md` (Gaia-style weighted **correctness** + **completeness**). Produces a single CSV row for `workflow_eval_11`.
 
 ## Full procedure
 

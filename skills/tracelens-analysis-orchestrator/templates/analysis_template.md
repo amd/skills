@@ -34,13 +34,15 @@ section that has STANDALONE / COMPARATIVE variants. Delete the unused variant.
    P-item Impact line uses the canonical mid `impact_score` value; low/high values appear only
    in Detailed Analysis. Cards join the corresponding sub-agent's Detailed Analysis block by
    `(findings[i].category, findings[i].category_rank)`.
-5. System-Level Optimizations: If all system-level analyses report no actionable issues
-   (NONE/N/A severity), use a single "✅ No system-level bottlenecks detected" summary instead of
-   P1/P2/P3 recommendations. Only generate numbered priorities when at least one actionable issue
-   exists (number sequentially from P1, including CPU/Idle first if invoked).
+5. System-Level Optimizations: One card per entry in `priority_data.json::system_findings`, in array
+   order (already globally sorted by share); the P-number is the entry's `rank`. Copy the card and its
+   Detailed Analysis block from the findings file whose card has the same title, renumbering the card
+   heading, the Detailed Analysis heading and the marker `rank=` to the entry's `rank`. A failed analyzer is listed in
+   the rule 1 warning and gets no card; if the list is empty because of a failure, keep the heading and
+   note and add no card.
 6. Each section is independently composable -- can be shared standalone.
 7. All three tiers (Compute, Kernel Fusion, System) use separate sequential P1/P2/P3 numbering (no gaps).
-8. Priority icons are assigned by PRIORITY NUMBER, not severity, in every section (Compute Kernel, Kernel Fusion, System-Level): 🔴 P1 → 🟡 P2 → 🟢 P3 → 🟢 P4 ... (System-Level only when actionable issues exist)
+8. Priority icons are assigned by PRIORITY NUMBER, not severity, in every section (Compute Kernel, Kernel Fusion, System-Level): 🔴 P1 → 🟡 P2 → 🟢 P3 → 🟢 P4 ...
 9. Field labels — each section uses EXACTLY these labels:
 
    OPTIMIZATION CARDS (§Compute Kernel Optimizations, §Kernel Fusion, §System-Level):
@@ -53,7 +55,7 @@ section that has STANDALONE / COMPARATIVE variants. Delete the unused variant.
    - Kernel Fusion blocks:    **Identification:** / **Data:** / **Resolution:** / **Impact estimate:**
 
 10. Detailed Analysis: three subsections (`### Compute Kernel Insights`, `### Kernel Fusion Insights`, `### System-Level Insights`) with `#### 🔴/🟡/🟢 Pn: <Brief Title>` blocks matching card titles and order.
-11. Model and appendix: Use `model_info["model"]` from `metadata/model_info.json` for the
+11. Model and appendix: Use `model_info["model"]` from `cache/model_info.json` for the
     report title (fall back to "Workload" if "Cannot be inferred from trace"). Fill Appendix
     **Model Architecture** with the raw `model`, `architecture`, `scale`, `precision` values.
 12. Library parenthetical: Compute Kernel card titles and Detailed Analysis headings must include
@@ -306,28 +308,23 @@ Scope: node <focus_job> (trace `<focus trace>`, capture `<manifest.capture_folde
 Findings from system-level analysis (GPU utilization, memory transfer patterns,
 communication/compute overlap). These affect the GPU pipeline as a whole.
 
-<!-- CONDITIONAL: If NO actionable system-level issues found (idle <= 15% and all multi-kernel assessments flagged: false), use Template A. -->
-<!-- Otherwise, number priorities sequentially: CPU/Idle first (if idle > 15%), then multi-kernel issues by severity. -->
 <!-- Icon mapping by PRIORITY NUMBER (not severity): P1=🔴, P2=🟡, P3+=🟢 -->
-<!-- Title format: Descriptive name only. -->
-<!-- System-level recommendations always include **Impact**: "Not quantifiable from trace data" with null markers. -->
-<!-- De-dup rule: If CPU/Idle and Multi-Kernel propose the same mechanism/action, keep one merged system card with combined evidence (do not render two near-duplicate cards). -->
+<!-- Title format: the entry's title verbatim. -->
+<!-- System-level recommendations always include **Impact**: "Not quantifiable from trace data" with null markers; `node=` appears only when the findings card's marker carries it. -->
 
-<!-- === TEMPLATE A: No actionable system-level issues === -->
-<!-- Use this when idle <= 15% and all multi-kernel assessments have flagged: false -->
+<!-- === TEMPLATE A: Empty system_findings, every invoked analyzer succeeded === -->
 
 ✅ No system-level bottlenecks detected. GPU activity breakdown shows X% computation, with negligible memcpy and communication overhead.
 
-<!-- === TEMPLATE B: Actionable issues found === -->
-<!-- Use this when idle > 15% or at least one multi-kernel assessment has flagged: true -->
+<!-- === TEMPLATE B: One or more system_findings entries === -->
 
-### 🔴 P1: <CPU/Idle Title OR Multi-Kernel Issue Title>
+### 🔴 P1: <title>
 
 **Insight**: [1-2 sentences - what's wrong]
 
 **Action**: [1-2 sentences - what to do]
 
-<!-- impact-begin kind=p_item low=null mid=null high=null -->
+<!-- impact-begin kind=p_item low=null mid=null high=null node=<node> -->
 **Impact**: Not quantifiable from trace data
 <!-- impact-end -->
 
@@ -335,13 +332,13 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 ---
 
-### 🟡 P2: <Multi-Kernel Issue Title>
+### 🟡 P2: <title>
 
 **Insight**: [1 sentence - what's wrong]
 
 **Action**: [1-2 sentences - what to do]
 
-<!-- impact-begin kind=p_item low=null mid=null high=null -->
+<!-- impact-begin kind=p_item low=null mid=null high=null node=<node> -->
 **Impact**: Not quantifiable from trace data
 <!-- impact-end -->
 
@@ -349,13 +346,13 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 ---
 
-### 🟢 P3: <Next Multi-Kernel Issue>
+### 🟢 P3: <title>
 
 **Insight**: [1 sentence]
 
 **Action**: [1-2 sentences]
 
-<!-- impact-begin kind=p_item low=null mid=null high=null -->
+<!-- impact-begin kind=p_item low=null mid=null high=null node=<node> -->
 **Impact**: Not quantifiable from trace data
 <!-- impact-end -->
 
@@ -369,7 +366,7 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 <!-- Paste reasoning blocks from sub-agent findings, augment headings with P-numbers, icons, and HTML anchors. Everything else should be copied verbatim-->
 <!-- Detailed Analysis labels per rule 9 — do not use these labels in optimization cards above -->
-<!-- Impact estimate bullets are rendered by each sub-agent from metadata/*.json → impact_estimates (same source as card Impact). -->
+<!-- Impact estimate bullets are rendered by each sub-agent from category_data/*_metrics.json → impact_estimates (same source as card Impact). -->
 <!-- MARKER CONTRACT: Every #### P<N>: heading in Detailed Analysis MUST be
      preceded by  <!-- reasoning-candidate tier=<TIER> rank=<R> --> where TIER = compute | fusion | system (matching the ### subsection), R= 1, 2, 3, … incrementing per tier (rank=1 for first item, rank=2 for second, etc.). -->
 
@@ -414,7 +411,7 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 **Reasoning for Slowdown:** [2-3 sentences - Why Trace 1 is slower than Trace 2 for these operations as the traces show. No micro-architecture speculation.]
 **Resolution:** [1-2 sentences - Why the suggested optimization helps close the gap — not merely restating what to do.]
-**Impact estimate:** [Rendered from metadata → impact_estimates]
+**Impact estimate:** [Rendered from category_data/*_metrics.json → impact_estimates]
 
 <a id="detailed-analysis-compute-p2"></a>
 <!-- reasoning-candidate tier=compute rank=2 -->
@@ -480,7 +477,7 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 ### System-Level Insights
 
-<!-- One #### 🔴/🟡/🟢 Pn: <title> block per promoted system P-item, in priority order. -->
+<!-- One #### 🔴/🟡/🟢 Pn: <title> block per System-Level card, same order. Its marker is `tier=system rank=<P-number>`. -->
 <!-- Each block has an HTML anchor: <a id="detailed-analysis-system-pN"></a> -->
 <!-- System-level detailed analysis uses the same format for both standalone and comparative modes.
      In comparative mode, system-level analysis covers Trace 1 () only. -->
@@ -488,7 +485,7 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 <a id="detailed-analysis-system-p1"></a>
 <!-- reasoning-candidate tier=system rank=1 -->
-#### 🔴 P1: <Brief Title>
+#### 🔴 P1: <title>
 **Identification:**
 **Data:**
 **Reasoning for Slowdown:**
@@ -497,7 +494,7 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 <a id="detailed-analysis-system-p2"></a>
 <!-- reasoning-candidate tier=system rank=2 -->
-#### 🟡 P2: <Brief Title>
+#### 🟡 P2: <title>
 **Identification:**
 **Data:**
 **Reasoning for Slowdown:**
@@ -506,7 +503,7 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 <a id="detailed-analysis-system-p3"></a>
 <!-- reasoning-candidate tier=system rank=3 -->
-#### 🟢 P3: <Brief Title>
+#### 🟢 P3: <title>
 **Identification:**
 **Data:**
 **Reasoning for Slowdown:**

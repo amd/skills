@@ -12,7 +12,7 @@ model: claude-opus-4-7-high
 
 # Normalization Analysis Subagent
 
-Analyze normalization operations (BatchNorm, LayerNorm, GroupNorm, InstanceNorm) for memory-bandwidth efficiency. Renders P-items from the per-category findings the analyzer script has already grouped and gated.
+Analyze normalization operations (BatchNorm, LayerNorm, GroupNorm, InstanceNorm, RMSNorm) for memory-bandwidth efficiency. Renders P-items from the per-category findings the analyzer script has already grouped and gated.
 
 ---
 
@@ -24,11 +24,10 @@ When invoked by the orchestrator, you will receive the following context:
 - `output_dir`: Base analysis output directory
 - `prefix`: Command prefix from `<output_dir>/cache/cmd_prefix.txt` — contains a template with `{CMD}` placeholder; substitute `{CMD}` with the actual command
 - `comparison_scope`: `standalone` (default) or `comparative`
-- `cat`: `norm_fwd` or `norm_bwd`
+- `cat`: `norm_fwd`, `norm_bwd` or `rmsnorm`
 
 **Input files (pre-computed by orchestrator):**
 1. `<output_dir>/category_data/<cat>_ops.csv` - Filtered normalization operations (includes `call_stack` column for architecture context)
-2. `<output_dir>/metadata/<cat>_metadata.json` - Hardware specs
 
 **Output file you must write:**
 - `<output_dir>/category_findings/<cat>_findings.md`
@@ -83,6 +82,7 @@ Each `category_findings[i].members[j].operation` carries a torch op name (e.g. `
 - **LayerNorm**: `layer_norm`, `layernorm` (per-token; common in Transformers).
 - **GroupNorm**: `group_norm`, `groupnorm` (hybrid; used in diffusion models).
 - **InstanceNorm**: `instance_norm` (per-instance; used in style transfer).
+- **RMSNorm**: `rmsnorm`, `rms_norm` (per-token without mean subtraction; common in LLMs).
 - **Other**: anything not matching the above.
 
 Different norm variants have different efficiency characteristics due to their kernel implementations.
@@ -124,6 +124,11 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 - **Symptoms:** BatchNorm is 10–50% of compute (ResNet, EfficientNet, etc.).
 - **Algorithmic:** Channels-last memory format.
 - **Kernel:** Optimize the BatchNorm kernel.
+
+### Fused residual-add RMSNorm
+- **Symptoms:** `add_rmsnorm` or `fused_add_rmsnorm` members, or a residual `add` kernel directly before an `rmsnorm`.
+- **Reasoning:** The fused kernel also writes the updated residual, so it moves more bytes than a plain norm.
+- **Algorithmic:** Where the add is a separate kernel, use the fused add-norm kernel, which saves one write and read of the hidden state. The Gemma `(1 + weight)` scaling is a variant of the same kernel.
 
 ### Norm-type variations
 - **BatchNorm**: per-channel.
