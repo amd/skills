@@ -1,0 +1,16 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+---
+apiVersion: v2
+name: aiwb
+description: AIWB (AI Workbench) - API and UI services for AI workload management
+
+type: application
+
+# Chart version (placeholder; release workflow overwrites before OCI publish)
+version: 0.0.0
+
+# Application version tag default (overridden when packaging for OCI / releases)
+appVersion: "0.0.0"

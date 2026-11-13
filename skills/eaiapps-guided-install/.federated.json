@@ -1,0 +1,10 @@
+{
+  "source": "amd-enterprise-ai-amd-eai-apps",
+  "repo": "amd-enterprise-ai/amd-eai-apps",
+  "ref": "main",
+  "commit": "ef8a6b2172481284cbe1c690425395f102036e9d",
+  "path": ".agents/skills/guided-workbench-install",
+  "license": "MIT",
+  "content_hash": "811f039757a11c734fcc7e8f6491422e469526081d8a8f179b3c633acae2a519",
+  "imported_at": "2026-11-12T21:09:55Z"
+}

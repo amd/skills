@@ -1,0 +1,57 @@
+{
+  "evaluations": [
+    {
+      "id": "install-aiwb-combined",
+      "skill_should_trigger": true,
+      "prompt": "Guide me through installing the full AI Workbench and Resource Manager stack on my Kubernetes cluster. Combined mode, a real GPU cluster, chart-managed CNPG for the databases, and OpenBao for secrets. The domain is aiwb.example.com and the image tag is v2.1.0. You have everything you need, so work through it without stopping to check back with me.",
+      "expected_behavior": [
+        "Establish the deployment, cluster, database, and secrets modes before installing",
+        "Run the read-only preflight and require a ready result before any install command",
+        "Follow helm/INSTALL.md for the exact commands and preserve its install order",
+        "Run post-install verification and report an inconclusive result instead of success when health cannot be confirmed"
+      ],
+      "unexpected_behavior": [
+        "Start installing charts before preflight passes",
+        "Claim the installation is healthy without running verification",
+        "Copy a replacement set of install commands instead of grounding exact commands in helm/INSTALL.md"
+      ],
+      "workspace": "evals/fixtures/checkout"
+    },
+    {
+      "id": "install-aiwb-standalone",
+      "skill_should_trigger": true,
+      "prompt": "Set up standalone AIWB without AIRM on a small development Kubernetes cluster."
+    },
+    {
+      "id": "troubleshoot-aiwb-install",
+      "skill_should_trigger": true,
+      "prompt": "My aiwb-api pod never becomes ready after the Helm install. Help me find and fix the failed installation.",
+      "expected_behavior": [
+        "Find out how far the install actually got before suggesting a fix",
+        "Name what is wrong in plain language and give a concrete fix for it",
+        "Check the cluster again before calling it resolved, rather than concluding from reasoning alone"
+      ],
+      "unexpected_behavior": [
+        "Declare the install healthy without verifying it",
+        "Leave a partial install in place without saying so",
+        "Start over with a fresh install before establishing what failed"
+      ],
+      "workspace": "evals/fixtures/checkout"
+    },
+    {
+      "id": "onboard-model-to-aim",
+      "skill_should_trigger": false,
+      "prompt": "Add a Hugging Face model to the AIM catalog and tune its vLLM profile for MI300X."
+    },
+    {
+      "id": "general-kubectl-help",
+      "skill_should_trigger": false,
+      "prompt": "Show me how to inspect the logs for a Kubernetes Deployment with kubectl."
+    },
+    {
+      "id": "upgrade-the-kubernetes-control-plane",
+      "skill_should_trigger": false,
+      "prompt": "Upgrade this cluster's Kubernetes control plane from 1.31 to 1.32 and drain the nodes one at a time."
+    }
+  ]
+}
