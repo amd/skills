@@ -19,6 +19,30 @@
       "id": "rocm-vllm-import-error",
       "cli": "current",
       "symptom": "ImportError: libtorch_cuda.so: cannot open shared object file: No such file or directory"
+    },
+    {
+      "id": "rocm-no-vendor-no-amd-gpu-asks-which-gpu",
+      "cli": "current",
+      "symptom": "torch can't see the GPU",
+      "host": "no-amd-gpu"
+    },
+    {
+      "id": "rocm-no-vendor-wsl-host-gpu-hidden-asks-which-gpu",
+      "cli": "current",
+      "symptom": "torch can't see the GPU",
+      "host": "wsl-host-gpu-hidden"
+    },
+    {
+      "id": "rocm-no-vendor-amd-found-goes-on-to-diagnose",
+      "cli": "current",
+      "symptom": "torch can't see the GPU",
+      "host": "amd-found"
+    },
+    {
+      "id": "rocm-examine-fails-relays-the-error",
+      "cli": "current",
+      "symptom": "torch can't see the GPU",
+      "host": "examine-fails"
     }
   ]
 }

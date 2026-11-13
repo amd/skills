@@ -117,6 +117,12 @@ never for every machine the id applies to:
 - **windows** — auto-applicable: `fix-2-unset-override`, `fix-6-path`.
 - **wsl** — auto-applicable: `fix-6-path`.
 
+"Auto-applicable" here is the `auto` class on this host, the same as the
+`fix.auto_applicable` flag in a diagnosis. `SKILL.md` counts a wider set, the
+fixes that *have a runner*: these three ids plus `fix-9-igpu-dgpu`, whose runner
+only prints the discrete-GPU query unless `--device-index N` is passed. The two
+counts differ on purpose, and neither is wrong.
+
 The rest print their plan for the user to run. Pass the **full** id
 (`rocm fix fix-2-unset-override`, not `rocm fix fix-2`; a short id returns
 exit 2, unknown fix-id).
