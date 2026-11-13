@@ -4,9 +4,9 @@ Run by `cargo test -p xtask` (see `the_eval_hook_tests_pass` in
 `xtask/src/eval_fixtures.rs`), as `python -I test_hooks.py`. Stdlib only.
 
 What they pin is the promise the docs make about the stub: it replays the
-recorded answer for `--version`, `fix --json` and `diagnose`, refuses every
-other command with exit code 2, and leaves PATH and the temporary directory as
-it found them. It never runs anything (it only prints canned text); the refusal
+recorded answer for `--version`, `fix --json` and `diagnose` (and `examine
+--json` for a case whose recording has one), refuses every other command with
+exit code 2, and leaves PATH and the temporary directory as it found them. It never runs anything (it only prints canned text); the refusal
 of unrecorded `diagnose` options is about fidelity.
 """
 
@@ -119,6 +119,9 @@ class Replay(unittest.TestCase):
             ["diagnose", "--model=foo"],
             ["diagnose", "--distro=Ubuntu"],
             ["diagnose", "--json", "--send=me@example.invalid"],
+            # This case recorded no examination, so there is nothing to replay.
+            ["examine", "--json"],
+            ["examine"],
         ]:
             with self.subTest(args=args):
                 done = rocm(*args)
@@ -136,6 +139,56 @@ class Replay(unittest.TestCase):
         # A second teardown is harmless.
         hooks.teardown(None, CASE, self.ctx)
         self.assertEqual(os.environ["PATH"], self.saved_path)
+
+
+def examine_recording(case_id):
+    return json.loads(
+        (HERE / "fixtures" / case_id / "replies.json").read_text(encoding="utf-8")
+    )["examine_json"]
+
+
+class ExamineReplay(unittest.TestCase):
+    """A case that names a host replays `examine --json`, and only that form."""
+
+    def replay(self, case_id):
+        case = types.SimpleNamespace(id=case_id)
+        saved = os.environ["PATH"]
+        ctx = {}
+        hooks.setup(None, case, ctx)
+
+        def restore():
+            hooks.teardown(None, case, ctx)
+            os.environ["PATH"] = saved
+
+        self.addCleanup(restore)
+
+    def test_examine_json_prints_the_recorded_reply(self):
+        case_id = "rocm-no-vendor-no-amd-gpu-asks-which-gpu"
+        recorded = examine_recording(case_id)
+        self.replay(case_id)
+        done = rocm("examine", "--json")
+        self.assertEqual(done.returncode, recorded["rc"])
+        self.assertEqual(done.returncode, 0)
+        self.assertEqual(done.stdout.replace("\r\n", "\n"), recorded["stdout"])
+        self.assertEqual(json.loads(done.stdout)["status"], "no-amd-gpu")
+
+    def test_a_failing_examine_replays_its_exit_code_and_stderr(self):
+        case_id = "rocm-examine-fails-relays-the-error"
+        recorded = examine_recording(case_id)
+        self.replay(case_id)
+        done = rocm("examine", "--json")
+        self.assertEqual(done.returncode, recorded["rc"])
+        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(done.stdout, "")
+        self.assertEqual(done.stderr.replace("\r\n", "\n"), recorded["stderr"])
+
+    def test_the_plain_examine_form_is_still_refused(self):
+        self.replay("rocm-no-vendor-no-amd-gpu-asks-which-gpu")
+        for args in (["examine"], ["examine", "--json", "--verbose"]):
+            with self.subTest(args=args):
+                done = rocm(*args)
+                self.assertEqual(done.returncode, 2, done.stderr)
+                self.assertIn("runs nothing else", done.stderr)
 
 
 class Overlap(unittest.TestCase):
