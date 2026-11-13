@@ -115,6 +115,9 @@ Build the Docker command by combining:
 3. **Port**: `-p <port>:<port>` (default 8000)
 4. **Environment variables**: merge `gpu_configs.<gfx_version>.env_defaults`
    with the recipe's `model.base_env` and `hardware_overrides.amd.extra_env`.
+   Then check `gpu_configs.<gfx_version>.model_overrides`: if the model ID
+   contains an entry's `match` string, add its `env_set` vars (these win over
+   the values above).
    Always add `--env HF_TOKEN=${HF_TOKEN}`.
 5. **Docker image**: use `docker_image` from `recipes_cache.json` top level
    (unless the model needs a pinned image, e.g. GLM-4.5 needs `v0.15.1`).
@@ -158,6 +161,16 @@ This queries the HuggingFace Hub API (no model download) and returns JSON with:
 - `fit.context_limited` -- true if KV cache limits context below the
   model's native max
 - `fit.min_tp_required` -- minimum TP needed (only if weights don't fit)
+- `fit.free_vram_gb`, `fit.min_needed_gb`, `fit.can_serve` -- free VRAM
+  right now (read from local `amd-smi`; pass `--free-vram-gb` for a remote
+  host), the minimum the model needs to start, and whether it fits
+
+**Free VRAM check:** another vLLM container or process may already hold GPU
+memory. If `fit.can_serve` is false, stop: tell the user the model needs
+`fit.min_needed_gb` GB but only `fit.free_vram_gb` GB is free, show what is
+using the GPU (`docker ps`), and do not launch. Otherwise pass
+`--gpu-memory-utilization <fit.gpu_memory_utilization>` to vLLM, replacing
+any value from the recipe.
 
 **Understanding the overhead:** The script reserves ~4 GB for vLLM's runtime
 overhead (activation profiling, HIP graph capture, internal buffers). During

@@ -10,6 +10,10 @@ Usage:
     python3 scripts/estimate_vram.py --model-id Qwen/Qwen3-32B
     python3 scripts/estimate_vram.py --model-id Qwen/Qwen3-32B --vram-gb 192
     python3 scripts/estimate_vram.py --model-id Qwen/Qwen3-32B --vram-gb 192 --tp 2
+    python3 scripts/estimate_vram.py --model-id Qwen/Qwen3-32B --vram-gb 192 --free-vram-gb 20
+
+With --vram-gb, free VRAM is read from local amd-smi (or --free-vram-gb) and
+fit.can_serve says whether the model can start in what is free right now.
 
 Output: JSON to stdout. Exits 0 on success, 1 on failure.
 
@@ -21,6 +25,7 @@ import argparse
 import json
 import math
 import os
+import subprocess
 import sys
 import urllib.request
 import urllib.error
@@ -159,6 +164,25 @@ def _kv_per_token(config):
     return 2 * n_layers * n_kv * hdim * 2, details
 
 
+def _local_free_vram_gb(tp):
+    """Lowest free VRAM in GB across the first `tp` local GPUs, or None."""
+    try:
+        r = subprocess.run(["amd-smi", "metric", "--mem-usage", "--json"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           text=True, timeout=20)
+        data = json.loads(r.stdout)
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return None
+    gpus = data.get("gpu_data", [data]) if isinstance(data, dict) else data
+    free = []
+    for g in gpus[:tp]:
+        v = g.get("mem_usage", {}).get("free_vram", {})
+        mb = v.get("value") if isinstance(v, dict) else v
+        if isinstance(mb, (int, float)):
+            free.append(mb / 1024)
+    return round(min(free), 1) if free else None
+
+
 def main():
     p = argparse.ArgumentParser(
         description=__doc__,
@@ -170,6 +194,8 @@ def main():
                    help="Per-GPU VRAM in GB (enables fit check)")
     p.add_argument("--tp", type=int, default=1, help="Tensor parallelism")
     p.add_argument("--gpu-memory-utilization", type=float, default=0.9)
+    p.add_argument("--free-vram-gb", type=float, default=0,
+                   help="Free VRAM per GPU in GB (default: read from local amd-smi)")
     args = p.parse_args()
 
     token = os.environ.get("HF_TOKEN", "")
@@ -204,6 +230,16 @@ def main():
     if args.vram_gb > 0:
         tp = args.tp
         util = args.gpu_memory_utilization
+        # vLLM's gpu_memory_utilization is a fraction of TOTAL VRAM and it
+        # refuses to start if that much is not free (e.g. another vLLM
+        # container is running). Cap it to what is free, with a 2 GB margin.
+        free_gb = args.free_vram_gb or _local_free_vram_gb(tp)
+        free_limited = False
+        if free_gb:
+            free_util = math.floor((free_gb - 2) / args.vram_gb * 100) / 100
+            if free_util < util:
+                util = max(0.0, free_util)
+                free_limited = True
         w_per_gpu = round(w_gb / tp, 1)
         usable = round(args.vram_gb * util, 1)
         # Reserve for activations, HIP graph capture, internal buffers.
@@ -223,7 +259,15 @@ def main():
             "weights_fit": w_per_gpu < usable,
         }
 
-        if not fit["weights_fit"]:
+        if free_gb:
+            # Minimum to start: weights + overhead + 2 GB of KV cache.
+            min_needed = round(w_per_gpu + overhead + 2, 1)
+            fit["free_vram_gb"] = free_gb
+            fit["min_needed_gb"] = min_needed
+            fit["limited_by_free_vram"] = free_limited
+            fit["can_serve"] = free_gb - 2 >= min_needed
+
+        if not fit["weights_fit"] and usable > overhead:
             raw = math.ceil(w_gb / (usable - overhead))
             min_tp = 1
             while min_tp < raw:
