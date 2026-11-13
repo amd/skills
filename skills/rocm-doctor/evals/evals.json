@@ -123,12 +123,11 @@
     {
       "id": "rocm-vllm-import-error",
       "skill_should_trigger": true,
-      "note": "Replays a current CLI. The import error matches the torch DLPack entry (Linux and WSL2) at the likely level (score 50), not the high-confidence level. The recorded plan opens with steps that confirm the torch version in the engine's environment before the reinstall, so the agent should present the match as likely and have the user check that first rather than state the cause as certain. The user has not named a group or permission problem, and the agent must not invent one. The reinstall is graded on its own line rather than alongside the match, because the recorded plan puts two confirmation steps in front of it: an agent that relays the plan in order has not withheld the reinstall. The prompt names Linux on purpose: this catalog entry applies on Linux and WSL2 only and native Windows gets no match, so the case is not expected to pass on a Windows lane.",
+      "note": "Replays a current CLI. The import error matches the torch DLPack entry (Linux and WSL2) at the likely level (score 50), not the high-confidence level. The recorded plan opens with steps that confirm the torch version in the engine's environment before the reinstall, so the agent should present the match as likely and have the user check that first rather than state the cause as certain. The user has not named a group or permission problem, and the agent must not invent one. The prompt names Linux on purpose: this catalog entry applies on Linux and WSL2 only and native Windows gets no match, so the case is not expected to pass on a Windows lane.",
       "prompt": "vLLM fails to start on my AMD GPU on Linux with 'ImportError: libtorch_cuda.so: cannot open shared object file: No such file or directory'. How do I fix it?",
       "expected_behavior": [
         "Run `rocm diagnose` with the error line as the symptom and relay the matched cause",
         "Present the match as likely rather than certain, and have the user check the torch version in the engine's environment before reinstalling the engine",
-        "Relay the `rocm engines install vllm --reinstall` step the CLI returned, after the confirmation steps the recorded plan puts in front of it",
         "Say near the start of the reply, before any step-by-step plan, that the fix is print-only: the user runs the printed steps and the CLI does not apply them"
       ],
       "unexpected_behavior": [
@@ -176,14 +175,13 @@
     {
       "id": "rocm-no-vendor-wsl-host-gpu-hidden-asks-which-gpu",
       "skill_should_trigger": true,
-      "note": "On WSL2 `rocm examine` answers status `wsl` whatever the GPU, so the skill reads `has_amd_gpu`, which is set from the Windows side. The replay is a WSL2 host whose Windows side has no AMD GPU: status `wsl`, `has_amd_gpu` false. An agent that treats `wsl` as 'nothing to ask' goes on to diagnose without ever learning which GPU the machine has. The pin is a field name only the replayed examination prints. The replay omits the real command's `summary` object. What the examination found and the question that follows it are graded separately: a reply that asks the question but never says the CLI found no AMD GPU has skipped the first half, and one expectation covering both cannot say which half is missing.",
+      "note": "On WSL2 `rocm examine` answers status `wsl` whatever the GPU, so the skill reads `has_amd_gpu`, which is set from the Windows side. The replay is a WSL2 host whose Windows side has no AMD GPU: status `wsl`, `has_amd_gpu` false. An agent that treats `wsl` as 'nothing to ask' goes on to diagnose without ever learning which GPU the machine has. The pin is a field name only the replayed examination prints. The replay omits the real command's `summary` object.",
       "prompt": "I'm in WSL2 on Windows and torch can't see the GPU, torch.cuda.is_available() is False. What's wrong?",
       "expected_behavior": [
-        "Run `rocm examine --json` and say that it found no AMD GPU, although the status is `wsl`",
-        "Ask which GPU the machine has"
+        "Run `rocm examine --json`, read `has_amd_gpu` as false although the status is `wsl`, and ask which GPU the machine has"
       ],
       "unexpected_behavior": [
-        "Propose a fix before the user has said which GPU the machine has",
+        "Go on to propose a fix without asking which GPU the machine has, because the status is `wsl`",
         "Decline the user because they are on WSL2",
         "Execute a mutating or sudo command without first getting the user's explicit consent"
       ],
