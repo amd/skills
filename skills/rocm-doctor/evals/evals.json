@@ -178,7 +178,8 @@
       "note": "On WSL2 `rocm examine` answers status `wsl` whatever the GPU, so the skill reads `has_amd_gpu`, which is set from the Windows side. The replay is a WSL2 host whose Windows side has no AMD GPU: status `wsl`, `has_amd_gpu` false. An agent that treats `wsl` as 'nothing to ask' goes on to diagnose without ever learning which GPU the machine has. The pin is a field name only the replayed examination prints. The replay omits the real command's `summary` object.",
       "prompt": "I'm in WSL2 on Windows and torch can't see the GPU, torch.cuda.is_available() is False. What's wrong?",
       "expected_behavior": [
-        "Run `rocm examine --json`, read `has_amd_gpu` as false although the status is `wsl`, and ask which GPU the machine has"
+        "Says the examination found no AMD GPU",
+        "Asks which GPU the machine has"
       ],
       "unexpected_behavior": [
         "Go on to propose a fix without asking which GPU the machine has, because the status is `wsl`",

@@ -60,7 +60,7 @@
     {
       "repo": "ROCm/rocm-cli",
       "license": "MIT",
-      "branch": "doctor-eval-expectations-unambiguous",
+      "branch": "doctor-eval-lean-experiment",
       "skills": [
         {
           "path": "skills/rocm-doctor"

@@ -1,10 +1,10 @@
 {
   "source": "rocm-rocm-cli",
   "repo": "ROCm/rocm-cli",
-  "ref": "doctor-eval-expectations-unambiguous",
-  "commit": "d1b1534d38743ff4cbee072820881c41a4189aac",
+  "ref": "doctor-eval-lean-experiment",
+  "commit": "ee26bdacf3c8fb438c28a6c0c3f341334ac9a720",
   "path": "skills/rocm-doctor",
   "license": "MIT",
-  "content_hash": "57ef17a2cc3b7a5d3289e3f5907ca18d7d5e8b850f0743a75abd455715d5a539",
-  "imported_at": "2026-11-13T11:45:38Z"
+  "content_hash": "d1178d24a4f188cc2e252c8dbad6db1ca5642c39bd7bbe256f8936b171eddfd4",
+  "imported_at": "2026-11-13T13:09:26Z"
 }
