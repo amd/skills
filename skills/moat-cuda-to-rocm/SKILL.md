@@ -9,10 +9,11 @@ Accumulated across many real ports. This file is the index and the decision-crit
 everything else is in `references/`, loaded only when you need it.
 
 **Most porting bugs are not in symbol names.** Hipify handles the renaming. The bugs are
-semantic differences where AMD is strict and CUDA is lenient, and most surface at runtime
-on a build that compiled cleanly, though some, like a 32-bit `*_sync` mask, fail to
-compile even after hipify runs clean. Read the fault-class index below before concluding a
-port works.
+semantic differences where AMD is strict and CUDA is lenient. Most surface at runtime on a
+build that compiled cleanly, but a clean hipify is not a clean build: hipify leaves
+literals and types alone, so some idioms -- a 32-bit `*_sync` mask is the common one --
+hipify without complaint and then fail to compile under HIP. Read the fault-class index
+below before concluding a port works.
 
 ## Naming: ROCm or HIP?
 
@@ -77,6 +78,7 @@ Scan this list against what you are doing. If any line could apply, open
 - A full 64-bit `*_sync` mask in 32-lane group code traps in a HIP debug build on wave64 when the halves diverge; pass the group mask.
 - Intra-wave barrier divergence: a per-row early return before `__syncthreads()` is benign on CUDA, faults on wave64.
 - `cub`/`hipCUB` block-collective `TempStorage` reuse races on a 64-thread block without an explicit `__syncthreads`.
+- Tables built from `kWarpSize` (square `kWarpSize*kWarpSize` blocks, 4..32 thread-group width ladders) overflow 1024 threads or leave width gaps at 64.
 - `__smid()` can EXCEED `multiProcessorCount` on AMD, unlike NVIDIA.
 - HIP's device `warpSize` is not an `int`; cast it at any `printf` vararg.
 
@@ -89,6 +91,9 @@ Scan this list against what you are doing. If any line could apply, open
 - `hipEventQuery`/`hipEventSynchronize` dereference the event's recording stream: querying an event after that stream is destroyed (legal on CUDA) hangs or crashes intermittently. Keep destroyed streams alive: route stream create/destroy through a sync-park-reuse pool in the compat header, not per-holder sweeps.
 - A functor returning a reference to a by-value parameter (lifetime UB) is tolerated by nvcc, not by clang/HIP.
 - `hipLaunchHostFunc` callback threads must not call ANY runtime API.
+- A flag one GPU polls in another GPU's `hipMalloc` memory never updates on MI250X; use uncached or fine-grained memory.
+- Data a peer GPU reads over IPC is stale on gfx1100 even in fine-grained memory and after a system-scope release; stage it in uncached memory (an event release is lost in graph replay).
+- HIP streams share a pool of hardware queues, so a cross-GPU spin barrier on one stream and a collective on another can deadlock two GPUs; give each stream its own queue with `hipExtStreamCreateWithCUMask`.
 - A `hipLaunchHostFunc` callback must not block either: ROCr runs it on the async-events thread, so a callback waiting on a host gate stalls every later event on the device (a multi-stream test hung on gfx1100).
 - HIP after `fork()` crashes in the child (segfault in hipEventQuery); a test that forks and then touches the GPU fails on ROCm.
 - A query HIP reports as unsupported (`cudaLimitPrintfFifoSize` -> hipErrorUnsupportedLimit) leaves a sticky last error that the NEXT launch check reports; clear it under the HIP branch.
@@ -100,16 +105,19 @@ Scan this list against what you are doing. If any line could apply, open
 - Gate hardware-vs-software texture paths on a VERIFIED runtime self-test, never on creation success or `_WIN32`.
 
 **Floating point**
-- `__fsqrt_rn` is not always correctly rounded on gfx90a or gfx1100 (1 ULP high); CUDA's is IEEE-correct. Map it to `sqrtf` when a test compares against host sqrt.
-- Without `__HIP_DEFINE_EXTENDED_HOST_MIN_MAX__` HIP's HOST `min`/`max` take int, so `min(float, float)` in `__host__ __device__` code silently truncates on the host (whole-pixel camera errors); define it for the HIP build.
+- `__fsqrt_rn` is not always correctly rounded (seen on gfx90a, 1 ULP high); CUDA's is IEEE-correct. Route the f32 device sqrt through `__dsqrt_rn` and cast back when a test needs bit-exact results.
 - clang(HIP) defaults to `-ffp-contract=fast` and forms FMAs ACROSS expressions; nvcc contracts expression-only.
 - Exact float-equality branches fed by `__fdividef` produce out-of-range indices.
 - HIP device `cuda::min`/`max` NaN-selection can differ from host `std::min`/`max`.
-- HIP host `min`/`max` in `.cu` files exist only for `(int, int)`: float arguments silently truncate. Fix the call sites with `fmin`/`fmax`; the macro is ROCm >= 7.2 only and defaults off.
+- rocBLAS `gemm_ex` with a 16-bit D splits long k (`max(lda, ldb) * k >= 2^30` in ROCm 10.1) and rounds D once per chunk; send those GEMMs to hipBLASLt.
+- gfx11/gfx12 WMMA float accumulation drifts with k (biased toward zero) in hipBLASLt and rocBLAS alike; run k-chunks of <= 2^15 yourself with 16-bit per-chunk outputs summed in float (a float D is 8-28x slower on gfx1100), recomputing in float the outputs whose 16-bit chunk sums overflow or whose summed half-ulp rounding bound exceeds 3 units of roundoff of the result (a root-sum-square test is beaten by sums that round alike), not hipBLASLt split-k (a gfx1201 kernel is wrong at large k even when split). Route fused-epilogue (cuBLASLt) wrappers through the same path, with the epilogue applied afterwards.
+- HIP host `min`/`max` in `.cu` files exist only for `(int, int)`: float arguments in `__host__ __device__` code silently truncate on the host (whole-pixel camera errors). Fix the call sites with `fmin`/`fmax`; do not rely on `__HIP_DEFINE_EXTENDED_HOST_MIN_MAX__`, which exists only from ROCm 7.2 and defaults off.
 
 **Headers, includes and build**
 - A shared compat header must be host-includable: gate device-only includes behind `__CUDACC__`/`__HIPCC__`, or CUB leaks into host TUs. Hit independently by two projects.
 - `__HIP_PLATFORM_AMD__` is undefined until `hip_runtime.h` is included; a gate placed before it silently picks the CUDA branch.
+- A compat header that defines `__CUDA_ARCH__` for HIP device code also makes numeric `#if __CUDA_ARCH__ < NNN` gates true, which can select `__trap()` fallbacks.
+- Feature and version macros CUDA headers define but HIP headers do not (`__CUDA_BF16_TYPES_EXIST__`, `CUBLAS_VERSION`) silently drop whole dtype paths; audit gates by macro class, not only `__CUDA_ARCH__`.
 - Missing includes in a HIP port are usually pre-existing upstream omissions unmasked by the narrower include graph.
 - A `-include`d compat header creates no dependency edge: wipe objects after editing it or you validate stale code.
 - clang type-checks kernel bodies in the HIP host pass, where `__CUDA_ARCH__` is unset: a `__CUDA_ARCH__`-split debug macro calling host code fails only in Debug.
@@ -126,6 +134,9 @@ Scan this list against what you are doing. If any line could apply, open
 - `clock64()` is a 20-bit wrapping counter on RDNA3; cycle-bounded spins and delays end early. Use `wall_clock64()`.
 - `char` vs `signed char` vector base types differ between HIP and CUDA.
 - AMD compute-capability values COLLIDE with NVIDIA arch numbers, so CC-keyed dispatch picks the wrong path.
+- hipCUB/rocPRIM: temp storage queries never return less than 4 bytes; segmented `ArgMax` returns an out-of-range key for an all-NaN segment.
+- MIOpen pooling needs its workspace in the forward pass for NHWC input; MIOpen runs a convolution only on a handle where Find ran for it (and reuses destroyed handle addresses); MIOpen 3.6 has no double batch norm or convolution and no bias backward; hipBLASLt epilogues differ from cuBLASLt per type and in the ReLU aux format; rpp.h and miopen.h collide on `BILINEAR`.
+- On RDNA, `hipOccupancyMaxActiveBlocksPerMultiprocessor` counts the 128 KiB WGP and returns 1 for dynamic shared memory between 64 and 128 KiB, so "occupancy > 0, take the smem kernel" launches what cannot run.
 - Library swaps: cuBLAS -> hipBLAS, cuFFT -> hipFFT, cuRAND -> hipRAND, cuSPARSE -> hipSPARSE, cuDNN -> MIOpen, Thrust/CUB -> rocThrust/hipCUB. Handle types and v2-enum signatures differ.
 - nvJPEG/nvImageCodec -> rocJPEG for JPEG decode only (VCN; baseline SOF0 only: no SOF1 or progressive, nothing under 64x64, no encoder, no JPEG 2000); the rest needs a named CPU path, chosen from the frame header, not a catch-all. A JPEG with no scan hangs the VCN engine: validate markers on the host first. NVDEC -> FFmpeg demux + rocDecode's parser and decoder (no FFmpeg hwaccel); gate on profile as well as `rocDecGetDecoderCaps`, which has no profile and lets unsupported H.264 profiles decode wrong, and whose size limits are coded sizes (round the display size up to the block size); a success status can still carry wrong pixels on some GPU and VA driver pairs, so decode a reference clip per codec once per process before trusting it; the CPU path needs libdav1d for AV1. NVENC has no ROCm equivalent: name the software encoder path. See fault-classes "Vulkan interop and image codecs".
 - Runtime PTX + CUDA Driver API is a third build class beyond A and B.
@@ -138,6 +149,21 @@ Two diagnostic methods in `references/validation.md` are worth knowing before yo
 suspected AMD fault: a per-tile "later data corrupts earlier" signature usually means the
 reproducer's input dtype is wrong, and SP-vs-DP triangulation distinguishes FP reassociation
 from a genuine wavefront bug. Both were learned the expensive way.
+
+## Reviewing a port
+
+A review is a sweep, not a diagnosis. Finding one fault that explains the reported symptom
+does not end it; ported code usually carries several independent faults, and the one
+nobody asked about is the one that ships.
+
+1. Walk every section of the index above against the code: wavefront and warp semantics,
+   memory and lifetime, textures, floating point, headers and build, types and platform
+   limits. Note a hit or a clean pass for each.
+2. Check what will not compile under HIP separately from what will misbehave at runtime.
+   "Hipify ran clean" says nothing about the first.
+3. For each fresh allocation, check that its first access is not a read-modify-write
+   without a preceding memset or init kernel.
+4. Report every hit, each with its fix, even when it is unrelated to the question asked.
 
 ## Portability rule for shared code
 

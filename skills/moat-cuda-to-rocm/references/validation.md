@@ -6,12 +6,14 @@
 - A CPU-only docker build (image `rocm/dev-ubuntu-24.04:7.2.4-complete`) proves the code compiles and links under ROCm. It cannot observe any fault-class bug, since no GPU runs, so it is never a validation gate. Do NOT wire it into CI that appears to gate the port: a workflow that proves nothing and emails failure noise at whoever watches the repository is pure cost. Run a CPU-only docker build locally if you want a manual compile check.
 - gfx90a and gfx942 are CDNA (wave64); the gfx11xx/gfx12xx parts are RDNA (wave32). A change that passes on one width can still fail on the other via the warp-size class, which is why each arch validates on its own hardware rather than inheriting a result.
 - PR-prep gate -- nvcc CUDA-build check: before opening any PR whose claim is "the CUDA/NVIDIA build is unchanged", compile the CUDA path (`USE_HIP=OFF`) with nvcc. No NVIDIA GPU is needed: a dedicated conda env works on a ROCm-only machine (`conda create -y -n cuda-12.8 -c nvidia cuda-toolkit=12.8` -- the full `cuda-toolkit`, not compiler-only `cuda-nvcc`, because the check must LINK; host gcc 13 works. ALWAYS pin the arch, e.g. `-DCMAKE_CUDA_ARCHITECTURES=80`: `native` autodetection on a host with no NVIDIA GPU silently degrades to an ancient arch, and `atomicAdd(double*)` "no instance of overloaded function" is that fingerprint, not a real failure). GPU validation on AMD cannot see a broken CUDA path -- writing "the CUDA path is preserved" in your notes is NOT the same as having compiled it. State it honestly in the PR ("compile-checked with nvcc, not run"). REQUIRED when the port adds a CUDA/HIP-split backend (e.g. `Foo_cuda.cpp` vs `Foo_hip.cpp`): that CUDA file is never compiled during HIP-only porting and can be badly broken. The check must reach the LINK stage (build one real target/demo, not compile-only of a single TU) -- the undefined-reference class (e.g. explicit instantiations that do not match real call-site signatures) only surfaces at link. If a fix leaves the HIP code objects byte-identical, it needs no new GPU run.
+  - No conda on the host: the PyPI `nvidia-cuda-nvcc-cu12` 12.8 wheels ship only `ptxas`, `nvvm` and `crt` headers, no `nvcc` driver, so they cannot be the toolkit. Assemble a `CUDA_HOME` from NVIDIA's redistributable archives instead: `https://developer.download.nvidia.com/compute/cuda/redist/redistrib_12.8.1.json` lists each component (cuda_nvcc, cuda_cudart, cuda_cccl, libcublas, libcurand, libcufft, libcusolver, libcusparse, libnvjitlink, cuda_nvtx, cuda_cupti, plus libnvjpeg/libnpp if the build links them) with a sha256; extract them all with `--strip-components=1` into one directory and pass `-DCUDAToolkit_ROOT`. cuDNN and NCCL can come from their wheels after adding the unversioned `.so` symlinks CMake's `find_library` looks for. Old third-party pins may need a scratch-only fix under a new toolkit (oneflow's flash-attention needed `#include <cstdio>` with 12.8); patch the extracted copy, never the fork, and record it. (Source: oneflow, 2026-10-30.)
   - Setup: point `-I` at the project's deps (vcpkg include dir, plus any CUDA-Samples headers it uses -- `helper_cuda.h`, `helper_math.h`, `helper_string.h`) and select the project's non-MATLAB/Python build macro. For a Thrust/CUB project also install `cuda-cccl`: on CUDA 13.x they ship there under `include/cccl/{thrust,cub}` (nvcc finds them automatically, but a host-compiler OpenMP-backend check needs that path on `-I` explicitly, and stdgpu's CMake wants `THRUST_INCLUDE_DIR` pointed at it).
   - For a header-only or template library the changed headers only compile when instantiated: CMake-configure the CUDA backend to generate its config headers, then `nvcc -c` a small TU that `template class`-instantiates the affected containers, rather than compiling headers alone.
   - The newest toolkit is not the whole check: a host TU that touches `__half` can be ill-formed on every CUDA release the project supports and fine on the one installed here, because 12.2 exposed `__half`'s integer converts to host compilers (11.0 through 12.1 hide them, and a 12.2-or-newer build hides them again if it defines `__CUDA_FP16_DISABLE_IMPLICIT_INTEGER_CONVERTS_FOR_HOST_COMPILERS__`). When the port touches half-typed host code, also compile that translation unit (or a repro of its template shape) against an older toolkit's headers -- `conda create -n cuda-12.1-hdr -c nvidia cuda-cudart-dev=12.1 cuda-cccl=12.1` is enough for a `g++ -std=c++17 -I<env>/include` check, no nvcc needed. See "A ROCm-only branch inside a shared template still COMPILES on the CUDA path" in fault-classes.md for what it catches. (marian-dev)
   - The class this catches that a HIP-only build cannot: an unconditional device-header include reaching host translation units. Used on 8 projects in one six-week window; it caught a template-shadow regression in Velvet and an stdgpu regression of exactly that include class. (stdgpu, SCAMP, cuSZ, mahout, lc0, cuPDLPx, TIGRE, Velvet)
-  - A torch `CUDAExtension` cannot get this gate the same way: `torch/extension.h` pulls in the host's installed PyTorch, and on a machine whose only torch is a ROCm build with no CUDA-flavored counterpart, the check dies in the ambient install's headers before it can judge the port. See "CUDA gate for torch-extension ports" below for the fingerprints, the diagnosis, and how to record it. (FaithC, accelerated-scan)
+  - A torch `CUDAExtension` cannot get this gate from the toolkit alone, so install a CUDA-built torch wheel in a throwaway venv first (the torch-extension bullet below). Where no such wheel can be installed, the check falls back to the host's torch: `torch/extension.h` pulls in the host's installed PyTorch, and on a machine whose only torch is a ROCm build with no CUDA-flavored counterpart, the check dies in the ambient install's headers before it can judge the port. See "CUDA gate for torch-extension ports" below for the fingerprints, the diagnosis, and how to record it. (FaithC, accelerated-scan)
   - A CUDA-path configure failure at `find_package(CUDA <ver> REQUIRED)` ("did not find CUDAConfig.cmake / cuda-config.cmake") on a project whose `cmake_minimum_required` floor is >= 3.27 is a CMake/toolchain incompatibility, not a port regression, if the project still calls the legacy `FindCUDA` module (as opposed to pure `enable_language(CUDA)` + `FindCUDAToolkit`, which is unaffected). CMake 3.27 added policy CMP0146 ("the FindCUDA module is removed"); once the project's minimum-required version reaches or exceeds a policy's introduction version, that policy defaults to NEW and the module self-disables (its file is found on disk but returns immediately) -- confirm with `--debug-find-pkg=CUDA`, which shows "The file was found at .../FindCUDA.cmake" right above the "did not find" error. `-DCMAKE_POLICY_DEFAULT_CMP0146=OLD` does NOT recover it once minimum-required is at/above the policy version (verified with a two-line reproducer CMakeLists.txt); only an in-project `cmake_policy(SET CMP0146 OLD)` before the `find_package(CUDA...)` call works, which would be an edit to code the port does not own. Confirm pre-existing by building the identical upstream base sha with the identical cmake/nvcc/gcc versions: if it fails identically, record the CUDA check as not validated, with the CMP0146 explanation, rather than as a port regression. (arbor)
+  - For a torch-extension port (Strategy B), plain nvcc is not enough: the project's `setup.py` picks CUDA vs HIP by reading the installed torch (`hasattr(torch.version, 'hip') and torch.version.hip is not None`, or similar), so the CUDA leg needs a CUDA-*built* torch, not just the toolkit. This is still doable on a host with no NVIDIA GPU, and still compile/link-only: `pip install --index-url https://download.pytorch.org/whl/cu121 torch==<pinned>` into a throwaway venv (pick an older CUDA minor, e.g. cu121, so a prebuilt cp312 wheel exists; the wheel bundles its own `nvidia-*-cu12` shared libs, so no system CUDA runtime is needed for compile/link), point `CUDA_HOME` at the dedicated nvcc conda env, and pin `TORCH_CUDA_ARCH_LIST=8.0` (the `torch.utils.cpp_extension` analogue of `-DCMAKE_CUDA_ARCHITECTURES=80` -- unset, it calls `torch.cuda.get_device_capability()` via autodetection and fails or silently degrades on a host with no NVIDIA GPU). Build a scratch copy of the extension source (`git archive HEAD | tar -x`) rather than the project's own working tree, so the CUDA build's `build/` and `.o` files never land as untracked-and-possibly-unignored noise next to the ROCm ones. Confirm the pin took with `cuobjdump --list-elf` on the built `.so` (expect `sm_80` cubins, one per translation unit) the same way `llvm-objdump --offloading` confirms the HIP gfx target. (faster-gaussian-splatting)
 - Cross-OS HIP host-pass check from Windows: a Windows host can syntax-check the Linux HIP host pass of a `.cu` without a Linux box. No root is needed: in WSL, `apt-get download libstdc++-14-dev libgcc-14-dev libc6-dev linux-libc-dev libc6 libcrypt-dev` then `dpkg-deb -x` each into a directory and copy `usr/include` and `usr/lib/gcc` out (`tar -ch` to resolve symlinks). Then run the HIP clang with the TU's own `-D/-I/-include` flags plus `--target=x86_64-unknown-linux-gnu --sysroot=<dir> --gcc-install-dir=<dir>/usr/lib/gcc/x86_64-linux-gnu/14 -nogpulib -x hip --cuda-host-only -fsyntax-only`; `-E -dM` should show `__linux__`, `__GLIBCXX__` and no `_MSC_VER`. Use the same ROCm toolchain as the Linux validators, both the clang major and the HIP headers: in the LichtFeld-Studio `std::pow(__half, __half)` case, clang 23 with the ROCm 7.14 headers accepted the call that clang 24 with the 10.x headers (the Linux build's toolchain) rejected as ambiguous. `__half`'s conversion operators live in ROCm's `amd_hip_fp16.h`, and that run did not separate the compiler from the headers, so a check on an older toolchain proves nothing. Reproduce the Linux error first (negative control) before trusting a clean result. It is syntax evidence only; the Linux validator's real build stays the gate. (LichtFeld-Studio)
 
 ## Platforms
@@ -44,6 +46,57 @@ once -- confirm which ROCm the process actually loaded -- and do NOT rebuild in 
 a DLL-load error; rebuilding a correct binary against a broken runtime is the single
 biggest time sink on Windows. A port is not "broken on Windows" until it has been run
 against a full ROCm distribution.
+
+## Windows: TheRock's devel wheel can ship with hipCUB/rocThrust headers missing
+
+`_rocm_sdk_devel`'s `include/` can be present but genuinely empty (0 entries, no
+error) while `rocm-sdk init` reports success, and a sibling directory the extractor
+staged into can carry an ACL that even the file owner cannot read (`Access is
+denied` from a non-elevated PowerShell `Get-ChildItem`, even though `icacls` shows
+the parent directory itself is readable). `_devel.tar`, the archive `rocm-sdk init`
+would expand, is often already consumed (its `RECORD` entry exists but the file
+is gone) and there is no full re-download budget in a validation session. Confirm
+before assuming corruption: `tar -tf` the still-present tar (if any) and grep for
+the missing library by name -- an absent hit means the wheel build never packaged
+it, a present hit narrows it to this host's extraction. Either way it is a
+toolchain gap, not a code fault: it fires identically for any project whose HIP
+path needs hipCUB or rocThrust, regardless of what the port touched.
+
+Workaround that unblocked a real validation (LC-framework, gfx1151, hipCUB's
+`DeviceScan` and rocThrust's `minmax_element`/`device_ptr`): the three libraries
+now live together in the `ROCm/rocm-libraries` monorepo, so a version-matched set
+is one sparse checkout away rather than three independently-versioned clones that
+can skew against each other (an `ROCm/hipCUB` `main` against an unrelated
+`ROCm/rocPRIM` branch produced real compile errors from an API mismatch, not from
+the port). `git clone --filter=blob:none --sparse --depth 1
+https://github.com/ROCm/rocm-libraries.git && cd rocm-libraries && git
+sparse-checkout set projects/hipcub projects/rocprim projects/rocthrust` pulls a
+consistent set in under a minute. The `cd` is load-bearing: `git clone` does not
+change directory, so without it `git sparse-checkout set` applies to whatever
+repository you are standing in and empties its working tree of everything outside
+the named paths. Each ships a `*_version.hpp.in` that only a CMake configure step
+normally expands (`hipcub_version.hpp`, `rocprim_version.hpp`,
+`rocthrust_version.hpp`) -- hand-write the trivial expansion (three `#define`s,
+any plausible version number; nothing in this class of build reads the value) and
+point `-I` at `projects/hipcub/hipcub/include`, `projects/rocprim/rocprim/include`,
+and `projects/rocthrust` (its `thrust/` subdirectory is the include root). This is
+validator-side scaffolding to prove the port compiles and runs correctly on real
+hardware -- it is not part of the fork commit, and it does not change what the
+project's own documented build needs once a host's ROCm installation is intact.
+
+**Prefer repairing the SDK to carrying the scaffolding.** Reinstalling the four
+packages together (`rocm`, `rocm-sdk-core`, `rocm-sdk-devel`,
+`rocm-sdk-libraries-<gfx>`, all pinned to one date-stamp from the per-arch
+nightly index) restored a populated `include/` -- 30 entries, `hipcub/`,
+`rocprim/` and `thrust/` among them -- and LC-framework then rebuilt and passed
+every gate on gfx1151 with no `-I` scaffolding at all. Two things follow. The
+half-expanded tree is a local extraction failure, not a wheel that omits the
+libraries, so `tar -tf` finding nothing does not settle it. And a
+`validation-failed` recorded against this class says nothing about the port:
+re-run it after the host is repaired before treating it as evidence about the
+code. Cross-check the layout after any repair, since it moves between SDK
+versions -- `hipcc`, the device bitcode and `libexec/hipify` sat under
+`_rocm_sdk_core` on 7.13 and under `_rocm_sdk_devel` on 7.14.
 
 ## Windows: keep one clang driver across every CMake language, and check the CMake version
 
@@ -96,6 +149,108 @@ import, not of a bad port.
 seconds; run it on the DLLs too, not just the .exe, since the missing module is usually
 one level down.
 
+## Windows: a crash trace without a PDB names the wrong function
+
+**The function names in a Windows crash trace from a binary linked without `/DEBUG` are
+the nearest EXPORTED symbol, not the function that was running.** The tell is the
+offset: `save_object_data() + 0x214FE7 byte(s)` is two megabytes past that symbol, so it
+is not that function. plvs lost three porter sessions on two hosts to such a trace: a
+`0xC00000FD` stack overflow whose frames all read
+`boost::archive::...oserializer<...KeyFrame>::save_object_data` was diagnosed as
+"clang-cl miscompiles boost.serialization into infinite recursion", tried against
+static/dynamic boost and `-O0`, and recorded as a toolchain wall. Relinking with
+`-Xlinker /DEBUG` (a PDB, no recompile) and feeding the trace's image offsets
+(`0x140000000 + offset`) to `llvm-symbolizer --obj=<exe>` showed the truth in one run:
+seven frames, ending in `__chkstk` under `Tracking::MonocularInitialization`.
+
+Rerun the binary after relinking -- `/DEBUG` changes the `/OPT` defaults, so the old
+trace's offsets do not map onto the new image. A short trace that ends in `__chkstk`
+(`_alloca_probe`) is a big stack frame, not recursion: get the frame sizes from the
+`movl $imm, %eax` before each `__chkstk` call in `llvm-objdump -dr <file>.obj`. Windows
+gives an executable 1 MB of stack and Linux threads get 8 MB, so code that keeps large
+objects on the stack (plvs: three nested ~420 KB `Frame` locals) runs on Linux and
+overflows on Windows. The fix is a stack reserve on the Windows link
+(`add_link_options(LINKER:/STACK:8388608)` under `if(WIN32)`); `std::thread` workers take
+their size from the same PE header. A `/STACK` change that "did not help" is worth
+checking with `llvm-readobj --file-headers <exe> | grep StackReserve` -- the flag may
+never have reached the linker.
+
+## Windows: a CPU crash that Linux never shows is often a heap over-read
+
+**An access violation that hits only the Windows build, in CPU code the port did not
+touch, and moves between functions from run to run, is worth reading as an
+out-of-bounds read before suspecting threads or the toolchain.** On Linux a read a few
+KB past the end of a vector usually lands in already-mapped heap memory, returns
+garbage and goes unnoticed; the Windows heap commits pages on demand, so the same read
+can land on an unmapped page. plvs (TUM-VI stereo, fisheye cameras) crashed 13 of 13
+Windows runs while Linux finished most runs, and three upstream CPU bugs were behind
+it. The every-run crash (`LocalMapping::CreateNewMapFeatures`, `KeyFrameCulling`) was
+`mvuRight`/`mvDepth` sized to the left-image keypoint count but indexed over both
+images (code inherited from ORB-SLAM3, so any ORB-SLAM3 derivative has it). Fixing that
+allocation still left 3 of 10 runs crashing: a loop-closure keyframe vector shorter
+than the point vector it is indexed with (the `LoopClosing` crash, plvs-only) and a
+line observation counted twice. Only with all three fixed were 10 of 10 runs clean, so
+keep running the sequence after the first fix. AddressSanitizer on a Linux CPU-only
+build shows the over-reads in a run that exits 0, which makes it the cheaper search.
+
+Getting file:line costs one rebuild and no admin rights:
+- Build a CPU-only tree with `-DCMAKE_CXX_FLAGS="... -g -gcodeview"` and
+  `-DCMAKE_EXE_LINKER_FLAGS="-Xlinker /DEBUG"` (the GNU-driver clang++ emits CodeView);
+  `/DEBUG` alone, as in the section above, gives function names but no lines or locals.
+- `cdb.exe` without installing anything: download the WinDbg `.msixbundle` (the URL is
+  in `https://windbg.download.prss.microsoft.com/dbazure/prod/1-0-0/windbg.appinstaller`),
+  `unzip` the `windbg_win-x64.msix` out of it, and `unzip` that; `amd64/cdb.exe` runs
+  from the extracted tree.
+- Run `cdb -g -G -y <pdb dir> -c "sxd av; sxe -c2 \".lines -e; .ecxr; r; kn 40; dv /t /v; q\" av; g" <exe> <args>`
+  (`MSYS2_ARG_CONV_EXCL="*"` under Git Bash). `sxd av` skips first-chance faults the
+  program handles; the second-chance command prints the stack with source lines and
+  the faulting registers, which show the index and the base pointer of the bad read.
+- If several build trees write their executables into the same source-tree directory
+  (plvs does), copy each exe and its PDB under a distinct name before building the next
+  tree, or a run silently uses the other build.
+
+## Windows: TheRock clang 23 can hang in x86 register allocation
+
+A host C++ TU that compiles in about a second at `-O1` but never finishes at `-O2`/`-O3`
+is a compiler fault, not a slow build. Find the function with
+`-mllvm -debug-pass=Executions` under a `timeout`: the last lines name the pass and the
+function (plvs libelas: `Greedy Register Allocator` on `Elas::gapInterpolation`; at `-O1`
+with `-funroll-loops` the same pass crashes instead). `-mllvm -regalloc=basic` on that
+one source file keeps the optimization level and compiles it in a second.
+
+## Windows: a torch wheel needs the matching `[device-<gfx>]` extra
+
+TheRock publishes torch on several indexes and they do not carry the same thing. The
+PER-ARCH index (`.../v2/<gfx>/`) can lag a ROCm release behind, so matching a 7.14 SDK
+means `whl-staging-multi-arch` -- and the plain multi-arch wheel there carries device
+code for only some architectures. The failure is quiet in exactly the wrong way:
+`torch.cuda.is_available()` returns True, `get_device_name` and `gcnArchName` read back
+correctly, and then the first real kernel raises
+
+    torch.AcceleratorError: CUDA error: device kernel image is invalid   (hipErrorInvalidImage)
+
+Install `torch[device-<gfx>]==<same version>` (it pulls `amd-torch-device-<gfx>` and
+`rocm-sdk-device-<gfx>`) and it works. **`hipErrorInvalidImage` on the first kernel of a
+correctly-detected device is a missing architecture in the wheel, never a port fault.**
+Pin one date-stamp across torch, `rocm-sdk-core/libraries/devel` and the device packages,
+because they resolve against each other. (gfx1151, torch 2.12.0+rocm7.14.0a20260519.)
+
+## An integrated APU can crash the device linker under build parallelism
+
+    clang: error: amdgcn-link command failed due to signal (use -v to see invocation)
+    clang: note: diagnostic msg: Error generating preprocessed source(s).
+
+This is resource exhaustion, not a broken toolchain and not bad code. It showed up on a
+20-CU APU building 14 template-heavy rasterizer variants at `MAX_JOBS=8`, always in the
+device-link step; the same variant alone at `MAX_JOBS=2` built immediately, and the whole
+14-variant sweep at `MAX_JOBS=4` passed with no failures. An APU shares one memory pool
+between CPU and GPU, so concurrent device links compete with everything else on the box.
+
+Halve the job count before investigating anything else, and do not read a signal-killed
+`amdgcn-link` as evidence about the port. Related but distinct from the reboot class: the
+same host has hard-reset under heavy parallelism plus sustained GPU load, so a build that
+takes the machine down is the same lesson one notch further along.
+
 ## Windows: a C++ LibTorch consumer must force the torch_hip.dll import
 
 **A C++ test that gates on `torch::cuda::is_available()` can fail on Windows against a
@@ -139,6 +294,21 @@ passes alone and fails on its Nth repeat or deep into a suite. `AMD_LOG_LEVEL=3`
 climbing bases. Run such suites one gtest suite per process, with a per-test fallback, and
 treat it as a runtime defect, not a port bug. (LichtFeld-Studio)
 
+## Windows: `hipcc.exe` and hiprtc traps for setuptools/Python builds
+
+Found porting CuPy's Windows build. Each one looks like a broken port and is not:
+
+- **`hipcc.exe -c` links the static CRT by default.** The object carries `RuntimeLibrary=MT_StaticRelease`, so linking it with setuptools' `/MD` objects is LNK2038. Pass `-fms-runtime-lib=dll`.
+- **No target means gfx906, silently.** Without `--offload-arch` or `HCC_AMDGPU_TARGET`, hipcc on Windows builds for gfx906, and `--offload-arch=native` fails. The symptom is "invalid device function" at launch. Require an explicit target at build time; at run time pass `--offload-arch=<gcnArchName>` of the current device.
+- **`hipcc.exe` does not quote what it forwards to clang.** An argument with a space or a quote is split: `-DX=extern "C"` becomes `-DX=extern` plus a file named `C`, and `-IC:\Program Files (x86)\...` becomes three arguments (`clang: error: no such file or directory: 'Files'`). Keep such arguments out of hipcc commands; hiprtc and clang-cl are not affected.
+- **hiprtc rejects an absolute program name.** `hiprtcCreateProgram(..., name="C:\...\k.cu")` then `hiprtcCompileProgram` returns `HIPRTC_ERROR_COMPILATION` with an EMPTY log; `k.cu` or `dir\k.cu` compiles the same source. Pass a base name.
+- **hiprtc kernels that include C++ standard headers compile against the MSVC STL, and `<complex>` breaks.** Two failures, in order: `MSVC ...\include\complex:575: call to 'signbit' is ambiguous` (MSVC calls `std::signbit(long double)`; hiprtc declares only float and double), then, once that compiles, `ld.lld: error: undefined hidden symbol: _Exp` (MSVC's complex `exp`/`cosh`/`sinh` call the UCRT helpers `_Exp`, `_Cosh`, `_Sinh`, `_FExp`, `_FCosh`, `_FSinh`). TheRock ships no libc++ headers, so dropping the MSVC include dirs is no fix. A pre-included header guarded by `__HIPCC_RTC__ && _MSC_VER` that adds `signbit(long double)` (plus `namespace std { using ::signbit; }`) and defines the six helpers as `__device__ __attribute__((weak))` functions bound to the C names with `__asm__("_Exp")` etc. makes it compile and link; a plain `extern "C" __device__ _Exp` definition is refused ("`__host__ __device__` function cannot overload `__device__` function") because clang's `cuda_wrappers/complex` forces the STL declarations host-device. It must come before the first `<complex>` include. User `RawKernel`/`RawModule` code that does not include that header is still affected.
+- **A `friend` naming a `__device__` function template needs `__device__` itself** with the clang in ROCm 7.14 (Linux and Windows): without it the friend no longer matches, and the template loses access (`'x_' is a private member of ...`). NVRTC also rejects the unannotated friend unless `-default-device` is given. Annotate the friend; it is correct on both.
+- **The hiprtc DLL's name carries the HIP version, and the digit layout has changed between releases** (`hiprtc0702.dll`, `hiprtc0714.dll` and `hiprtc07013.dll` have all shipped), so it is not a soname-like name and must not be hard-coded: list `<rocm>/bin` for `hiprtc0*.dll` (the `0` excludes `hiprtc-builtins*.dll`).
+- **A symbol looked up in your own extension by name must be `__declspec(dllexport)`.** `ctypes.CDLL(__file__)` / `GetProcAddress` sees only exported symbols on Windows; on Linux every non-static function is visible, so this is Windows-only and fails at first use, not at link.
+- **`os.add_dll_directory(<rocm>/bin)` is enough** for a Python extension that links the ROCm DLLs, even on a host whose System32 `amdhip64_7.dll` is broken: the extension-load search order puts the added directory before System32, and hiprtc's later by-name loads of `amd_comgr.dll` resolved from the same directory (checked with `GetModuleFileNameW`). No preloading by full path was needed. Keep the returned handle alive.
+- **A missing ROCm root does not fail the import; the extension binds the display driver's System32 `amdhip64_7.dll` without any error.** If the extension skips `add_dll_directory` because it cannot find the root, the import still succeeds against the driver's HIP runtime (7.12 on the gfx1151 host). The failure comes later and points elsewhere (cupy: `failed to load hiprtc0712.dll`, a hiprtc name derived from the wrong runtime version). TheRock's `hipconfig.exe` / `rocm-sdk.exe` are console scripts in the venv's `Scripts` directory, which is on PATH only when the venv is activated, so an unactivated `venv\Scripts\python.exe` (from an IDE, a service, or a build with `--no-build-isolation`) finds neither. Look up `shutil.which('hipconfig', path=sysconfig.get_path('scripts'))` when PATH has no hipconfig, and warn by name when no root is found. Verify which DLL loaded with `GetModuleFileNameW`. (Source: cupy.)
+
 ## Windows: kernels on different streams run one after another
 
 **A test that asserts a speedup from multi-stream concurrency fails on every Windows host
@@ -163,10 +333,38 @@ reset and `hipStreamDestroy` then uses it again (valgrind: use-after-free on Lin
 where glibc aborts only some runs). The port-side fix is to destroy the owning object
 before the reset; whether to change the project is the upstream maintainer's call when
 a test exercises the order on purpose. Stale `hipFree` and `hipHostFree` fail cleanly
-with `hipErrorInvalidValue`; stale `hipEventDestroy` returns `hipSuccess` and was not
+with `hipErrorInvalidValue` in a single-threaded process (in a multithreaded one, see the
+next section); stale `hipEventDestroy` returns `hipSuccess` and was not
 checked under valgrind. Tell it apart from a missing DLL (which dies before `main`
 prints anything) by the work having completed first. A 12-line repro and a parity
 request to HIP are on FLAMEGPU2.
+
+## A duplicate `hipFree` in one thread can crash a different thread
+
+When a library frees the same device pointer twice and another thread allocates between
+the two frees, the second free can release that thread's buffer. The failure then shows
+up somewhere unrelated, and only in some runs: for example an OpenCV `cv::cuda` call
+aborting with `(-217) invalid argument` from `cudaGetLastError()`, or a jump to address 0.
+plvs hit this once its libelas GPU path was enabled. The upstream code freed two buffers
+twice, and on gfx1100 4-5 of 13 dense-stereo SLAM runs died that way, against 0 of 26
+runs of three controls (the double free removed, the CPU fallback, no GPU code). On
+gfx90a the same head never showed it, so a clean run on one architecture does not clear
+the code. Read the code for duplicate frees when a crash kind appears only where a newly
+enabled GPU path runs. Separate it from upstream races with the counting method under
+"Diagnosing a suspected AMD fault before escalating" (CPU-only control, many runs, one
+stack per crash kind). Without core dumps (`ulimit -c 0`), and when gdb slows the run too
+much to finish, a 15-line `LD_PRELOAD` handler that calls `backtrace_symbols_fd` on
+SIGSEGV/SIGABRT still gives the stack. (plvs)
+
+## A free-memory leak check measures the whole GPU, not your process
+
+`hipMemGetInfo` (like `cudaMemGetInfo`) reports free memory for the device, so a leak
+harness that compares free memory across repeated calls also counts every other process
+allocating on that GPU. plvs: a 21-call libelas leak check reported 8.00 MB lost on one
+image while a SLAM run shared the card, and 0.00 MB once it ran alone, which is the
+recorded figure. Run memory-delta checks with nothing else on the device (check
+`rocm-smi --showpids`), and repeat any non-zero result alone before calling it a leak.
+(plvs)
 
 ## Two GPUs visible to one process can crash the runtime
 
@@ -248,10 +446,29 @@ Windows runners do), and neither is a port defect:
 ## One architecture gets wrong numbers while the others pass
 
 A clean build that produces wrong results on exactly one architecture -- an iterative
-solver, an LM/Newton fit, an FP regression head -- is usually floating-point
-accumulation divergence rather than a port bug, and RDNA3.5 (gfx1151) is where it has
-shown up. Record the error magnitude and stop rather than chasing it deep: the
-comparison that matters is against the other architectures, not against a fix.
+solver, an LM/Newton fit, an FP regression head -- has two very different causes: a real
+bug that only that architecture's timing or width exposes, or floating-point
+accumulation divergence. The checks for a real bug are cheap, so they come first:
+
+- An unsynchronized upload: a `cudaMemcpy*Async` on one stream consumed by a kernel on
+  another, or an init-time kernel on the null stream racing other streams (both in
+  fault-classes.md under streams and events). Run the same call 20 times and compare
+  bitwise with the first; add one stream synchronize after the last upload and see
+  whether the error disappears.
+- A device-to-device copy racing its producer, and an allocation the code reads before
+  writing (CUDA often hands back zeros; HIP does not).
+- A wavefront-width assumption: compare against a second architecture of the same width.
+- Single against double precision: if every GPU variant diverges from the
+  double-precision result identically at the same positions, and the double path matches
+  the CPU, it is reassociation at a comparison boundary (see "Diagnosing a suspected AMD
+  fault before escalating" below).
+
+Only when those are clean is accumulation-order divergence the likely answer; RDNA3.5
+(gfx1151) is where it has shown up in iterative solvers. Then record the error magnitude
+beside the other architectures' and stop: the comparison that matters is against them,
+not against a fix. Stopping at the first step is how one value-head error stayed
+recorded as a BLAS-library problem for two months before it turned out to be a
+null-stream upload race that was latent on CUDA too (lc0).
 
 ## Read what the project's own cross-backend checker actually compares
 
@@ -274,6 +491,11 @@ Two patterns that each cost a deep investigation before the real cause was found
 
 - **A "data-dependent, later-data-corrupts-earlier, per-tile" corruption signature is the fingerprint of a REPRODUCER bug, not a codegen fault.** cuSZ chased a suspected miscompile to a BLOCKED state and an IR bisect; the actual cause was the test input -- `np.arange(..., dtype=float32) * (python float)` promotes to float64, so `.tofile()` wrote 8 bytes per element and the tool read the stream as f32. Validate the byte width and dtype of any binary test input before escalating to an ISA bisect or a ROCm bug report. (cuSZ)
 - **Triangulate single- against double-precision before blaming the wavefront.** When a warp-collective rewrite shows SP divergence, run a second GPU variant and compare both to the DP oracle. If both GPU variants diverge from DP identically at the same positions, and the DP path is bit-identical to the CPU oracle, it is floating-point reassociation at a comparison boundary -- not a wave-size fault. SCAMP used this to clear a ~0.5 divergence at 10/8093 positions as a threshold-boundary artifact. (SCAMP)
+- **A once-per-suite host crash that stress reruns never reproduce: widen the suspected race window instead of rerunning.** If the stack sits in runtime code the port does not touch (`git diff` empty there), read it for a publish-before-register ordering, insert a temporary sleep between the two steps, rebuild, and run a tiny loop. A crash that becomes deterministic, and also happens with CPU-only work, is an upstream race that a fast GPU merely exposes; revert, rebuild and record it. oneflow's `LaunchLazyJob` pushed a graph's SourceTick before `EnqueueNNGraph`, so a tiny graph's finish callback could pop an empty queue: 1 crash in ~550 suite files on two arches, 0 in 70 stress reruns, 5 of 5 with a 20 ms sleep (CPU graphs included). (oneflow)
+
+- **ROCm 10.1 `AMD_LOG_MASK` takes decimal only, and graph replays are invisible to it.** A hex value such as `0x60000` is silently read as nothing (level 4 then prints one banner line), so check a mask on a tiny HIP program before trusting a quiet log. Bits on that runtime: 1 = API calls, 131072 = memory, 2097152 = `ShaderName` per dispatch. A graph's kernel nodes log `ShaderName` once, at `hipGraphInstantiate`, never on replay, and an illegal access logs `Memory Fault Error` with no address at any level (and `dmesg` is usually not readable in a container), so neither logging nor `AMD_SERIALIZE_KERNEL=3` names the kernel that faults inside a graph replay. Varying the replay order changes how often such a fault shows (oneflow: 0 of 12 to 7 of 8 at one commit), so an apparent regression between two commits can be the order hiding it.
+- **Before blaming the code under test for a wrong result, save the output, the inputs as read back and the reference, and recompute the reference on the CPU.** A test that checks a GPU result against an in-process GPU reference (torch, or the project's own float64 path) fails the same way when the REFERENCE is the wrong side. oneflow's "corrupt first-graph replay" on two gfx1100 GPUs survived two rounds of graph-capture hypotheses; dumping the arrays showed the graph output matching a CPU product of the read-back inputs to 9e-7 while the float64 reference GEMM on the other GPU came back as garbage, just before the illegal access. Also turn the suspected feature off first: the same fault with HIP graph capture disabled (`ONEFLOW_KERNEL_ENABLE_CUDA_GRAPH=0`, 2 of 2) cleared graphs in two runs. (oneflow)
+- **When a wrong result survives a `hipDeviceSynchronize` on every device, probe the HIP copy path itself before suspecting kernels.** Between the steps of the failing script, copy a known pattern host-to-device and back with plain `hipMemcpy` (ctypes is enough) into a host buffer pre-filled with -1, and report the wrong byte ranges. In oneflow's two-GPU nn.Graph run on gfx1100 (ROCm 10.1 SDK), such a probe on device 0 came back with whole 48 KiB pieces never delivered (still -1), with rc 0, after the larger graphs ran on device 1. That probe and torch's reference uploads run no oneflow code at all, but the state that makes them fail can still come from the application's two-device activity, so a clean probe on one device does not clear the application. **Do not attribute a timing-dependent fault from one single-variable condition on one build.** `HSA_ENABLE_SDMA=0` (copies by blit kernels instead of the SDMA engines) first looked decisive there (0 of 10 against 23 of 23 at the default), yet interleaved runs on two builds of the same source, differing only by inert env-gated debug hooks, showed it moving the rate in either direction: 8 of 8 to 0 of 8 on one build, 0 of 8 to 3 of 8 on the other, with the illegal access itself in a blit-kernel copy. The two builds also gave 8 of 8 against 0 of 8 at the default, and the clr queue toggles (`DEBUG_CLR_AQL_BARRIER_OPT`, `DEBUG_CLR_AQL_DEV_QUEUE`, `DEBUG_CLR_ENABLE_KDQ`, `DEBUG_CLR_DOORBELL_SKIP`, `DEBUG_CLR_USE_MOVDIR64B`, 3 of 3 each) and `DEBUG_HIP_DYNAMIC_QUEUES=0` (6 of 8) did not remove it. Before a condition attributes anything, interleave it with its control, at least 8 runs per cell, on more than one build. A newer runtime under the same build is the second cheap test: preloading a later nightly's `libamdhip64.so.7` and `libhsa-runtime64.so.1` (`LD_PRELOAD`; ABI-compatible within the same soname) ran 0 of 13 there. That is consistent with a runtime defect but does not prove one, because a runtime swap also changes timing and an application race (a missing cross-device dependency, a buffer freed while another device still reads it) would react the same way; it takes a reproducer without the application, or the one runtime commit that makes the difference, to place the bug in the runtime. `AMD_LOG_LEVEL=3 AMD_LOG_MASK=256` logs the per-stream SDMA engine assignment (one INFO line per assignment, little overhead). A probe on the legacy null stream returns 906 while another thread's stream is capturing, so place probes outside a capture or run with capture off. (oneflow)
 - **A kernel that hangs only in a Debug build: rebuild Debug at `-O2` before blaming an assert or the port.** A Debug HIP build turns two things on at once, `-O0` device codegen and every `assert` (including HIP's own `__hip_check_mask` in the `*_sync` intrinsics). Configure a second Debug tree with `-DCMAKE_HIP_FLAGS_DEBUG="-O2 -g0"` (NDEBUG still unset). If the test passes there, the asserts are not what fires and the hang is `-O0` codegen; find the kernel with `AMD_SERIALIZE_KERNEL=3 AMD_LOG_LEVEL=3` (last launch that never completes) and the PC with the SDK's `rocgdb` after a SIGINT. Run a Debug suite one test per process with a timeout so one hang does not hide the rest. The asserts-on `-O2` tree is also the better Debug evidence for mask and wave64 checks. (LichtFeld-Studio)
 
 ## A fault inside a vendored JIT entry point: rebuild-with-a-forced-throw beats a debugger
@@ -335,10 +557,11 @@ versioned name has this fault on TheRock: list `${ROCM_PATH}/bin` for the
 versioned file instead (`hiprtc0*.dll` -- the `0` excludes
 `hiprtc-builtins*.dll`), and compare the names the loader tries against
 `ls $ROCM_PATH/bin` before anything else. (diff-surfel-tracing)
+- **An intermittent crash seen only in the GPU build needs a CPU-only build control, run as often and under the same load.** A multi-threaded application (SLAM, pipelines with worker threads) can carry an upstream race that the GPU path only changes the timing of. plvs stereo segfaulted in 4 of 9 HIP runs and in 0 of 6 CPU-only runs, which looks like a port fault, but the crash was in CPU line-mapping code (a null `KeyFrame*` in `MapLine::UpdateNormalAndDepth`). Six more of each, run side by side, gave HIP 0/6 and CPU 1/6. Build the control from the same tree with the GPU option off, into a copy of the source tree when the project writes its outputs into the source tree, get a backtrace (`gdb -batch -ex run -ex bt`), and count runs before you decide. A handful of runs per side cannot tell a rate of 25% from a rate of 8%. (plvs)
 
 ## CUDA gate for torch-extension ports: the host's installed PyTorch itself can be the wall
 
-On a host whose only installed PyTorch is a ROCm dev build (built from source with `USE_ROCM=1`), nvcc-compiling a torch C++/CUDA extension fails for reasons that have nothing to do with the port. No full `CUDAExtension` link is reachable without downloading a genuine CUDA-flavored torch wheel, so the closest available check is a raw `nvcc -c` of the `.cu` against `torch.utils.cpp_extension.include_paths()` -- and that dies in the ambient install's headers. Two fingerprints of the same root cause:
+On a host whose only installed PyTorch is a ROCm dev build (built from source with `USE_ROCM=1`), nvcc-compiling a torch C++/CUDA extension fails for reasons that have nothing to do with the port. The first choice is still a genuine CUDA-flavored torch wheel in a throwaway venv (see the validation policy above), which gives a full `CUDAExtension` compile and link. Without one, the closest available check is a raw `nvcc -c` of the `.cu` against `torch.utils.cpp_extension.include_paths()` -- and that dies in the ambient install's headers. Two fingerprints of the same root cause:
 
 - The shipped `torch/include` tree was generated for the ROCm build and is missing CUDA-only generated headers, e.g. `#include <c10/cuda/impl/cuda_cmake_macros.h>: No such file or directory` (that file is emitted by cmake only when `USE_CUDA=1`).
 - `torch/headeronly/util/complex.h` guards `#include <thrust/complex.h>` with `#if defined(__HIPCC__) || defined(__HIPCC__)` -- a duplicated-token typo, evidently meant `__CUDACC__ || __HIPCC__` -- so under nvcc the include is skipped while `c10/util/complex.h`/`complex_math.h` still reference `thrust::complex` unconditionally under `__CUDACC__`, cascading into ~100 "identifier thrust is undefined" errors on ANY project that includes `torch/extension.h`, regardless of that project's own code (observed on dev build `2.14.0a0+gitb6b444c`).

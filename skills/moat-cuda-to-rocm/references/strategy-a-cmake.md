@@ -5,7 +5,7 @@ Goal: only `.cu`/`.hip` translation units see the HIP toolchain; host C++ is unt
 1. Add one CUDA-to-HIP compat header (e.g. `src/.../cuda_to_hip.h`). On ROCm it aliases the CUDA spellings the project uses to their HIP equivalents and includes the HIP runtime; on NVIDIA it is a no-op include of the CUDA runtime. Everywhere else keep the plain CUDA spelling (`cudaXxx`, `curand*`, `cublas*`). This header is the only file that knows about HIP.
 
        #pragma once
-       #if defined(USE_HIP) || defined(__HIP_PLATFORM_AMD__)
+       #if defined(USE_HIP) || defined(__HIP__)
        #include <hip/hip_runtime.h>
        #define cudaMalloc        hipMalloc
        #define cudaFree          hipFree
@@ -41,6 +41,8 @@ Goal: only `.cu`/`.hip` translation units see the HIP toolchain; host C++ is unt
        endif()
 
    Marking the existing `.cu` files `LANGUAGE HIP` keeps the diff minimal and the NVIDIA build intact. Configure with `-DUSE_HIP=ON -DCMAKE_HIP_ARCHITECTURES=gfx90a` (add `-DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang++` if CMake does not find it). Because the target reads `${CMAKE_HIP_ARCHITECTURES}`, one commit builds for any AMD target with only `-DCMAKE_HIP_ARCHITECTURES=<arch>` and no source change, so validating on another architecture needs no commit of its own. Pass every architecture you can test at planning time so the first bring-up is right.
+
+   Test the auto-detect path once by configuring with no `-DCMAKE_HIP_ARCHITECTURES`. A target created before `enable_language(HIP)` runs gets its `HIP_ARCHITECTURES` property initialized empty. Any executable that links a library with HIP objects links as HIP, so configure stops with `HIP_ARCHITECTURES is empty for target <exe>`, while explicit-arch builds still work and hide the problem. Detection also returns one entry per GPU (`gfx942;gfx942;...`). The fix: after `enable_language(HIP)`, run `list(REMOVE_DUPLICATES CMAKE_HIP_ARCHITECTURES)`, read `get_property(... DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)`, and set `HIP_ARCHITECTURES` on every target in that list (source: qrack, where tests and examples were created before `cmake/CUDA.cmake` was included).
 
    **Outside CMake you write that rule yourself, and the README has to say what you wrote.**
    A meson/Makefile project has no `enable_language(HIP)` to get this right for you, so the
@@ -94,6 +96,31 @@ files changed), leaving the `.cu`/`.cuh` tree byte-identical to upstream. That w
 behaviour-preserving: bit-identical GPU results, and all 10 device code objects byte-identical
 across two architectures.
 
+### The shim header is mandatory, not just tidier, when the file is vendored NVIDIA code
+
+A project that vendors `helper_cuda.h`/`helper_string.h` from the CUDA samples is carrying a
+file whose header says "Please refer to the NVIDIA end user license agreement (EULA) ... Any
+use, reproduction, disclosure, or distribution of this software ... outside the terms of the
+EULA is strictly prohibited." Adding a `#if defined(USE_HIP)` branch INSIDE that file makes
+the port's own diff a derivative modification of NVIDIA-proprietary-marked code, which is a
+licence problem no amount of correct HIP is worth. plvs shipped exactly that for two months --
+41 lines of `check()`/`checkCudaErrors` inside the vendored `include/cuda/helper_cuda.h`, and
+the deleted block had mirrored NVIDIA's own signature and message strings -- and it took a
+scoped fix round to undo. Put the substitute in `hip_compat/cuda/helper_cuda.h` and leave the
+vendored file byte-identical; check with `git diff <base> -- <file>` printing nothing, not by
+eye. Search the tree early for NVIDIA-proprietary markers (`grep -rliE "end user license
+agreement|NVIDIA CORPORATION and its licensors" .`): the files it names are exactly the ones
+your diff must not touch. Reproducing the API NAMES the project's own sources call (`checkCudaErrors`) is
+unavoidable and fine; copying the vendored implementation's signature, control flow, or format
+strings is not -- write your own. (plvs)
+
+Do not justify the shim with "the vendored header does not parse under hipcc" without checking:
+plvs's does parse clean once the compat header is force-included, because its cuBLAS/cuFFT enum
+tables sit behind `#ifdef CUBLAS_API_H_` and compile out. The real reason there was narrower and
+worth stating accurately in the commit -- `checkCudaErrors` is defined inside
+`#ifdef __DRIVER_TYPES_H__`, a macro only the CUDA toolkit's `driver_types.h` sets, so on ROCm
+the header supplies nothing. A one-line probe TU that calls the macro settles it. (plvs)
+
 Prefer this when the project includes CUDA headers by name. It does not apply where sources
 use CUDA symbols without including a CUDA header, or where the build already injects a
 compat header with `-include`.
@@ -105,12 +132,86 @@ compat header with `-include`.
   `--offload-arch=<arch>`; `enable_language(HIP)` auto-detects. A pinned arch is the single
   most common reason a port builds on the machine it was written on and nowhere else.
   (TurboFNO, LC-framework)
-- **hipify-perl, when that is the mechanism rather than CMake HIP language:** run it
-  synchronously -- `-inplace` in a backgrounded or `&&`-chained loop silently skips files --
-  and always re-grep the whole tree for `cudaMalloc|cudaSuccess|include <cub|include <cuda.h`
-  before compiling. Un-hipified files surface as "undeclared identifier cudaMalloc". Note
-  that hipify prepends `#include "hip/hip_runtime.h"`, which breaks a g++ CPU reference
-  build, so build that from a separate non-hipified copy. (LC-framework)
+- **A build-time wavefront width must refuse a mixed arch list.** When the warp size reaches
+  a kernel template argument it has to be one macro visible to both compile passes (the
+  device-only `__GFX9__` cannot feed the host launch), so it is derived from
+  `CMAKE_HIP_ARCHITECTURES` -- and a list holding a gfx9 and a gfx10/11/12 arch silently
+  gives one family the other's width: wrong reductions, no error. Auto-detect produces such
+  a list on any host with both kinds of GPU. `message(FATAL_ERROR)` on a mixed list rather
+  than picking one. (oneflow)
+- **Take the ROCm include path from `find_package(hip)`, never `/opt/rocm/include`.** For
+  host `.cpp` that need HIP or hipCUB/RCCL headers, use `${hip_INCLUDE_DIRS}` (set by
+  hip-config.cmake) or `hip::host`'s include directories. The ROCm Python SDK wheels put the
+  tree under site-packages with no `/opt/rocm` at all. (oneflow)
+- **When the project drives CMake from its own shell scripts, the toggle belongs there too --
+  and the toolchain probe must not hardcode `/opt/rocm`.** A bare `option(USE_HIP ...)` in
+  `CMakeLists.txt` is unreachable from the documented build if users are told to run
+  `./build.sh`: they get a CPU build and nothing says why. Put the toggle beside the existing
+  CUDA one in the config script and forward it from wherever that script forwards
+  `-DWITH_CUDA=ON`, which also makes the config script -- the file that already documents the
+  CUDA build -- document the ROCm build. In the probe, mirror the CUDA probe's shape but accept
+  a `hipcc` on `PATH` and honor an existing `ROCM_PATH`, instead of testing only
+  `/opt/rocm/bin/hipcc`: the TheRock/pip ROCm SDK installs under a Python `site-packages`
+  prefix, so a `/opt/rocm`-only test silently disables the GPU path on exactly the hosts that
+  validate the port. Keep the "not found" message inside the enabled branch so CUDA and
+  CPU-only builds print nothing new. (plvs)
+- **Never export a fallback `ROCM_PATH` such as `export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"`.**
+  `hipconfig` honors `ROCM_PATH`, and CMake runs `hipconfig` to find the toolchain for
+  `enable_language(HIP)`, so a `ROCM_PATH` naming a directory that does not exist turns a
+  working configure into `CMakeDetermineHIPCompiler: Failed to find ROCm root directory` -- the
+  config script disables the very build its own `PATH`-based probe just declared available.
+  Export only a prefix that resolves: keep an inherited value when `$ROCM_PATH/bin/hipcc`
+  exists, else derive it from the accepted `hipcc` (`hipconfig --rocmpath` run with `ROCM_PATH`
+  cleared, falling back to `dirname $(dirname $(readlink -f $(command -v hipcc)))`), else use
+  `/opt/rocm` only if it exists, else export nothing. Print that same prefix in the "HIP found"
+  message, not the fallback. Test it the way the documented build runs: a configure that passes
+  `-DCMAKE_HIP_COMPILER=...` by hand bypasses discovery entirely and hides this. (plvs)
+- **Grep the build scripts for every `CUDA_FOUND`-style gate, not just the flag forwarding.**
+  Adding `-DUSE_HIP=ON` where the script forwards `-DWITH_CUDA=ON` is only half the wiring: a
+  bundled GPU component built under `if [ $CUDA_FOUND -eq 1 ]` is still skipped on a machine
+  with no CUDA toolkit, while the main `CMakeLists.txt` links its archive unconditionally, so
+  the build configures cleanly and dies at link. Widen each such gate to
+  `[ $CUDA_FOUND -eq 1 ] || [ $USE_HIP -eq 1 ]` and run the script on a CUDA-free machine.
+  (plvs, its `Thirdparty/libsgm`)
+- **Then prove each GPU component actually has device code in the HIP build.** Two more
+  CUDA-only gates make a HIP build quietly CPU-only, and nothing fails: a source list that
+  names the `.cu` files only inside `if(USE_CUDA)` (the HIP branch's
+  `set_source_files_properties(${sources_gpu} ... LANGUAGE HIP)` then applies to an empty
+  list), and a runtime selector such as `#ifdef USE_CUDA new ElasGPU #else new Elas` that the
+  HIP build, defining only `USE_HIP`, never takes. The library builds, links, and passes every
+  test on the CPU implementation, and the review and validation rounds accept it. Check for
+  `--offload-arch` in `build.ninja`, a `.hip_fatbin` section in the archive members
+  (`readelf -SW`), and the kernel names in an `AMD_LOG_LEVEL=3` trace. A file that includes
+  the GPU header for the selector also needs the HIP headers, so build it as HIP (the CUDA
+  branch gets them from `include_directories(${CUDA_INCLUDE_DIRS})`). (plvs, its
+  `Thirdparty/libelas-gpu`, which ran CPU ELAS on every AMD platform for five months)
+- **hipify-perl, when that is the mechanism rather than CMake HIP language:** let the
+  conversion loop run to completion -- a whole-tree loop takes a while, and one cut short
+  leaves the remaining headers in CUDA form, so re-running it finishes the job. The signal
+  for that is the compiler, not a grep: un-hipified files surface as "undeclared identifier
+  cudaMalloc". Grepping the tree for `cudaMalloc` instead reports the `.prehip` backups
+  hipify itself writes -- 8 of 12 files on a fully converted tree -- and answers differently
+  depending on whether the grep honors `.gitignore`, which usually excludes them. Note that
+  hipify prepends `#include "hip/hip_runtime.h"`, which breaks a g++ CPU reference build, so
+  build that from a separate non-hipified copy. (LC-framework)
+- **`-inplace` re-hipifies from the `.prehip` backup, not from the file on disk.** The first
+  run saves `foo.cu` as `foo.cu.prehip`; every later run reads the backup and overwrites
+  `foo.cu` from it. So regenerating a file and hipifying it again silently resurrects the
+  previous generation's content, with no diagnostic and a plausible-looking build. Delete
+  the stale `*.prehip` (or work in a fresh copy of the tree) whenever a generator has
+  rewritten a file that was already hipified. (LC-framework)
+- **Do not key a macro gate on `__HIP_PLATFORM_AMD__` when a compiler predefine says the same
+  thing.** `__HIP_PLATFORM_AMD__` comes from `hip/hip_runtime.h`, not from the compiler, so a
+  gate above the includes -- wave-width selection above all -- depends on hipify happening to
+  prepend that header at line 1, and evaluates as if the platform were CUDA whenever it does
+  not. That failure is silent: it compiles and runs, with wave32 code on wave64 hardware.
+  `__GFX8__`/`__GFX9__`/`__GFX11__`/`__GFX12__` are AMD-clang device-pass predefines that need
+  no header and are never defined by nvcc or by a host compiler, so
+  `#if defined(__GFX8__) || defined(__GFX9__)` is both shorter and self-contained. Verify a
+  candidate gate with `hipcc -x hip --offload-arch=<arch> -dM -E` on an empty file before
+  trusting it, and assert the result per arch with a `static_assert` under
+  `#ifdef __HIP_DEVICE_COMPILE__` -- an unguarded one in a `__global__` body is also evaluated
+  in the host pass, where the answer is legitimately different. (LC-framework)
 
 ## Windows: CMake's HIP link rule mangles MSVC-style flags and paths
 
