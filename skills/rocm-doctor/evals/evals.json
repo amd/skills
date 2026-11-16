@@ -126,7 +126,7 @@
       "note": "Replays a current CLI. The import error matches the torch DLPack entry (Linux and WSL2) at the likely level (score 50), not the high-confidence level. The recorded plan opens with steps that confirm the torch version in the engine's environment before the reinstall, so the agent should present the match as likely and have the user check that first rather than state the cause as certain. The user has not named a group or permission problem, and the agent must not invent one. The prompt names Linux on purpose: this catalog entry applies on Linux and WSL2 only and native Windows gets no match, so the case is not expected to pass on a Windows lane.",
       "prompt": "vLLM fails to start on my AMD GPU on Linux with 'ImportError: libtorch_cuda.so: cannot open shared object file: No such file or directory'. How do I fix it?",
       "expected_behavior": [
-        "Run `rocm diagnose` with the error line as the symptom and relay the matched cause and the engine reinstall the CLI returned",
+        "Run `rocm diagnose` with the error line as the symptom and relay the matched cause",
         "Present the match as likely rather than certain, and have the user check the torch version in the engine's environment before reinstalling the engine",
         "Say near the start of the reply, before any step-by-step plan, that the fix is print-only: the user runs the printed steps and the CLI does not apply them"
       ],
