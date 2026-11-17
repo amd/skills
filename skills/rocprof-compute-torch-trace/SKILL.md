@@ -27,17 +27,17 @@ amd-smi list
 
 If either command fails, ROCm is not installed or no GPU is visible. Stop and
 point the user to "Install the ROCm Core SDK" in the
-[install guide](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/install/core-install.rst). Installing rocprof-compute
+[install guide](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/install/core-install.rst). Installing rocprof-compute
 alone does not help.
 
 Check the GPU against
-[compatible accelerators](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
+[compatible accelerators](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
 The table lists product families, so match the `Marketing Name` that `rocminfo`
 prints, and use the `gfx` name to confirm. If the GPU is not supported, stop and
 tell the user.
 
 Then follow "Install the analyze mode dependencies" in the
-[install guide](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/install/core-install.rst), which installs
+[install guide](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/install/core-install.rst), which installs
 rocprof-compute in a virtual environment of its own. Use the nightly index so the
 version matches these skills. Activate that environment with
 `source <venv>/bin/activate` before you run rocprof-compute, and confirm with
@@ -59,7 +59,7 @@ annotate a compiled binary. The collector is a generic prebuilt
 `torch_trace_collector.so` and needs no PyTorch or Python development packages
 to build. The workload still needs Python-compatible `roctx` bindings. The
 full requirement list is in the Torch trace section of
-[profile mode](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+[profile mode](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
 
 ## 2. Collect
 
@@ -88,7 +88,7 @@ Tracing adds overhead on top of the usual counter replay. Profile a few
 iterations of a steady-state model rather than a full training run, and skip
 warmup. `ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0` reduces instrumentation
 overhead by dropping the device and layout wraps; see
-[profile mode](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for what that costs you.
+[profile mode](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for what that costs you.
 
 Tracing cannot be combined with attaching to a running process, and cannot be
 combined with a PC-sampling-only profile.
@@ -113,7 +113,7 @@ also runs the roofline benchmarks.
 - `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
   each kernel, so it only helps when every profiled kernel is dispatched many
   times. Pair it with `-k`. See Iteration multiplexing in
-  [profile mode](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+  [profile mode](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 3. List the captured operators
@@ -153,7 +153,7 @@ Quote patterns so the shell does not expand them.
 rmsnorm nodes on a Triton tree.
 
 Worked examples are in the PyTorch operator analysis section of
-[the analyze CLI guide](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst).
+[the analyze CLI guide](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst).
 
 ## 5. Read the result
 
