@@ -21,6 +21,11 @@
       "product_release_owner": "thiagocrepaldi"
     },
     {
+      "repo": "AMDResearch/intellikit",
+      "engineering_owner": "coleramos425",
+      "product_release_owner": "mawad-amd"
+    },
+    {
       "repo": "ROCm/FlyDSL",
       "engineering_owner": "coderfeli",
       "product_release_owner": "coderfeli"
