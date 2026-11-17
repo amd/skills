@@ -2,9 +2,9 @@
   "source": "rocm-rocm-systems",
   "repo": "ROCm/rocm-systems",
   "ref": "users/vedithal-amd/rocprof-compute-skills-install-check",
-  "commit": "a3d117ca0b3b9096e5b4148bd893da4686b3a87b",
+  "commit": "e52715175a94a6fa52b38e4107c170e70c1fb822",
   "path": "projects/rocprofiler-compute/skills/rocprof-compute-kernel-bottleneck",
   "license": "MIT",
-  "content_hash": "e455f9d3fba4328791d602febf287bb16a8e1a9c232edd288f44cbdab12dbdbc",
-  "imported_at": "2026-11-17T20:16:03Z"
+  "content_hash": "b492500804da26214776007591e47a9015da55c14f0e365127deedfaa7850e30",
+  "imported_at": "2026-11-17T21:15:29Z"
 }
