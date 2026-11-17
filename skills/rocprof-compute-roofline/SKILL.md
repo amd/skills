@@ -27,17 +27,17 @@ amd-smi list
 
 If either command fails, ROCm is not installed or no GPU is visible. Stop and
 point the user to "Install the ROCm Core SDK" in the
-[install guide](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/install/core-install.rst). Installing rocprof-compute
+[install guide](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/install/core-install.rst). Installing rocprof-compute
 alone does not help.
 
 Check the GPU against
-[compatible accelerators](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
+[compatible accelerators](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
 The table lists product families, so match the `Marketing Name` that `rocminfo`
 prints, and use the `gfx` name to confirm. If the GPU is not supported, stop and
 tell the user.
 
 Then follow "Install the analyze mode dependencies" in the
-[install guide](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/install/core-install.rst), which installs
+[install guide](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/install/core-install.rst), which installs
 rocprof-compute in a virtual environment of its own. Use the nightly index so the
 version matches these skills. Activate that environment with
 `source <venv>/bin/activate` before you run rocprof-compute, and confirm with
@@ -63,12 +63,12 @@ still succeeds, so a missing roofline there is not a mistake in how the profile
 was run. Never tell an MI100 user to re-profile without `--no-roof`; use
 Speed-of-Light and the `rocprof-compute-memory` skill instead. Confirm support
 for a new architecture against
-[compatible-accelerators.rst](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
+[compatible-accelerators.rst](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
 
 `--device` selects the GPU for the roofline microbenchmarks. It does not
 choose which GPU the application runs on; use `HIP_VISIBLE_DEVICES` for that.
 
-See [standalone roofline](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for `--roof-only`
+See [standalone roofline](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/how-to/profile/mode.rst) for `--roof-only`
 and `--bench-only`, which run the microbenchmarks without profiling an
 application.
 
@@ -89,7 +89,7 @@ also runs the roofline benchmarks.
 - `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
   each kernel, so it only helps when every profiled kernel is dispatched many
   times. Pair it with `-k`. See Iteration multiplexing in
-  [profile mode](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
+  [profile mode](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 2. Read the table
@@ -145,7 +145,7 @@ caches are absorbing the traffic.
 
 `--view table` prints one table for all kernels together instead of one per
 kernel. To compare many kernels, write the
-[analysis database](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst) with
+[analysis database](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst) with
 `--output-format db` and query it with SQL.
 
 ## 4. When roofline data is missing
@@ -157,4 +157,4 @@ kernel. To compare many kernels, write the
 | `roofline.csv` absent from the workload directory | the benchmark did not complete; check the profile log |
 
 The concepts behind the ceilings are in the
-[performance model](https://github.com/ROCm/rocm-systems/blob/a3d117ca0b3b9096e5b4148bd893da4686b3a87b/projects/rocprofiler-compute/docs/conceptual/performance-model.rst).
+[performance model](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/conceptual/performance-model.rst).
