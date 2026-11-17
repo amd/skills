@@ -129,6 +129,10 @@
       "license": "MIT",
       "skills": [
         {
+          "path": ".agents/skills/cluster-environment-check",
+          "as": "eaiapps-cluster-check"
+        },
+        {
           "path": ".agents/skills/guided-workbench-install",
           "as": "eaiapps-guided-install"
         }

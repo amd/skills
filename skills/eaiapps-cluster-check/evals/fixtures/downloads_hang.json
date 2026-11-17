@@ -1,0 +1,17 @@
+{
+  "get configmap cilium-config -n kube-system -o json": [
+    0,
+    "{\"data\":{}}",
+    ""
+  ],
+  "get --raw /api/v1/namespaces/monitoring/services/prometheus:9090/proxy/api/v1/query?query=count%28gpu_gfx_activity%7Bworkload_id%21%3D%22%22%7D%29": [
+    0,
+    "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\":[]}}",
+    ""
+  ],
+  "get nodes -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"labels\": {\"amd.com/gpu.device-id\": \"example-gpu\"}}, \"status\": {\"capacity\": {\"amd.com/gpu\": \"4\"}, \"allocatable\": {\"amd.com/gpu\": \"4\"}}}, {\"metadata\": {\"labels\": {\"amd.com/gpu.device-id\": \"example-gpu\"}}, \"status\": {\"capacity\": {\"amd.com/gpu\": \"4\"}, \"allocatable\": {\"amd.com/gpu\": \"4\"}}}]}",
+    ""
+  ]
+}

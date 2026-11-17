@@ -1,0 +1,74 @@
+{
+  "evaluations": [
+    {
+      "id": "diagnose-silent-platform-problems",
+      "skill_should_trigger": true,
+      "prompt": "Our workbench is installed but model downloads keep hanging and the GPU metrics panels are all zero. Nothing looks wrong in the pod list. Can you work out what is broken?",
+      "expected_behavior": [
+        "Confirm which cluster the kubeconfig context points at before checking anything",
+        "Run the read-only checker rather than inspecting resources ad hoc",
+        "Report what is wrong, why it matters, and the concrete fix, not just the raw check output",
+        "Treat a check that did not run as inconclusive rather than as a pass"
+      ],
+      "unexpected_behavior": [
+        "Report the cluster healthy without every check having actively passed",
+        "Change anything in the cluster while diagnosing it",
+        "Name a single cause from the symptoms alone without running the checker"
+      ]
+    },
+    {
+      "id": "pre-install-readiness",
+      "skill_should_trigger": true,
+      "prompt": "Sweep this cluster for the known silent platform faults before we commit to installing on it. I do not want to find a dead storage provisioner halfway through.",
+      "expected_behavior": [
+        "Run the readiness checks against the current cluster rather than describing what could be checked",
+        "Treat checks that are only meaningful after an install as inconclusive, not as failures",
+        "State plainly whether the cluster is fit to install onto, and what must be fixed first"
+      ],
+      "unexpected_behavior": [
+        "Start installing the workbench or any of its charts",
+        "Report a post-install check as failed when the component is not deployed yet"
+      ]
+    },
+    {
+      "id": "limited-access-not-proven-healthy",
+      "skill_should_trigger": true,
+      "prompt": "I only have a read-only account on this cluster. Check it for platform problems, and be straight with me about anything you could not actually verify.",
+      "expected_behavior": [
+        "Name each check that could not read what it needed, and why",
+        "Say plainly that the cluster is not proven healthy when checks could not confirm their state",
+        "Say what would let the blocked checks run, such as the missing permission"
+      ],
+      "unexpected_behavior": [
+        "Present a run with unverified checks as a pass",
+        "Report the cluster healthy when permissions blocked part of the check",
+        "Drop the checks that could not run from the report instead of naming them"
+      ]
+    },
+    {
+      "id": "sign-in-failures",
+      "skill_should_trigger": true,
+      "prompt": "Team members are getting errors signing in to the workbench UI. I suspect the OIDC issuer disagrees with Keycloak but I cannot prove it."
+    },
+    {
+      "id": "e2e-failed-on-permissions",
+      "skill_should_trigger": true,
+      "prompt": "Our E2E suite failed on missing permissions and one lane timed out waiting for a Ready AIM. Check the cluster before we rerun it."
+    },
+    {
+      "id": "pin-the-cilium-mtu",
+      "skill_should_trigger": false,
+      "prompt": "The Cilium MTU on this cluster is unpinned. Pin it to the right value and restart the agents so model downloads stop hanging."
+    },
+    {
+      "id": "kubeflow-scheduling-failures",
+      "skill_should_trigger": false,
+      "prompt": "Our Kubeflow pipelines keep failing to schedule on this Kubernetes cluster. Work out what is wrong with it."
+    },
+    {
+      "id": "storage-outage-writeup",
+      "skill_should_trigger": false,
+      "prompt": "Write up last week's outage where the storage provisioner died, for Thursday's incident review."
+    }
+  ]
+}
