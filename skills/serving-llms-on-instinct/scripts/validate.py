@@ -105,7 +105,7 @@ def main():
         })
 
     # Docker
-    rc, out, err = _run("docker ps -q 2>&1 | head -1", host, user, port)
+    rc, out, err = _run("docker ps -q", host, user, port)
     if rc != 0 or "permission denied" in err.lower() or "cannot connect" in err.lower():
         issues.append({
             "check": "docker",
