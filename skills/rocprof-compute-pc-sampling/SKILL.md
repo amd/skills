@@ -27,17 +27,17 @@ amd-smi list
 
 If either command fails, ROCm is not installed or no GPU is visible. Stop and
 point the user to "Install the ROCm Core SDK" in the
-[install guide](https://github.com/ROCm/rocm-systems/blob/32d55820f1641c0b68b121002c4d701a7fb2d9ef/projects/rocprofiler-compute/docs/install/core-install.rst). Installing rocprof-compute
+[install guide](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/install/core-install.rst). Installing rocprof-compute
 alone does not help.
 
 Check the GPU against
-[compatible accelerators](https://github.com/ROCm/rocm-systems/blob/32d55820f1641c0b68b121002c4d701a7fb2d9ef/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
+[compatible accelerators](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/reference/compatible-accelerators.rst).
 The table lists product families, so match the `Marketing Name` that `rocminfo`
 prints, and use the `gfx` name to confirm. If the GPU is not supported, stop and
 tell the user.
 
 Then follow "Install the analyze mode dependencies" in the
-[install guide](https://github.com/ROCm/rocm-systems/blob/32d55820f1641c0b68b121002c4d701a7fb2d9ef/projects/rocprofiler-compute/docs/install/core-install.rst), which installs
+[install guide](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/install/core-install.rst), which installs
 rocprof-compute in a virtual environment of its own. Use the nightly index so the
 version matches these skills. Activate that environment with
 `source <venv>/bin/activate` before you run rocprof-compute, and confirm with
@@ -124,7 +124,7 @@ there, and the fix is usually coalescing, prefetching, or more independent work
 between the load and its use.
 
 Stall reasons and what each one implies are listed in
-[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/32d55820f1641c0b68b121002c4d701a7fb2d9ef/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst). Do not interpret a stall
+[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst). Do not interpret a stall
 reason from host-trap data; it does not record one.
 
 ## 5. Export annotated disassembly
@@ -147,4 +147,4 @@ accepts, rather than drawing conclusions from a handful of samples.
 
 For multi-process workloads, keep each process or rank separate; see the
 multi-process sections of
-[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/32d55820f1641c0b68b121002c4d701a7fb2d9ef/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst).
+[pc_sampling.rst](https://github.com/ROCm/rocm-systems/blob/e52715175a94a6fa52b38e4107c170e70c1fb822/projects/rocprofiler-compute/docs/how-to/pc_sampling.rst).
