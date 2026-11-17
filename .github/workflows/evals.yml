@@ -82,7 +82,7 @@ jobs:
     # out at the commit this ref names and runs it from there, so bumping the
     # line below is the whole of upgrading -- there is no second version to keep
     # in step with it.
-    uses: amd/skillscope/.github/workflows/skill-evals.yml@v0.1.3
+    uses: amd/skillscope/.github/workflows/skill-evals.yml@0f734b2dd344cd72b5e016ad6c3b1ac2ce36f6f3 # v0.1.3
     # By name, not by value: the Instinct legs read a secret scoped to the
     # `behavioral-instinct` environment, and an environment's secrets are
     # readable only inside the job that declares it.
