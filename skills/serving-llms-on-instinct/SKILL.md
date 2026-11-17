@@ -23,6 +23,8 @@ Get a vLLM endpoint running on AMD Instinct GPU hardware.
 - ROCm driver and `amd-smi` installed on the GPU host
 - Docker running and accessible (check with `docker ps`)
 - `/dev/kfd` and `/dev/dri` present on the GPU host
+- Python 3, Git, curl, and PyYAML available where the helper scripts run
+  (`python3 -m pip install PyYAML` if `import yaml` fails)
 - HuggingFace token in `HF_TOKEN` env var (required for gated models; not
   required for Qwen3 or Gemma). For gated models (Llama 3.2, Gemma, etc.),
   the HF token must belong to an account that has accepted the model's license
@@ -36,12 +38,13 @@ Get a vLLM endpoint running on AMD Instinct GPU hardware.
 
 Read these files directly to get model and GPU configuration:
 
-- **`data/recipes_cache.json`** -- model configs synced from
+- **`data/recipes_cache.json`** -- bundled fallback model configs synced from
   [vllm-project/recipes](https://github.com/vllm-project/recipes). Each entry
   under `models.<HF_ID>.recipe` contains the full recipe with `model.base_args`,
   `model.base_env`, `features.tool_calling.args`, `features.reasoning.args`,
   `hardware_overrides.amd.extra_args`, `hardware_overrides.amd.extra_env`.
-  The top-level `docker_image` field has the latest resolved vLLM ROCm image.
+  The top-level `docker_image` field has the resolved vLLM ROCm image. Do not
+  treat this bundled file as current until Step 3 verifies freshness.
 
 - **`data/gpu_overrides.json`** -- GPU-specific configuration. Contains
   `docker_flags` (mandatory for all AMD Instinct), `gpu_configs` keyed by
@@ -88,22 +91,40 @@ python3 scripts/validate.py --auto-fix --host user@hostname
 Returns JSON with `ready` (bool), `errors`, `warnings`, `fixes_applied`.
 Do not proceed if `ready` is `false`.
 
-## Step 3: Refresh recipes (if stale)
+## Step 3: Establish a fresh recipe source
 
-Check `fetched_at` in `data/recipes_cache.json`. If older than 24 hours or
-the file is missing, refresh:
+Before selecting a model, image, precision, or arguments, check the writable
+runtime cache:
 
 ```bash
-python3 scripts/sync_recipes.py
+# Refresh only when the existing cache is missing, invalid, or stale.
+python3 scripts/sync_recipes.py --check || python3 scripts/sync_recipes.py
+
+# Reopen the cache from disk, confirm it is fresh, and print its path.
+python3 scripts/sync_recipes.py --check
 ```
 
-This shallow-clones vllm-project/recipes from GitHub and fetches the latest
-Docker tag from Docker Hub. Takes ~10 seconds. If it fails, the existing
-cache still works.
+The final check is intentional: it validates the file written by a refresh,
+rather than trusting the refresh command's exit status. A successful refresh
+shallow-clones `vllm-project/recipes`, resolves
+the highest stable vLLM ROCm image and immutable manifest digest, and writes a
+runtime cache outside the installed skill package. Read the `cache` path from
+the JSON output and use that file in the remaining steps.
+
+Both checks and refreshes return nonzero on missing, stale, malformed, or
+unrefreshable data. Never silently present the bundled cache as current. If
+refresh fails:
+
+- If the requested model is absent from the bundled cache, stop before launch
+  and explain that current framework support and arguments could not be
+  established.
+- If the model is present, report the bundled cache's `fetched_at`, image tag,
+  and refresh error in the Step 5 summary. Use it only after the user explicitly
+  accepts the stale recipe risk.
 
 ## Step 4: Construct the Docker command
 
-Read `data/recipes_cache.json` and `data/gpu_overrides.json` directly.
+Read the fresh runtime cache selected in Step 3 and `data/gpu_overrides.json`.
 Build the Docker command by combining:
 
 1. **Docker flags** from `gpu_overrides.json > docker_flags` (mandatory for all AMD GPUs)
@@ -116,11 +137,14 @@ Build the Docker command by combining:
 4. **Environment variables**: merge `gpu_configs.<gfx_version>.env_defaults`
    with the recipe's `model.base_env` and `hardware_overrides.amd.extra_env`.
    Always add `--env HF_TOKEN=${HF_TOKEN}`.
-5. **Docker image**: use `docker_image` from `recipes_cache.json` top level
-   (unless the model needs a pinned image, e.g. GLM-4.5 needs `v0.15.1`).
-   If the user specifies a Docker image version, check it against the recipe's
-   `model.min_vllm_version`. Warn if the image is older -- the model may crash
-   on startup with an opaque "Engine core initialization failed" error.
+5. **Docker image**: use `docker_image_pinned` from the runtime cache when
+   available; otherwise disclose that only a mutable `docker_image` tag is
+   available. Always compare the selected image against
+   `model.min_vllm_version`, even when the user did not specify the image.
+   Use a model-specific pinned image instead when the recipe requires one
+   (for example, GLM-4.5 requires `v0.15.1`).
+   Do not launch with an older image; it may fail with an opaque "Engine core
+   initialization failed" error.
 6. **Model ID**: `--model <HF_ID>`
 7. **vLLM args**: combine the recipe's `model.base_args` +
    `hardware_overrides.amd.extra_args` + `features.tool_calling.args` +
@@ -129,13 +153,17 @@ Build the Docker command by combining:
    For MoE models on multi-GPU, also add `--distributed-executor-backend mp`.
 8. **Port arg**: `--port <port>`
 
-If the exact model ID is not in `recipes_cache.json`, check for a base model
-match by stripping date/version suffixes (e.g., `Kimi-K2-Instruct` matches
-`Kimi-K2-Instruct-0905`). Use the base model's recipe if found.
+If the exact model ID is not in the fresh runtime cache, do not infer support
+from a similarly named older generation. A date/version-suffixed fine-tune may
+use its exact base model's recipe only after its Hugging Face `config.json`
+confirms the same `model_type` and `architectures`.
 
 If no recipe match, check `legacy_models` in `gpu_overrides.json`. If not
-there either, use a generic config with
-`--enable-auto-tool-choice --trust-remote-code --tool-call-parser hermes`.
+there either, inspect the model provider's official serving instructions, the
+current vLLM supported-model list and release notes, and the model config before
+proposing an experimental generic launch. Do not add `--trust-remote-code` or
+assume the `hermes` tool parser without model-specific evidence. Present the
+generic configuration and uncertainty in Step 5 and wait for confirmation.
 
 **Precision variant selection:** Recipes may offer variants (default, fp8,
 nvfp4). Check `gpu_configs.<gfx_version>.precision.native` in
@@ -221,6 +249,9 @@ Before launching, present a summary and ask the user to confirm:
 - **TP**: tensor parallelism degree (1, 2, 4, 8)
 - **Context**: max achievable context length (and whether it's limited)
 - **Port**: which port the endpoint will be on
+- **Recipe provenance**: cache timestamp, vLLM recipes commit, immutable image
+  digest, and whether the target GPU is merely supported or actually verified
+  by the upstream recipe
 
 If a quantized alternative was selected (Step 4 fit check), explain that
 the original model doesn't fit and which alternative is being used.
