@@ -2,9 +2,9 @@
   "source": "rocm-rocm-systems",
   "repo": "ROCm/rocm-systems",
   "ref": "users/vedithal-amd/rocprof-compute-skills-install-check",
-  "commit": "ebf465e112ae1ca99a2e6e45de06c0ad84388439",
+  "commit": "a3d117ca0b3b9096e5b4148bd893da4686b3a87b",
   "path": "projects/rocprofiler-compute/skills/rocprof-compute-memory",
   "license": "MIT",
-  "content_hash": "eecd7a9b04af2f417629f5ea9190891bd60838a93867a51e04f51ef439dcd847",
-  "imported_at": "2026-11-09T18:28:38Z"
+  "content_hash": "b84260b0945352701d3da5073f929fd7b8b22e15cb1663174d7e00693ae4a90a",
+  "imported_at": "2026-11-17T20:16:10Z"
 }
