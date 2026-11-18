@@ -588,8 +588,9 @@ Reads the last `--recent-minutes` (default 30) of logs of every pod of `airm-ui`
   but has a ready replica also passes; the verdict names it and says that only its readiness, not its
   log, was checked.
 - **WARN** — a line containing `OIDC discovery document from` (a discovery document naming another
-  issuer or lacking the login endpoints, e.g. `… names the issuer https://kc.<your-domain>/realms/airm,
-but OIDC_ISSUER is http://localhost:8080/realms/airm`) or `Invalid issuer` (an API rejecting
+  issuer or lacking the login endpoints, e.g. one naming the issuer
+  `https://kc.<your-domain>/realms/airm` while `OIDC_ISSUER` is
+  `http://localhost:8080/realms/airm`) or `Invalid issuer` (an API rejecting
   tokens; one can be a client presenting another realm's token, so it counts from 3 lines), or 3 or
   more lines with `unhandled` / a Python traceback. The latest matching line is
   quoted.
