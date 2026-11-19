@@ -2,9 +2,9 @@
 
 ## Requirements
 
-This collection of walkthroughs assumes you already have [Claude Code](https://www.anthropic.com/claude-code) set up on your machine.
+These walkthroughs assume you already have [Claude Code](https://www.anthropic.com/claude-code) set up on your machine.
 
-Participants using other agents are still encouraged to participate. You might have to adapt some of the instructions provided below to your specific agent.
+If you use another agent, you can still follow along, but you might need to adapt some instructions for your agent.
 
 Choose a skill to get started.
 
