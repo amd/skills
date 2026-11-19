@@ -25,10 +25,10 @@ When invoked by the orchestrator, you will receive the following context:
 - `prefix`: Command prefix from `<output_dir>/cache/cmd_prefix.txt` — contains a template with `{CMD}` placeholder; substitute `{CMD}` with the actual command
 
 **Input (produced by script in Step 1):**
-- `<output_dir>/metadata/condensed_op_info.csv` — CSV with columns **name**, **Input type**, and **Input Dims** (extracted from the perf report by the script)
+- `<output_dir>/cache/condensed_op_info.csv` — CSV with columns **name**, **Input type**, and **Input Dims** (extracted from the perf report by the script)
 
 **Output file you must write:**
-- `<output_dir>/metadata/model_info.json` — JSON with exactly four fields: `model`, `architecture`, `scale`, `precision`
+- `<output_dir>/cache/model_info.json` — JSON with exactly four fields: `model`, `architecture`, `scale`, `precision`
 
 ---
 
@@ -50,7 +50,7 @@ Write a JSON file with exactly these four keys:
 
 ### Step 1: Run the extraction script
 
-Execute the Python script to extract the **name**, **Input type**, and **Input Dims** columns into `<output_dir>/metadata/condensed_op_info.csv`:
+Execute the Python script to extract the **name**, **Input type**, and **Input Dims** columns into `<output_dir>/cache/condensed_op_info.csv`:
 
 ```bash
 <prefix> python3 -c "
@@ -65,19 +65,19 @@ The script does **not** perform any inference. It only produces the CSV for you 
 
 ### Step 2: Read nn_modules.txt for model identity
 
-If `<output_dir>/metadata/nn_modules.txt` exists and is non-empty, use it to infer **model**.
+If `<output_dir>/cache/nn_modules.txt` exists and is non-empty, use it to infer **model**.
 
 If the file is absent or empty, skip this step and infer **model** from `condensed_op_info.csv` in Step 3.
 
 ### Step 3: Analyze condensed_op_info.csv and write model_info.json
 
-Open `<output_dir>/metadata/condensed_op_info.csv` and analyze the **name**, **Input type**, and **Input Dims** values across the rows. Infer:
+Open `<output_dir>/cache/condensed_op_info.csv` and analyze the **name**, **Input type**, and **Input Dims** values across the rows. Infer:
 - **model** (if not already determined in Step 2)
 - **architecture**
 - **scale**
 - **precision**
 
-Write `<output_dir>/metadata/model_info.json` with these four keys. **Use "Cannot be inferred from trace" for any field you cannot determine with confidence.**
+Write `<output_dir>/cache/model_info.json` with these four keys. **Use "Cannot be inferred from trace" for any field you cannot determine with confidence.**
 
 ---
 
@@ -87,13 +87,6 @@ Write `<output_dir>/metadata/model_info.json` with these four keys. **Use "Canno
 - **Architecture**: From **name** and **Input Dims** — e.g. convolution → CNN; bmm + softmax + (batch, heads, seq, seq) → Transformer.
 - **Scale**: From typical hidden/embed sizes in **Input Dims**
 - **Model**: Prefer `nn_modules.txt` (Step 2) over op-name inference.
-
----
-
-## Error Handling
-
-- If the script fails or `condensed_op_info.csv` is missing: write `metadata/model_info.json` with all four fields set to `"Cannot be inferred from trace"`.
-- Always ensure `metadata/model_info.json` exists and is a valid JSON with keys `model`, `architecture`, `scale`, `precision` before returning to the orchestrator.
 
 ---
 

@@ -71,6 +71,18 @@
       ]
     },
     {
+      "id": "zero-shot-topic-router",
+      "skill_should_trigger": true,
+      "prompt": "Use LFM2.5-Encoder-350M-Prompt-Router-ONNX as a zero-shot classifier: hard reasoning or coding questions go to fireworks.kimi-k2p6, everything else stays on Qwen3.5-9B-GGUF.",
+      "expected_behavior": [
+        "Declare a classifier with type zero_shot whose model is LFM2.5-Encoder-350M-Prompt-Router-ONNX, with a labels array of descriptive phrases (not LABEL_0/LABEL_1 style ids), and a rule on one of those labels that routes to fireworks.kimi-k2p6",
+        "Tell the user the policy cannot be imported into the desktop Hybrid Router editor"
+      ],
+      "files_exist": [
+        "router.json"
+      ]
+    },
+    {
       "id": "nginx-load-balance",
       "skill_should_trigger": false,
       "prompt": "Set up nginx to load-balance incoming requests across three backend servers."

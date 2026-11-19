@@ -24,13 +24,13 @@ When invoked by the orchestrator, you will receive the following context:
 - `output_dir`: Base analysis output directory
 - `prefix`: Command prefix from `<output_dir>/cache/cmd_prefix.txt` — contains a template with `{CMD}` placeholder; substitute `{CMD}` with the actual command
 - `comparison_scope`: `standalone` (default) or `comparative`
+- `cat`: `reduce`, `crossentropy_fwd` or `crossentropy_bwd`
 
 **Input files (pre-computed by orchestrator):**
-1. `<output_dir>/category_data/reduce_ops.csv` - Filtered reduce operations (includes `call_stack` column for architecture context)
-2. `<output_dir>/metadata/reduce_metadata.json` - Hardware specs
+1. `<output_dir>/category_data/<cat>_ops.csv` - Filtered reduce operations (includes `call_stack` column for architecture context)
 
 **Output file you must write:**
-- `<output_dir>/category_findings/reduce_findings.md`
+- `<output_dir>/category_findings/<cat>_findings.md`
 
 ---
 
@@ -63,14 +63,15 @@ Use vendor-agnostic terminology:
 ```bash
 <prefix> python3 \
   TraceLens/Agent/Analysis/category_analyses/reduce_analysis.py \
-  --output-dir <output_dir>
+  --output-dir <output_dir> \
+  --category <cat> \
   --comparison_scope <comparison_scope>
 ```
 
 ### Step 2: Read metrics
 
 ```bash
-cat <output_dir>/category_data/reduce_metrics.json
+cat <output_dir>/category_data/<cat>_metrics.json
 ```
 
 `category_specific.softmax_count` flags attention-pattern reductions; reference it in **Identification** when softmax dominates a finding.
@@ -118,6 +119,11 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 - **Reasoning:** Memory-bound reductions should approach peak memory BW for simple cases.
 - **Kernel:** Investigate kernel-level memory access patterns if well below the band.
 
+### Cross-entropy (`crossentropy_fwd`, `crossentropy_bwd`)
+- **Symptoms:** Log-softmax and NLL as separate kernels over the `[tokens, vocab]` logits.
+- **Reasoning:** The logits are the largest activation in the loss. An unfused loss writes the full softmax, reads it back for NLL, and reads it again in backward.
+- **Algorithmic:** Use a fused softmax and NLL kernel that reduces over vocab chunks with an online logsumexp, so one pass reads the logits and no softmax tensor is materialized. In backward, write the gradient (`softmax - onehot`) over the logits buffer.
+
 ---
 
 ## Trace observability (category-specific)
@@ -145,7 +151,7 @@ if not passed:
         print('  - ' + e)
     sys.exit(1)
 print('PASS: Findings file is valid')
-" '<output_dir>/category_findings/reduce_findings.md' 'compute' '<comparison_scope>'
+" '<output_dir>/category_findings/<cat>_findings.md' 'compute' '<comparison_scope>'
 ```
 
 If validation fails, fix the findings file and re-run. Max 2 retries.

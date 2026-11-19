@@ -1,0 +1,66 @@
+{
+  "evaluations": [
+    {
+      "id": "review-kernel-for-wave64",
+      "skill_should_trigger": true,
+      "prompt": "We're porting this CUDA kernel to HIP so the same code runs on an MI300X as well as our NVIDIA cards. hipify ran clean. Before we spend time building, review it for what will go wrong on the AMD side and write the findings to review.md. There is no GPU or ROCm on this machine, so don't try to build or install anything.\n\n```cpp\n#define WARP_SIZE 32\n\n__device__ float warp_sum(float v) {\n  for (int o = WARP_SIZE / 2; o > 0; o /= 2) v += __shfl_down_sync(0xffffffff, v, o);\n  return v;\n}\n\n__global__ void count_positive(const float* x, unsigned* count, int n) {\n  int i = blockIdx.x * blockDim.x + threadIdx.x;\n  uint32_t mask = (uint32_t)__ballot_sync(0xffffffff, i < n && x[i] > 0.f);\n  if (threadIdx.x % WARP_SIZE == 0) atomicAdd(count, __popc(mask));\n}\n\n// host side\ncudaMalloc(&d_count, sizeof(unsigned));\ncount_positive<<<blocks, 256>>>(d_x, d_count, n);\n```",
+      "expected_behavior": [
+        "Flag the hardcoded warp size of 32 as wrong on MI300X, whose wavefront is 64 lanes wide, and recommend deriving the width from the device's warpSize instead of hardcoding a different constant",
+        "Flag that the 32-bit mask 0xffffffff passed to __shfl_down_sync and __ballot_sync fails HIP's compile-time check that warp-sync masks are 64-bit, so the kernel will not build under HIP even though hipify ran clean, and recommend a mask that is 64-bit on HIP while staying 32-bit for CUDA",
+        "Flag that casting the ballot result to a 32-bit integer keeps only half of a 64-lane wavefront's bits, so the positive count comes out wrong on MI300X",
+        "Flag that the counter allocated with cudaMalloc is never zeroed before atomicAdd accumulates into it"
+      ],
+      "unexpected_behavior": [
+        "Conclude the kernel is ready for AMD because hipify translated its symbols without errors",
+        "Recommend fixing the warp size by hardcoding 64, which would break the NVIDIA build and 32-lane AMD GPUs"
+      ],
+      "files_exist": [
+        "review.md"
+      ]
+    },
+    {
+      "id": "plan-torch-extension-port",
+      "skill_should_trigger": true,
+      "prompt": "Our repo is a PyTorch C++/CUDA extension. setup.py is essentially this:\n\n```python\nfrom setuptools import setup\nfrom torch.utils.cpp_extension import BuildExtension, CUDAExtension\n\nsetup(\n    name=\"fused_ops\",\n    ext_modules=[CUDAExtension(\"fused_ops\", [\"csrc/ops.cpp\", \"csrc/fused_kernel.cu\"])],\n    cmdclass={\"build_ext\": BuildExtension},\n)\n```\n\nWe want it to also build and run on AMD Instinct GPUs without breaking the NVIDIA build. Write a short porting plan to plan.md. Don't install or build anything; this machine has no GPU and the sources aren't here.",
+      "expected_behavior": [
+        "Identify the project as a PyTorch extension and plan to rely on PyTorch's own build-time hipify (the same CUDAExtension, built against a ROCm build of PyTorch), changing only what that translation cannot handle",
+        "State that the port is finished only when the extension's tests pass on a real AMD GPU, not when it compiles"
+      ],
+      "unexpected_behavior": [
+        "Make a standalone CMake build with enable_language(HIP) and a hand-written CUDA-to-HIP compatibility header the primary plan for this extension",
+        "Plan to run hipify-perl or hipify-clang over the sources and commit the converted copies, or to maintain a separate HIP copy of the kernels"
+      ],
+      "files_exist": [
+        "plan.md"
+      ]
+    },
+    {
+      "id": "hip-port-misbehaves-at-runtime",
+      "skill_should_trigger": true,
+      "prompt": "My HIP port of a CUDA particle simulation compiles cleanly with hipcc, but the results on a Radeon RX 7900 XTX drift away from the NVIDIA run, and on an MI250X it sometimes dies with a memory access fault. Where should I start looking?"
+    },
+    {
+      "id": "add-amd-build-to-cmake-cuda-project",
+      "skill_should_trigger": true,
+      "prompt": "Our CMake project has a dozen .cu files and builds with nvcc. We'd like an AMD GPU build alongside it, without forking the sources or breaking the NVIDIA build. How should we set that up?"
+    },
+    {
+      "id": "cuda-bank-conflicts-on-rtx",
+      "skill_should_trigger": false,
+      "note": "CUDA kernel work with no AMD target anywhere in sight. Tuning for NVIDIA is not porting.",
+      "prompt": "Nsight Compute says my CUDA GEMM kernel on an RTX 4090 has heavy shared-memory bank conflicts. How should I change the tile layout to get rid of them?"
+    },
+    {
+      "id": "pytorch-cuda-to-apple-mps",
+      "skill_should_trigger": false,
+      "note": "Moving CUDA code off NVIDIA, but onto Apple's GPU rather than an AMD one.",
+      "prompt": "My PyTorch training script calls .cuda() everywhere. Make it run on the GPU in my M3 MacBook instead."
+    },
+    {
+      "id": "cuda-kernel-to-cpu-openmp",
+      "skill_should_trigger": false,
+      "note": "Porting a CUDA kernel, but to a CPU with no GPU at all.",
+      "prompt": "Rewrite this CUDA vector add as a plain C++ loop parallelised with OpenMP so it runs on a laptop that has no GPU:\n\n```cpp\n__global__ void add(const float* a, const float* b, float* c, int n) {\n  int i = blockIdx.x * blockDim.x + threadIdx.x;\n  if (i < n) c[i] = a[i] + b[i];\n}\n```"
+    }
+  ]
+}

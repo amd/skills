@@ -131,6 +131,26 @@
           "as": "rocprofiler-systems-instrumenting-binaries"
         }
       ]
+    },
+    {
+      "repo": "AMD-Ecosystem/moat",
+      "license": "MIT",
+      "skills": [
+        {
+          "path": ".claude/skills/cuda-to-rocm",
+          "as": "moat-cuda-to-rocm"
+        }
+      ]
+    },
+    {
+      "repo": "amd-enterprise-ai/amd-eai-apps",
+      "license": "MIT",
+      "skills": [
+        {
+          "path": ".agents/skills/guided-workbench-install",
+          "as": "eaiapps-guided-install"
+        }
+      ]
     }
   ]
 }

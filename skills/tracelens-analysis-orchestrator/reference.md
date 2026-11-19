@@ -10,7 +10,7 @@ This document is the detailed specification for the TraceLens **analysis-orchest
 
 ## Workflow overview
 
-The orchestrator runs a staged pipeline (Steps 0–12): collect inputs and environment prefix, generate perf reports, prepare category data via `orchestrator_prepare.py`, run system-level and compute-kernel subagents in parallel, aggregate and validate findings, identify the model, render plots when no extension is present, and write `analysis.md` via remote `tee` heredocs. Only Steps 7, 8, and 10 delegate to Task subagents; all other steps run in the main agent.
+The orchestrator runs a staged pipeline (Steps 0–12): collect inputs and environment prefix, generate perf reports, prepare category data via `orchestrator_prepare.py`, run system-level and compute-kernel subagents in parallel, aggregate and validate findings, identify the model, optionally augment unmodeled kernels with a config-derived roofline, render plots when no extension is present, and write `analysis.md` via remote `tee` heredocs. Only Steps 7, 8, 10, and 10.2 delegate to Task subagents; all other steps run in the main agent.
 
 ---
 
@@ -28,18 +28,19 @@ Use vendor-agnostic terminology throughout such as GPU kernels, collective commu
 0. Query User Inputs (interactive answers or a run YAML, Environment Setup) → cache/run_config.yaml
 1. Generate Performance Report (one wrapper call on cache/run_config.yaml; semantic pre-processing first)
 2. Trace-Quality Gate (deterministic fallback branch for graph-under-recorded traces)
-3-6. Prepare Category Data (GPU Util, Top Ops, Tree Data, Multi-Kernel Data, Category Filtering)
+3-6. Prepare Category Data (GPU Util, Top Ops, Multi-Kernel Data, Category Filtering)
 7. System-Level Analysis (PARALLEL, CPU/Idle + Kernel Fusion + Multi-Kernel) → system_findings/
 8. Invoke Compute Kernel Subagents (PARALLEL, read category_findings[] from _metrics.json) → category_findings/
-   8.5. Aggregate per-category category_findings[] → priority_data.json::findings[] (globally sorted)
+   8.5. Aggregate per-category category_findings[] → priority_data.json::findings[] (globally sorted) and the system metrics' system_findings[] → priority_data.json::system_findings (globally ranked)
 9. Validate Subagent Outputs (system_findings/ + category_findings/)
-10. Prepare Report Data (load_findings) + Model Identification (subagent) → metadata/model_info.json
+10. Prepare Report Data (load_findings) + Model Identification (subagent) → cache/model_info.json
+    10.2. Analytical Roofline Augmentation (optional; only when <augment_analytical_roofline> is set)
 11. Render performance PNG IF agent_extension.py is absent
 12. Generate Final Report (composable System + Compute sections), validate it,
     optionally invoke agent_extension.py (when present), then embed the PNG into the report.
 ```
 
-**Subagent usage:** Only invoke Task subagents in steps that explicitly say "subagent" (Step 1 pre-processing semantic diff, Steps 7, 8, 10). All other steps (including Step 8.5) must be performed directly by the orchestrator using the command prefix.
+**Subagent usage:** Only invoke Task subagents in steps that explicitly say "subagent" (Step 1 pre-processing semantic diff, Steps 7, 8, 10, and 10.2). All other steps (including Step 8.5) must be performed directly by the orchestrator using the command prefix.
 
 ---
 
@@ -47,7 +48,7 @@ Use vendor-agnostic terminology throughout such as GPU kernels, collective commu
 
 The prompt selects the input mode:
 
-- **YAML mode**: the prompt says "from config `<config_path>`", optionally with a scope (`standalone`, `comparative`, `semantic` or `multi_trace`). Resolve `<config_path>` to an absolute path. Read `output_dir` from the file and ask only the environment questions (item 5), unless the prompt answers them. Skip the other items.
+- **YAML mode**: the prompt says "from config `<config_path>`", optionally with a scope (`standalone`, `comparative`, `semantic` or `multi_trace`). Resolve `<config_path>` to an absolute path. Read `output_dir` from the file and ask only the environment questions (item 5), unless the prompt answers them. Skip the other items. Item 8 is not asked; apply its YAML-mode rule.
 - **Interactive mode**: the prompt names no config.
 
 **In Interactive mode, when this skill is invoked, immediately ask the user for:**
@@ -65,7 +66,7 @@ The prompt selects the input mode:
 
    - Set from the user’s intent before asking for paths:
      - **`comparative`** if the user asks for a comparative analysis, to compare two traces, or supplies two trace paths.
-     - **`multi_trace`** (multi-trace standalone) if the user supplies several named jobs of one workload on one platform (for example prefill and decode captures).
+     - **`multi_trace`** (multi-trace standalone) if the user supplies several jobs of one workload on one platform (for example prefill and decode captures).
      - **`standalone`** otherwise, including a request for standalone analysis or a single trace.
 
 2. **Trace File Path(s)** (PyTorch trace, `.json` or `.json.gz`)
@@ -75,8 +76,8 @@ The prompt selects the input mode:
      - **Primary trace (trace1)** → `<trace_path>`
      - **Comparison trace (trace2)** → `<trace2_path>`
      - Ask: "Please provide the full path to your primary trace file and your comparison trace file"
-   - **`multi_trace`:** ask for each job (2 or more) a name, a phase and **Trace File Path**; jobs that share a phase are combined
-     - Ask: "Please provide a name, a phase and the full path to the trace file for each job, starting with the job that kernel fusion and system analysis should focus on"
+   - **`multi_trace`:** ask for each job (2 or more) a phase, a node index within that phase, and **Trace File Path**; each job is one node
+     - Ask: "Please provide a phase, a node index within the phase and the full path to the trace file for each job, starting with the job that kernel fusion and system analysis should focus on"
 
 3. **Platform** → `<platform>`
    **`standalone`, `multi_trace`**: Ask: "Which platform are you analyzing?" (`multi_trace`: one platform for all jobs)
@@ -123,6 +124,12 @@ The prompt selects the input mode:
    - Ask: "Do you have a TraceLens extension file to apply? Press Enter to skip."
    - If provided, resolve to an absolute path and assign to `<extension_file>`.
    - If skipped, set `<extension_file>` to empty (no `extension_file` is set in the config).
+
+8. **Analytical Roofline Augmentation** (Optional) → `<augment_analytical_roofline>`
+   - Ask: "Would you like to augment the roofline with one derived from the model config? Note this will involve additional runtime. Press Enter to skip."
+   - If the user agrees, set `<augment_analytical_roofline>`.
+   - If skipped, leave `<augment_analytical_roofline>` empty. Step 10.2 does not run.
+   - In YAML mode, do not ask. Set `<augment_analytical_roofline>` only when the invoking prompt requests this augmentation; otherwise leave it empty. Do not put this flag in the run YAML.
 
 ### Build and Cache Command Prefix
 
@@ -205,7 +212,7 @@ Run one `config_utils` command. It completes the config, writes `<output_dir>/ca
   [--set extension_file=<extension_file>]
 ```
 
-Pass the second `--job` for `comparative` and `semantic`, a `capture_folder` only for graph replay + capture, and `--set extension_file` only when an extension file was provided. For `multi_trace`, pass one `--job name=<name>,phase=<phase>,...` per job (2 or more, same platform), the focus job first; the variables then describe the focus job and include `focus_job`.
+Pass the second `--job` for `comparative` and `semantic`, a `capture_folder` only for graph replay + capture, and `--set extension_file` only when an extension file was provided. For `multi_trace`, pass one `--job phase=<phase>,node=<index>,...` per job (2 or more, same platform), the focus job first; the variables then describe the focus job and include `focus_job`.
 
 If it exits non-zero, the errors are on stderr. In YAML mode, show them and stop. In Interactive mode, re-ask the field an error names once and rebuild.
 
@@ -316,13 +323,12 @@ Pass `--platform2` only for comparative and `--capture-folder` only if `config_u
 This script performs:
 - **Step 3:** Assess GPU utilization (computation, idle, communication times)
 - **Step 4:** Identify top 10 operations by GPU time
-- **Step 5:** Pre-compute tree data for bottleneck operations (load trace ONCE)
+- **Step 5:** Load the trace tree once (shared by Steps 5.5 and 5b)
 - **Step 5.5:** Pre-compute multi-kernel issue data (memcpy by direction, NCCL events, overlap metrics)
 - **Step 6:** Filter and export category-specific data
 
 **Outputs:**
 - `category_data/<category>_ops.csv` - Filtered operations per category
-- `metadata/<category>_metadata.json` - Platform specs, GPU utilization, config
 - `category_data/multi_kernel_data.json` - Memcpy/NCCL/overlap pre-computed data
 - `category_data/category_manifest.json` - Workflow metadata with categories (includes `tier` field: `system` or `compute_kernel`)
 - `system_findings/` - Directory for system-level analysis outputs
@@ -363,7 +369,7 @@ Launch system-level sub-agents simultaneously using the Task tool. Do NOT wait b
 | `kernel_fusion` | `kernel-fusion-analyzer.md` |
 
 **Invocation conditions:**
-- **CPU/Idle**: Read `category_data/category_manifest.json` and check `gpu_utilization.idle_time_percent`. On multi-trace standalone runs system analysis is scoped to the focus job, so apply this and the Multi-Kernel condition to `gpu_utilization.jobs[<focus_job>]` (what Step 7.1 prints). Only invoke the subagent if `idle_time_percent > 15`.
+- **CPU/Idle**: Read `category_data/category_manifest.json` and check `gpu_utilization.idle_time_percent`. On multi-trace standalone runs system analysis is scoped to the focus job, so apply this and the Multi-Kernel condition to `gpu_utilization.nodes[<focus_job>]` (what Step 7.1 prints). Only invoke the subagent if `idle_time_percent > 15`.
 - **Multi-Kernel**: `multi_kernel` category exists in manifest OR `gpu_util['exposed_comm_time_percent'] > 0` OR `gpu_util['exposed_memcpy_time_percent'] > 0`
 - **Kernel Fusion**: `kernel_fusion` category exists in manifest
 
@@ -473,8 +479,7 @@ Read and follow the FULL instructions in:
   TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/{agent_file}
 
 - Category: {category}
-- Input files: category_data/{category}_ops.csv, metadata/{category}_metadata.json,
-  category_data/{category}_metrics.json (P-items come from `category_findings[]`; `operations[i].module_chain` provides model layer context)
+- Input files: category_data/{category}_ops.csv, category_data/{category}_metrics.json (P-items come from `category_findings[]`; `operations[i].module_chain` provides model layer context)
 - Output file: category_findings/{category}_findings.md
 
 Execute every step in the agent file. Return "DONE" when complete.
@@ -499,7 +504,7 @@ After all compute kernel subagents complete:
 
 ### 8.5 Aggregate findings → priority_data.json
 
-After all compute sub-agent `_metrics.json` files exist (each carrying its own `category_findings[]`), concatenate them into a globally-sorted `priority_data.json::findings[]` for the report template.
+Once all compute sub-agent `_metrics.json` files exist, this call writes the globally sorted `priority_data.json::findings[]` from their `category_findings[]` and `priority_data.json::system_findings`, the system metrics' `system_findings[]` ranked globally by share.
 
 ```bash
 <prefix> python3 -c \"
@@ -545,11 +550,29 @@ load_findings(sys.argv[1])
 
 Launch a Task subagent (generalPurpose) that reads and follows `TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/model-identification-agent.md` with context: <output_dir>. Wait for completion.
 
-**On failure (subagent error, timeout, or `model_info.json` not written):**
-1. **Retry exactly once** by re-launching the same subagent with the same prompt.
-2. If the retry also fails, write fallback `metadata/model_info.json` with all four fields set to `"Cannot be inferred from trace"`.
+**On failure (subagent error or timeout), retry exactly once** by re-launching the same subagent with the same prompt.
 
-Assign <Model> to model value in `<output_dir>/metadata/model_info.json` or "Workload" if model is "Cannot be inferred from trace".
+Assign <Model> to model value in `<output_dir>/cache/model_info.json` or "Workload" if model is "Cannot be inferred from trace".
+
+---
+
+## Step 10.2: Analytical Roofline Augmentation (optional) → `<augment_analytical_roofline>`
+
+Skip this step unless `<augment_analytical_roofline>` is set.
+
+### 10.2.1 Derive projection arguments (subagent)
+
+Launch a Task subagent (generalPurpose) that reads and follows `TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/roofline-augment-agent.md` with context: `<output_dir>`, `<platform>`, `<prefix>`. Wait for completion.
+
+On failure (subagent error, timeout, or `cache/roofline_augment_args.json` not written), retry once. If the file is still missing, skip the rest of this step.
+
+### 10.2.2 Project and merge
+
+```bash
+<prefix> python3 -m TraceLens.Visualizer.model_explorer_export.roofline_augment \
+  --output-dir <output_dir> \
+  --args-json <output_dir>/cache/roofline_augment_args.json
+```
 
 ---
 
@@ -588,7 +611,7 @@ If the plot fails (extension-absent branch), retry once. If still failing, proce
 
    a. **Initialize** — truncate and write the title line, the `report_mode` + any `kind=warning` markers (see the template title block and the Warnings rule below), then `## Executive Summary` (metrics table, `{{PERF_PLOT}}` placeholder). Use `<prefix> tee <output_dir>/analysis.md << 'SECTION_EOF'` (truncating `tee`, not append) for this first write only.
       - Data sources: `category_data/category_manifest.json` (`gpu_utilization` keys), `priority_data.json` (top bottleneck).
-      - `multi_trace`: Total Time is the combined time; add one sentence giving each phase's time, summed over its jobs in `gpu_utilization.jobs`.
+      - `multi_trace`: use the template's MULTI_TRACE Executive Summary.
 
    b. **Compute Kernel Optimizations** — append `## Compute Kernel Optimizations` with `### Top Operations` table and P-item cards. Use `<prefix> tee -a <output_dir>/analysis.md << 'SECTION_EOF'`.
       - Data sources: `priority_data.json` — P1 = `findings[0]`, P2 = `findings[1]`, ... ; each card joins its sub-agent's Detailed Analysis block by `(findings[i].category, findings[i].category_rank)`. The Top Operations table materializes `priorities[]` verbatim (one row per entry, array order, no re-sorting).
@@ -600,16 +623,17 @@ If the plot fails (extension-absent branch), retry once. If still failing, proce
       - `multi_trace`: add the template's scope line.
 
    d. **System-Level** — append `## System-Level Optimizations`. Use `<prefix> tee -a <output_dir>/analysis.md << 'SECTION_EOF'`.
-      - Data sources: remaining `system_findings/*.md` (cpu_idle, multi_kernel).
+      - Data source: `priority_data.json::system_findings`, one card per entry in array order. Copy each card and its Detailed Analysis block from `system_findings/cpu_idle_findings.md` or `multi_kernel_findings.md`, matched by title.
       - `multi_trace`: add the template's scope line.
 
    e. **Detailed Analysis** — append `## Detailed Analysis` with `### Compute Kernel Insights`, `### Kernel Fusion Insights`, `### System-Level Insights` subsections. Use `<prefix> tee -a <output_dir>/analysis.md << 'SECTION_EOF'`.
       - Data sources: copy the `## Detailed Analysis` blocks verbatim from each `*_findings.md` file. Follow the template for formatting.
       - `category_data/*_metrics.json` (per-op tables, impact estimates).
+      - When a finding has `roofline.note`, emit it as a blockquote under that finding's `**Identification:**` line, and rephrase any "no performance model" or "cannot compute a roofline" wording for that finding (including its Executive Summary line and card Insight) to "no trace-based perf model".
 
    f. **Appendix** — append `## Appendix` with `### Model Architecture` and `### Hardware Reference`. Use `<prefix> tee -a <output_dir>/analysis.md << 'SECTION_EOF'`.
-      - `metadata/model_info.json` — substitute `<model>`, `<architecture>`, `<scale>`, `<precision>` with the four field values.
-      - Platform arch file — read `platform` from `category_manifest.json`, then read `TraceLens/Agent/Analysis/utils/arch/<platform>.json`. For `### Hardware Reference`: substitute `<platform>`, Peak Memory BW = `mem_bw_gbps / 1000` TB/s, Peak MAF (BF16) = `max_achievable_tflops.matrix_bf16` TFLOPS, Peak MAF (FP8) = `max_achievable_tflops.matrix_fp8` TFLOPS if present.
+      - `cache/model_info.json` — substitute `<model>`, `<architecture>`, `<scale>`, `<precision>` with the four field values.
+      - Hardware peaks — read `platform` and `platform_specs` from `category_manifest.json`. For `### Hardware Reference`: substitute `<platform>`, Peak Memory BW = `platform_specs.peak_mem_bw_tbs` TB/s, Peak MAF (BF16) = `platform_specs.max_achievable_tflops.matrix_bf16` TFLOPS, Peak MAF (FP8) = `platform_specs.max_achievable_tflops.matrix_fp8` TFLOPS if present.
 
 **Failure exclusion:** Skip any category listed in `load_findings()` output as `failed_system` or `failed_compute`; emit one top `kind=warning` marker per failure and per `high_variance` operation (CoV > 1.0 in `*_metrics.json`) instead. No mid-document `## Warnings` section — validation rejects it.
 
@@ -648,10 +672,10 @@ a. Check if the report contains similar but incorrectly named headers and rename
 b. If sections are entirely absent, add them with the correct `##` headers, keeping existing content.
 c. For "Missing metrics row" errors: add the row to the Executive Summary table using values from `category_data/category_manifest.json` (`gpu_utilization` keys) and `priority_data.json` (top bottleneck).
 d. For placeholder values (`X ms`, `Y%`, `Z%`, `W%`) in the Executive Summary metrics table: replace each with the actual value from `category_manifest.json` -> `gpu_utilization`.
-e. For unfilled `<Brief Title>` / `<Library>` / `<platform>` placeholders: substitute the real title/backend/platform from the corresponding findings file or `metadata/*_metadata.json`.
+e. For unfilled `<Brief Title>` / `<Library>` / `<platform>` placeholders: substitute the real title/backend/platform from the corresponding findings file or `category_manifest.json`.
 f. For Args cell mismatches: copy the matching `operations[].args` value verbatim (preserving `<br>`) from the corresponding `category_data/<cat>_metrics.json` and string-replace the bad cell.
 g. For marker errors: restore or add the missing/broken marker in place — never delete a card or block to silence an error. Source numeric values from `priority_data.json` (P-items) or `<cat>_metrics.json::impact_estimates[]` (detail estimates); use `null` or the sentinel `not quantifiable from trace data` for non-quantifiable items.
-h. For priority-consistency errors (R1 P-item count mismatch, R2 P-item category-order mismatch, R3 marker numeric mismatch, R4 Top Ops row-count mismatch, R6 phase mismatch): re-render the affected card(s) by re-reading `priority_data.json::findings[N-1]` for `category`, `phase`, `low` (impact_score_low), `mid` (impact_score), `high` (impact_score_high), and `priorities[]` for the Top Operations table rows (one row per entry, in array order).
+h. For priority-consistency errors (R1 P-item count mismatch, R2 P-item category-order mismatch, R3 marker numeric mismatch, R4 Top Ops row-count mismatch, R6 node mismatch, R7 System-Level card mismatch): re-render the affected card(s) by re-reading `priority_data.json::findings[N-1]` for `category`, `node` (fusion and system markers: the `node` of that analyzer's `<cat>_metrics.json`), `low` (impact_score_low), `mid` (impact_score), `high` (impact_score_high), and `priorities[]` for the Top Operations table rows (one row per entry, in array order; under `multi_trace`, each node's table takes the entries with that `node`). For R7, re-render the System-Level cards from `priority_data.json::system_findings` in array order.
 2. Run validation again.
 3. Maximum 2 retry attempts. If still failing after retry, proceed with a warning.
 

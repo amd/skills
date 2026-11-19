@@ -26,11 +26,10 @@ When invoked by the orchestrator, you will receive the following context:
 - `output_dir`: Base analysis output directory
 - `prefix`: Command prefix from `<output_dir>/cache/cmd_prefix.txt` — contains a template with `{CMD}` placeholder; substitute `{CMD}` with the actual command
 - `comparison_scope`: `standalone` (default) or `comparative`
-- `<cat>`: Category name (e.g., `other`, `inferenceattention`, `rmsnorm`, `multi_tensor_apply`). Substitute it everywhere below before executing.
+- `<cat>`: Category name (e.g., `other`, `mhc`, `gaussiansplat`, `ssm_fwd`, `customcollective`, `moe_comm_fwd`). Substitute it everywhere below before executing.
 
 **Input files (pre-computed by orchestrator):**
 1. `<output_dir>/category_data/<cat>_ops.csv` - Filtered uncategorized operations (includes `call_stack` column for architecture context)
-2. `<output_dir>/metadata/<cat>_metadata.json` - Hardware specs
 
 **Output file you must write:**
 - `<output_dir>/category_findings/<cat>_findings.md`
@@ -67,11 +66,11 @@ Use vendor-agnostic terminology:
 <prefix> python3 \
   TraceLens/Agent/Analysis/category_analyses/other_analysis.py \
   --category <cat> \
-  --output-dir <output_dir>
-  --comparison_scope <comparison_scope> \
+  --output-dir <output_dir> \
+  --comparison_scope <comparison_scope>
 ```
 
-### Step 2: Read Metrics and Tree Data
+### Step 2: Read Metrics
 
 ```bash
 cat <output_dir>/category_data/<cat>_metrics.json
@@ -94,8 +93,8 @@ Entries whose `estimate_method == "heuristic"` (op with no perf model) carry a n
 For each surviving entry:
 
 1. **Resolve what each member actually does.** Walk `members[]` and for every entry combine the `operation` name, kernel details, and `module_chain` context from `operations[]` to identify the real workload (e.g. embedding lookup, scatter/gather, custom layer). Call out miscategorization explicitly when the trace label is misleading.
-2. **Render the P-item.** Ground **Insight** / **Action** / **Reasoning for Slowdown** in the `members[]` rows (`operation`, `efficiency_pct`, `library`) plus the resolved purpose from step 1, using the Action Prose Guidance and Common Patterns below. The P-item heading must include the `(<Library>)` suffix per [`sub_agent_spec.md`](../templates/sub_agent_spec.md) § Recommendations: use `category_findings[i].library` as the value (e.g. `(vLLM)` for an aggregated InferenceAttention finding whose members are all vLLM ops). Omit the parenthetical only when the value is `Unknown`.
-3. **Annotate the Data table.** Extend the **Data:** operations table with a `Sub-Category` column from `operations[i].classification` when populated. Even when the finding has a single `members[]` row (e.g. aggregated InferenceAttention with one operation), render the canonical 10-column horizontal Operations Table from [`sub_agent_spec.md`](../templates/sub_agent_spec.md) § Operations Table Schema. Do not substitute a vertical `Metric | Value` table — that schema is system-tier only.
+2. **Render the P-item.** Ground **Insight** / **Action** / **Reasoning for Slowdown** in the `members[]` rows (`operation`, `efficiency_pct`, `library`) plus the resolved purpose from step 1, using the Action Prose Guidance and Common Patterns below. The P-item heading must include the `(<Library>)` suffix per [`sub_agent_spec.md`](../templates/sub_agent_spec.md) § Recommendations: use `category_findings[i].library` as the value (e.g. `(vLLM)` for a finding whose members are all vLLM ops). Omit the parenthetical only when the value is `Unknown`.
+3. **Annotate the Data table.** Extend the **Data:** operations table with a `Sub-Category` column from `operations[i].classification` when populated. Even when the finding has a single `members[]` row (e.g. an aggregated finding with one operation), render the canonical 10-column horizontal Operations Table from [`sub_agent_spec.md`](../templates/sub_agent_spec.md) § Operations Table Schema. Do not substitute a vertical `Metric | Value` table, which is system-tier only.
 
 **Markers required:** wrap every `**Impact**` line in `<!-- impact-begin kind=p_item ... --> ... <!-- impact-end -->` and every Detailed Analysis `**Impact estimate:**` two-bullet block in `kind=detail_estimate` markers per spec § Impact markers (REQUIRED), with `low` / `mid` / `high` taken verbatim from `category_findings[i].impact_score{,_low,_high}`.
 

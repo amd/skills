@@ -77,6 +77,9 @@ jobs:
       - name: Validate plugin with the claude CLI
         run: claude plugin validate .
 
+      - name: Validate generated Claude skills manifest
+        run: uv run .github/scripts/generate_claude_plugin.py --check
+
       - name: Validate generated Cursor manifest
         run: uv run .github/scripts/generate_cursor_marketplace.py --check
 

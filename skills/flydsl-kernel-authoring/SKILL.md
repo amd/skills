@@ -42,10 +42,10 @@ Python (@flyc.kernel/@flyc.jit)
 
 ### Key Passes
 Pipeline is built by `RocmBackend._pipeline_parts()` and split into three stages — see `docs/architecture_guide.md` §3 for the per-pass table. Highlights:
-1. `fly-rewrite-func-signature` - Rewrite DSL types at function / SCF boundaries to packed LLVM structs
+1. `fly-canonicalize` + `fly-rocdl-expand-ops` - Canonicalize Fly ops and expand target-specific operations
 2. `fly-layout-lowering` - Lower layout algebra (`fly.crd2idx`, partitions, divides) to arithmetic
 3. `fly-convert-atom-call-to-ssa-form` + `fly-promote-regmem-to-vectorssa` - Lift copy/MMA atom calls and register memory to vector SSA
-4. `convert-fly-to-rocdl` - Fly ops -> ROCDL intrinsics
+4. `convert-fly-to-rocdl` - Convert Fly values (signatures, calls, launches and control flow alike) to the nested packed ABI, and Fly ops to ROCDL intrinsics
 5. `gpu-module-to-binary{format=fatbin}` - Emit HSACO binary via LLVM AMDGPU backend
 
 ### Key Source Paths
@@ -437,7 +437,7 @@ See [references/environment-and-debugging.md](references/environment-and-debuggi
 2. **Raw `buffer_load` offset**: the `offset` parameter is in ELEMENTS, not bytes.
    The raw intrinsics live in `kernels/common/buffer_ops.py`, not `flydsl.expr`.
 
-3. **Cache stale after code changes**: The disk cache auto-invalidates on source/closure changes. Only set `FLYDSL_RUNTIME_ENABLE_CACHE=0` or clear `~/.flydsl/cache/` if you changed C++ passes or non-closure helpers.
+3. **Cache stale after code changes**: The disk cache is keyed by the traced MLIR and the toolchain fingerprint, so Python edits and rebuilt C++ passes invalidate it. Set `FLYDSL_RUNTIME_ENABLE_CACHE=0` or clear `~/.flydsl/cache/` only when debugging a suspected stale artifact.
 
 4. **LDS overflow**: Check capacity (64KB on gfx942, 160KB on gfx950). `SharedAllocator` sizes the LDS global for you; the compiler errors if a static allocation exceeds the arch limit.
 

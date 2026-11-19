@@ -7,7 +7,8 @@ directory, puts it first on PATH, and `teardown` takes it away again. A case
 with no directory runs exactly as it did before: no `rocm` on PATH.
 
 The stub replays recorded output and nothing else. It answers `--version`,
-`fix --json` and `diagnose`, and refuses every other command with exit code 2.
+`fix --json` and `diagnose`, and `examine --json` for a case whose recording has
+one, and refuses every other command with exit code 2.
 It only ever prints text read from `replies.json`, so whatever an agent asks it,
 it cannot change a machine or send anything: that comes from the allowlist, not
 from the refusal of `diagnose` options below, which is there for fidelity (see
@@ -72,9 +73,11 @@ elif args == ["fix", "--json"]:
     reply(replies["fix_json"])
 elif args[:1] == ["diagnose"] and not refused & {a.split("=")[0] for a in args}:
     reply(replies["diagnose_json" if "--json" in args else "diagnose_text"])
+elif args == ["examine", "--json"] and "examine_json" in replies:
+    reply(replies["examine_json"])
 sys.stderr.write(
-    "error: this evaluation replays only `--version`, `fix --json` and "
-    "`diagnose`; it runs nothing else\n"
+    "error: this evaluation replays only `--version`, `fix --json`, `diagnose` "
+    "and, where recorded, `examine --json`; it runs nothing else\n"
 )
 sys.exit(2)
 """

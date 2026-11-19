@@ -14,10 +14,10 @@ Produces numbered `.mlir` files per pipeline stage plus `final_isa.s`.
 | `FLYDSL_RUNTIME_ENABLE_CACHE` | true | Enable kernel disk caching (in-memory cache is always active) |
 | `FLYDSL_RUNTIME_CACHE_DIR` | ~/.flydsl/cache | Cache directory |
 | `FLYDSL_COMPILE_OPT_LEVEL` | 2 | Optimization level (0-3) |
-| `ARCH` | auto-detect | Override GPU architecture |
+| `FLYDSL_GPU_ARCH` | auto-detect | Override GPU architecture |
 
 ### Disk Cache Invalidation
-The JIT disk cache auto-invalidates when kernel source or closure values change. Set `FLYDSL_RUNTIME_ENABLE_CACHE=0` only when modifying C++ passes or non-closure helper functions:
+The JIT disk cache is keyed by the traced MLIR and the toolchain fingerprint, so Python edits and rebuilt C++ passes invalidate it. Set `FLYDSL_RUNTIME_ENABLE_CACHE=0` only when debugging a suspected stale artifact:
 ```bash
 FLYDSL_RUNTIME_ENABLE_CACHE=0 python my_kernel.py  # or: rm -rf ~/.flydsl/cache
 ```

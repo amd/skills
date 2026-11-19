@@ -1,6 +1,6 @@
 {
   "name": "amd-skills",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Agent Skills for AMD-optimized workflows.",
   "author": {
     "name": "AMD"
@@ -35,6 +35,9 @@
       "Write"
     ],
     "websiteURL": "https://github.com/amd/skills",
+    "supportURL": "https://github.com/amd/skills/issues",
+    "privacyPolicyURL": "https://www.amd.com/en/legal/privacy.html",
+    "termsOfServiceURL": "https://github.com/amd/skills/blob/main/LICENSE",
     "brandColor": "#ED1C24",
     "logo": "./assets/amd.png",
     "composerIcon": "./assets/amd.png",

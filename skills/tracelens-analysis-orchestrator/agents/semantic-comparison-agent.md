@@ -157,7 +157,14 @@ Scripts: `TraceLens/Agent/Analysis/semantic_analyses/kernel_unification.py`
 
 If Step 2.1 prints `STEM PREPROCESSING NEEDED` (combined unique names exceed
 the threshold, default 5000), the raw name set is too large for the LLM.
-Launch the subagent `TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/kernel-stem-preprocessing-agent.md`, then:
+Launch the subagent `TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/kernel-stem-preprocessing-agent.md`. **Validate its `stem_rules.json` before applying** (retry gate, up to 2x):
+
+```bash
+<prefix> python3 -c "from TraceLens.Agent.Analysis.utils.validation_utils import validate_stem_rules as v; import sys; ok,errs=v('<output_dir>/work/stem_rules.json'); print(chr(10).join(errs)); sys.exit(0 if ok else 1)"
+```
+
+On non-zero exit, return the printed errors to the stem agent to fix and
+re-emit `stem_rules.json`. Once it passes, apply:
 
 ```bash
 <prefix> python3 TraceLens/Agent/Analysis/semantic_analyses/kernel_unification.py apply-stem-rules \
@@ -174,12 +181,27 @@ Re-run until the printed stem count is within budget.
 ### 2.3 Launch Kernel Unification Agent
 
 Read `TraceLens/Agent/Analysis/skills/analysis-orchestrator/agents/kernel-unification-agent.md` and
-launch it with `kernel_unification_context.json` inline. For multi-region vLLM: run once per matching region pair.
+launch it with `kernel_unification_context.json` inline. It writes the
+id-referenced `kernel_unification_decisions.json`. For multi-region vLLM: run
+once per matching region pair.
 
-### 2.4 Apply the Map
+### 2.4 Validate, Expand & Apply
+
+Validate the agent's decisions (retry gate, up to 2x), then expand the ids back
+to names and apply:
 
 ```bash
-<prefix> python3 TraceLens/Agent/Analysis/semantic_analyses/kernel_unification.py apply-map \
+UN=TraceLens/Agent/Analysis/semantic_analyses/kernel_unification.py
+# 1. Validate
+<prefix> python3 -c "from TraceLens.Agent.Analysis.utils.validation_utils import validate_kernel_unification_map as v; import sys; ok,errs=v('<output_dir>/work/kernel_unification_decisions.json','<output_dir>/work/kernel_unification_context.json'); print(chr(10).join(errs)); sys.exit(0 if ok else 1)"
+# On non-zero exit, return the errors to the unification agent to fix & re-emit.
+# 2. Expand ids -> names
+<prefix> python3 $UN expand-map \
+    --decisions <output_dir>/work/kernel_unification_decisions.json \
+    --context <output_dir>/work/kernel_unification_context.json \
+    -o <output_dir>/work/kernel_unification_map.json
+# 3. Apply
+<prefix> python3 $UN apply-map \
     --labels-a <output_dir>/work/<name_a>/semantic_labels.json \
     --labels-b <output_dir>/work/<name_b>/semantic_labels.json \
     --name-a <name_a> --name-b <name_b> \
@@ -189,9 +211,9 @@ launch it with `kernel_unification_context.json` inline. For multi-region vLLM: 
 
 ### 2.5 Verify Unification
 
-Check that `kernel_unification_context.json` and `kernel_unification_map.json`
-exist in `<output_dir>/work/`, and that `apply-map` reported a non-empty
-shared vocabulary.
+Check that `kernel_unification_context.json`, `kernel_unification_decisions.json`
+and the expanded `kernel_unification_map.json` exist in `<output_dir>/work/`, and
+that `apply-map` reported a non-empty shared vocabulary.
 
 ### 2.6 Coherence Pass (second pass, LLM)
 
@@ -224,7 +246,16 @@ it with `kernel_coherence_context.json` inline. It writes
 `fallback_remap_a` / `fallback_remap_b`), pairing same-context one-sided buckets
 across traces into new shared names.
 
-### 2.6c Apply
+### 2.6c Validate & Apply
+
+Validate the decisions (retry gate, up to 2x) before applying:
+
+```bash
+<prefix> python3 -c "from TraceLens.Agent.Analysis.utils.validation_utils import validate_kernel_coherence_decisions as v; import sys; ok,errs=v('<output_dir>/work/kernel_coherence_decisions.json','<output_dir>/work/kernel_coherence_context.json'); print(chr(10).join(errs)); sys.exit(0 if ok else 1)"
+```
+
+On non-zero exit, return the errors to the coherence agent to fix and re-emit.
+Once it passes, apply:
 
 ```bash
 <prefix> python3 $KC apply \

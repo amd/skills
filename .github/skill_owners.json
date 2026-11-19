@@ -6,9 +6,24 @@
       "product_release_owner": "jeffdaily"
     },
     {
+      "repo": "amd-enterprise-ai/aim-build",
+      "engineering_owner": "bjorn-amd",
+      "product_release_owner": "reiserm"
+    },
+    {
+      "repo": "amd-enterprise-ai/amd-eai-apps",
+      "engineering_owner": "kevinkswSiloAI",
+      "product_release_owner": "DavidPSilo"
+    },
+    {
       "repo": "amd/Quark",
       "engineering_owner": "amd-zhaofeng",
       "product_release_owner": "thiagocrepaldi"
+    },
+    {
+      "repo": "AMDResearch/intellikit",
+      "engineering_owner": "coleramos425",
+      "product_release_owner": "mawad-amd"
     },
     {
       "repo": "ROCm/FlyDSL",

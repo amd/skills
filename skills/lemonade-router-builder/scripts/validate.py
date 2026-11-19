@@ -57,6 +57,14 @@ ENFORCED_KEYWORDS = {
 }
 ANNOTATION_KEYWORDS = {"description", "default", "title", "$comment", "examples"}
 
+# Classifier fields whose shape is checked by dedicated code below rather than
+# the generic _check_value walk (their schemas use nested object keywords that
+# walk doesn't interpret). Mirrors the server's parse_systemone_question.
+CUSTOM_VALIDATED_FIELDS = {"question"}
+SYSTEMONE_QUESTION_KEYS = {"type", "instructions", "criteria"}
+SYSTEMONE_QUESTION_TYPES = ("choice", "noul", "score")
+SCORE_LEVELS_MIN, SCORE_LEVELS_MAX = 2, 10
+
 
 def _type_rules(classifier_def):
     """Per-type field rules from the classifier's allOf if/then conditionals.
@@ -81,9 +89,13 @@ def _type_rules(classifier_def):
                 "non_empty": {k for k, v in then.get("properties", {}).items()
                               if v.get("minItems", 0) >= 1},
             }
-        elif cond.get("required") and "enum" in then.get("properties", {}).get("type", {}):
+        elif cond.get("required") and ({"enum", "const"} & then.get("properties", {}).get("type", {}).keys()):
+            # "field X is only accepted on type(s) ..." - an enum of types
+            # (on_truncation) or a single const type (question -> systemone).
+            type_rule = then["properties"]["type"]
+            allowed = set(type_rule["enum"]) if "enum" in type_rule else {type_rule["const"]}
             for field in cond["required"]:
-                gated[field] = set(then["properties"]["type"]["enum"])
+                gated[field] = allowed
         else:
             unparsed += 1
     return by_type, gated, unparsed
@@ -127,7 +139,8 @@ def load_vocab(schema):
         "_type_rules": by_type,
         "_gated": gated,
         "_unparsed_conditionals": unparsed,
-        "_unenforced_keywords": _unenforced_keywords(leaf_props) | _unenforced_keywords(clf["properties"]),
+        "_unenforced_keywords": _unenforced_keywords(leaf_props) | _unenforced_keywords(
+            {k: v for k, v in clf["properties"].items() if k not in CUSTOM_VALIDATED_FIELDS}),
     }
 
 
@@ -297,6 +310,99 @@ def _check_value(value, prop, name, issues, check, path):
     return ok
 
 
+def _blank(s):
+    return not s.strip(" \t\r\n")
+
+
+def _check_systemone_question(question, issues, path):
+    """Validate a systemone classifier's `question` the way the server's
+    parse_systemone_question does at /pull, and return the labels it yields
+    (choice: option names in order; noul: "true"/"false"; score: level strings).
+    Returns [] when the question is too malformed to derive labels from."""
+    check = "systemone_question"
+    if not isinstance(question, dict):
+        _err(issues, check, "'question' must be an object", path)
+        return []
+    unknown = set(question) - SYSTEMONE_QUESTION_KEYS
+    if unknown:
+        _err(issues, check, f"question has unknown key(s): {', '.join(sorted(unknown))} "
+                            f"(allowed: {', '.join(sorted(SYSTEMONE_QUESTION_KEYS))})", path)
+
+    instr = question.get("instructions")
+    if not ((isinstance(instr, str) and not _blank(instr)) or
+            (isinstance(instr, (dict, list)) and instr)):
+        _err(issues, check, "question.instructions must be non-blank text, or a non-empty object or array", path)
+
+    qtype = question.get("type")
+    criteria = question.get("criteria")
+    desc_ok = lambda d: d is None or isinstance(d, (str, dict, list))  # noqa: E731
+    labels = []
+
+    if qtype == "choice":
+        if isinstance(criteria, dict):
+            _err(issues, check,
+                 "choice criteria must be an ARRAY of option names and one-key {option: description} "
+                 "objects, e.g. [\"billing\", {\"shipping\": \"where an order is\"}] - not an object. "
+                 "(/v1/systemone takes an object, but a stored policy sorts object keys and option "
+                 "order changes the scores, so the router refuses it)", path)
+            return []
+        if not isinstance(criteria, list) or not criteria:
+            _err(issues, check, "choice question requires criteria: a non-empty array of option names "
+                                "and one-key {option: description} objects", path)
+            return []
+        for i, entry in enumerate(criteria):
+            if isinstance(entry, str):
+                option, desc = entry, None
+            elif isinstance(entry, dict) and len(entry) == 1:
+                option, desc = next(iter(entry.items()))
+            else:
+                _err(issues, check, f"criteria[{i}] must be an option name or a one-key "
+                                    "{option: description} object", path)
+                continue
+            if _blank(option):
+                _err(issues, check, f"criteria[{i}]: choice options must not be empty", path)
+            elif option in labels:
+                _err(issues, check, f"choice option '{option}' is listed twice", path)
+            elif not desc_ok(desc):
+                _err(issues, check, f"option '{option}' description must be text, an object, an array or null", path)
+            else:
+                labels.append(option)
+        if len(criteria) < 2:
+            _err(issues, check, "choice question needs at least 2 options; one option always scores 1.0", path)
+    elif qtype == "noul":
+        if criteria is not None:
+            if not isinstance(criteria, dict):
+                _err(issues, check, "noul criteria must be an object {\"true\": ..., \"false\": ...}", path)
+            else:
+                for k, d in criteria.items():
+                    if k not in ("true", "false"):
+                        _err(issues, check, "noul criteria accepts only 'true' and 'false'", path)
+                    elif not desc_ok(d):
+                        _err(issues, check, f"noul '{k}' description must be text, an object, an array or null", path)
+        labels = ["true", "false"]
+    elif qtype == "score":
+        if not isinstance(criteria, list) or not SCORE_LEVELS_MIN <= len(criteria) <= SCORE_LEVELS_MAX:
+            _err(issues, check, f"score question requires {SCORE_LEVELS_MIN} to {SCORE_LEVELS_MAX} "
+                                "criteria levels (an array of strings, lowest first)", path)
+            return []
+        for level in criteria:
+            if not isinstance(level, str) or _blank(level):
+                _err(issues, check, "score levels must be non-empty strings; they become the labels", path)
+            elif level in labels:
+                _err(issues, check, f"score level '{level}' is listed twice; levels must be distinct", path)
+            else:
+                labels.append(level)
+    else:
+        _err(issues, check, f"question.type must be one of {list(SYSTEMONE_QUESTION_TYPES)}, got {qtype!r}", path)
+        return []
+
+    # Options become labels, so they obey the same label rules (no control chars).
+    label_schema = VOCAB["_classifier_schemas"].get("labels", {}).get("items", {})
+    for lab in labels:
+        _check_value(lab, label_schema, f"option '{lab}'", issues, check, path)
+    return labels
+
+
 def validate_match_expr(expr, classifiers, path, issues, depth=0):
     if depth > 64:
         _err(issues, "match_depth", "exceeds max nesting depth (64)", path)
@@ -360,16 +466,14 @@ def validate_match_expr(expr, classifiers, path, issues, depth=0):
         elif cid not in classifiers:
             _err(issues, "classifier_ref", f"references undeclared classifier '{cid}'", path)
         else:
-            clf = classifiers[cid]
-            pool = (list((clf.get("reference_phrases") or {}).keys())
-                    if clf.get("type") == "semantic_similarity" else (clf.get("labels") or []))
+            pool, has_default = classifiers[cid]
             label = expr.get("label")
             if label is not None:
                 if not isinstance(label, str) or not label:
                     _err(issues, "classifier_label", "'label' must be a non-empty string", path)
                 elif pool and label not in pool:
                     _err(issues, "classifier_label", f"label '{label}' is not declared on classifier '{cid}'", path)
-            elif pool and not clf.get("default_label"):
+            elif pool and not has_default:
                 _err(issues, "classifier_label",
                      f"omits 'label' but classifier '{cid}' has labels and no default_label", path)
 
@@ -522,11 +626,12 @@ def validate(policy):
             cid = clf.get("id")
             if not isinstance(cid, str) or not cid:
                 _err(issues, "classifier_id", "must be a non-empty string", p)
+                cid = None
             elif cid in seen_ids:
                 _err(issues, "classifier_id", f"duplicate id '{cid}'", p)
+                cid = None
             else:
                 seen_ids.add(cid)
-                classifiers_by_id[cid] = clf
 
             ctype = clf.get("type")
             if ctype in VOCAB["reserved_classifier_types"]:
@@ -555,7 +660,7 @@ def validate(policy):
 
             # Value shapes (on_error enum, labels items, reference_phrases
             # structure, ...) straight from the schema's classifier properties.
-            for field in sorted(set(clf.keys()) & VOCAB["classifier_keys"] - {"id", "type"}):
+            for field in sorted(set(clf.keys()) & VOCAB["classifier_keys"] - {"id", "type"} - CUSTOM_VALIDATED_FIELDS):
                 _check_value(clf[field], VOCAB["_classifier_schemas"][field], field, issues, field, p)
 
             model = clf.get("model")
@@ -588,6 +693,9 @@ def validate(policy):
                     if isinstance(phrases, list) and any(x == "" for x in phrases):
                         _err(issues, "reference_phrases",
                              f"concept '{concept}' has an empty phrase; phrases must be non-empty strings", p)
+            elif ctype == "systemone":
+                # Labels are the question's options, not a declared list.
+                labels = _check_systemone_question(clf["question"], issues, p) if "question" in clf else []
             elif not isinstance(labels, list):
                 labels = []
 
@@ -596,9 +704,13 @@ def validate(policy):
                 if not isinstance(default_label, str) or not default_label:
                     _err(issues, "default_label", "must be a non-empty string", p)
                 elif not labels:
-                    _err(issues, "default_label", "set but classifier declares no labels/concepts to validate against", p)
+                    if ctype != "systemone":  # a bad question already reported why it has no options
+                        _err(issues, "default_label", "set but classifier declares no labels/concepts to validate against", p)
                 elif default_label not in labels:
                     _err(issues, "default_label", f"'{default_label}' is not in labels/concepts {labels}", p)
+
+            if cid is not None:
+                classifiers_by_id[cid] = (labels, bool(default_label))
 
     if has_rules:
         rules = routing["rules"]

@@ -101,10 +101,12 @@ original **full-capture** traces (the DECODE traces *and* their
 `capture_traces/` folders). Those are large and are **not committed to the
 repo** — only the slimmed DECODE-only traces ship in the fixtures. You must
 already have the full-capture traces available locally (on the machine where
-they were captured). The script's source paths default to
-`tests/traces/semantic/...` and are set in the `SEM_ROOT` / `SOURCES` entries at
-the top of the script; edit them to point at wherever you keep the traces. The
-script fails with a clear "missing source" error if they aren't present.
+they were captured). The script reads each case's DECODE trace paths
+(`trace_a` / `trace_b`, resolved under `REPO_ROOT`) from
+`partial_test_cases.csv` and expects each trace's `capture_traces/` folder in
+the same directory. Place the full-capture traces at those paths (override
+`REPO_ROOT` if they live elsewhere). The script fails with a clear "missing
+source" error if they aren't present.
 
 ```bash
 bash TraceLens/Agent/Analysis/skills/analysis-orchestrator/evals/partial_tests/generate_gold_ref.sh
