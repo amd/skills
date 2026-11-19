@@ -17,7 +17,7 @@ ready to answer OpenAI requests via `/v1/chat/completions`.
 - Disk space in `~/.cache/huggingface` for the model weights (the default model below is roughly 18 GB at BF16).
 - A Hugging Face token in `HF_TOKEN` **only** for gated models (Llama, Gemma). The default model (Qwen3.5) needs none. For gated models the token must belong to an account that has **accepted the license** at `huggingface.co/<model_id>`—a valid token without license acceptance fails with an opaque `Engine core initialization failed`.
 - **Node.js ≥ 18**, required by the `skills` CLI used in Step 2 (`npx skills ...`). Check with `node -v`.
-- *No Instinct hardware handy?* AMD Developer Cloud offers hosted MI300X instances that satisfy the requirements above. Note this is only a way to **get** a host—the skill itself does not provision or onboard cloud instances; it expects a machine that's already up.
+- *No Instinct hardware handy?* AMD Developer Cloud offers hosted MI300X instances that satisfy the requirements above. Note this is just a way to **get** a host—the skill itself does not provision or onboard cloud instances; it expects a machine that's already up.
 
 ## Step 1: Understanding which skills are available
 
