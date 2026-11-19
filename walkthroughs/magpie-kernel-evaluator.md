@@ -24,7 +24,7 @@ Magpie provides three public modes:
 | `compare` | Validate and rank two or more implementations | `compare_report.json` |
 
 The main path requires a model-serving environment. If one is unavailable, use
-the lightweight `vector_add` smoke test near the end of this file to verify that
+the lightweight `vector_add` smoke test near the end of this walkthrough to verify that
 the skill triggers and uses Magpie correctly.
 
 ## Prerequisites
