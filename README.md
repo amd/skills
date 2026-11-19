@@ -33,7 +33,7 @@ Install AMD Skills with the [`skills` CLI](https://github.com/vercel-labs/skills
 npx skills add amd/skills
 ```
 
-This prompts you to pick a skill and an install destination. To install a specific skill into specific agents, pass `--skill` with one or more `--agent` flags (e.g. `cursor`, `claude-code`, `codex`):
+This prompts you to pick a skill and an install destination. To install a specific skill into specific agents, pass `--skill` with one or more `--agent` flags (for example, `cursor`, `claude-code`, or `codex`):
 
 ```bash
 npx skills add amd/skills --skill local-ai-use --agent claude-code
@@ -60,7 +60,9 @@ For hands-on, step-by-step guides that show a skill in action, see the [walkthro
 
 ## The catalog
 
-The initial catalog is organized into three focus areas, spanning the full stack from client to cloud. This catalog is expected to grow significantly as more skills land.
+The catalog is organized into three focus areas that span the full stack, from client to cloud. Expect it to grow as more skills land.
+
+The **Source** column shows where each skill is maintained. Most skills are federated: the product team maintains the skill in its own repository, and `amd/skills` vendors a copy. Skills marked *in-repo* are maintained directly in `amd/skills`.
 
 ### Client-native
 
@@ -89,7 +91,7 @@ Run and optimize on AMD Instinct.
 
 | Skill | What it does | Source |
 | --- | --- | --- |
-| [`serving-llms-on-instinct`](https://github.com/amd/skills/blob/main/skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine or backend selection in later phases. | in-repo |
+| [`serving-llms-on-instinct`](https://github.com/amd/skills/blob/main/skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end to end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine or backend selection in later phases. | in-repo |
 | [`serving-llms-on-epyc`](https://github.com/amd/skills/blob/main/skills/serving-llms-on-epyc/SKILL.md) | Serve LLMs on AMD EPYC CPUs with vLLM and zentorch, in a container (Docker or Podman) or conda. Handles CPU detection, runtime and env validation, vLLM model-support and RAM-fit checks, hardware-sized threads and KV, launch, and health verification. Single instance; reports and stops on failure. | [ZenDNN-pytorch-plugin](https://github.com/amd/ZenDNN-pytorch-plugin) |
 | [`hyperloom-workload-optimizer`](https://github.com/amd/skills/blob/main/skills/hyperloom-workload-optimizer/SKILL.md) | Set up Hyperloom and autonomously optimize end-to-end LLM inference throughput on AMD Instinct GPUs, reporting a validated gain. | [Hyperloom](https://github.com/AMD-AGI/Hyperloom) |
 | [`magpie-kernel-evaluator`](https://github.com/amd/skills/blob/main/skills/magpie-kernel-evaluator/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM or SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
@@ -129,23 +131,23 @@ Skills earn their keep on repeated, opinionated workflows, exactly where the AMD
 
 The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integrations each have their own team, release cadence, and validation matrix. So skills here are **federated**: each skill is owned and versioned by the team that owns the product it describes, and this repository is the catalog that brings them together.
 
-```
-                ┌─────────────────────────────────────────────────────┐
-                │                amd/skills (this repo)               │
-                │                                                     │
-                │   skills/         .github/         .*-plugin/       │
-                │   vendored copies federation.json  agent manifests  │
-                └──────────────────────┬──────────────────────────────┘
-                                       │  one install
-                                       ▼
-                              your AI coding agent
-                                       ▲
-                                       │  resolves pointers to
-       ┌───────────────┬───────────────┼───────────────┬────────────────┐
-       │               │               │               │                │
-   ROCm/ROCm       ROCm/HIP        Ryzen AI repo   lemonade-sdk    ...more
-  rocm-doctor/    cuda-to-hip/    ryzen-ai-tools/   local-ai-app-   product
-   gfx-target-...  triton-amd-...  ...               integration/    repos
+```text
+  Product repositories (each team owns and versions its skills), for example:
+  ROCm/rocm-cli, ROCm/rocm-systems, ROCm/FlyDSL, amd/Quark,
+  lemonade-sdk/skills, AMD-AGI/Magpie, AMD-AGI/TraceLens
+                                 │
+                                 │  federate-skills workflow (nightly):
+                                 │  vendors only the skills that changed
+                                 ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │                    amd/skills (this repo)                    │
+  │                                                              │
+  │  skills/           .github/            .*-plugin/            │
+  │  vendored copies   federation.json     agent manifests       │
+  └──────────────────────────────┬───────────────────────────────┘
+                                 │  one install
+                                 ▼
+                       your AI coding agent
 ```
 
 [`.github/federation.json`](https://github.com/amd/skills/blob/main/.github/federation.json) is the whole registry: each
@@ -169,7 +171,7 @@ See [CONTRIBUTING.md](https://github.com/amd/skills/blob/main/CONTRIBUTING.md) t
 
 ## Manual installation
 
-Until marketplace integration lands, install skills manually: clone this repo, then copy (or symlink) the skill folders you want from `skills/` into your agent's skills directory. Each agent discovers `SKILL.md` automatically.
+To install without `npx`, clone the `amd/skills` repository, then copy (or symlink) the skill folders you want from `skills/` into your agent's skills directory. Each agent discovers `SKILL.md` automatically.
 
 ```bash
 git clone https://github.com/amd/skills.git amd-skills
