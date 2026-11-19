@@ -172,6 +172,10 @@ for i in range_constexpr(N):
 # Runtime loop (lowered by AST rewriting)
 for i in range(runtime_value):
     ...
+
+# Runtime loop with an optional LLVM unroll hint.
+for k in fx.range(N, unroll_full=True):  # or unroll=4; unroll=1 disables
+    ...
 ```
 
 ### Runtime vs Compile-Time Conditions (Current Style)
