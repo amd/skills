@@ -2,9 +2,9 @@
   "source": "rocm-rocm-systems",
   "repo": "ROCm/rocm-systems",
   "ref": "develop",
-  "commit": "eba5fda368e547935de774dbb27d90e9527abbda",
+  "commit": "d46f9b4416abca78eede7cbe8ed8c567010333c6",
   "path": "projects/rocprofiler-compute/skills/rocprof-compute-memory",
   "license": "MIT",
-  "content_hash": "898b9c49d94578f460cf5df66b9637723db7c0b819c50e0fc234907b9d30f1b9",
-  "imported_at": "2026-11-05T21:08:45Z"
+  "content_hash": "46200aeb28a99a9e3b6c513fcd7b9d70dad04766554f03c419b24ce115f0bb8b",
+  "imported_at": "2026-11-19T14:25:06Z"
 }
