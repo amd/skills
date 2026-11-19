@@ -1,180 +1,398 @@
 ---
 name: moat-cuda-to-rocm
-description: Port a CUDA project to ROCm/HIP for AMD GPUs. Strategy selection, the AMD-strict-where-CUDA-is-lenient fault classes, wavefront-size portability, library substitutions, and the validation bar. Use when planning, implementing, reviewing or validating a CUDA-to-HIP port, or when a HIP build compiles but misbehaves at runtime.
+description: Port a CUDA project to ROCm/HIP for AMD GPUs and keep the port working. Covers strategy selection (CMake HIP language or PyTorch extension), the faults where AMD is strict and CUDA is lenient, wave32/wave64 wavefront portability, CUDA library substitutions and their gaps (cuBLAS, cuSOLVER, cuDNN, cuSPARSE, Thrust, NCCL, RAPIDS, nvJPEG, NVDEC), ROCm build and link problems on Linux and Windows (clang-cl, lld-link, DLL loading, the pip-installed ROCm SDK), and the validation bar. Use when planning, implementing, reviewing or validating a CUDA-to-HIP port, when a HIP build fails to compile or link, when it compiles but misbehaves at runtime, when a CUDA library has no obvious ROCm equivalent, or when syncing a ROCm port with upstream changes.
 ---
 
 # CUDA to ROCm/HIP
 
-Accumulated across many real ports. This file is the index and the decision-critical parts;
-everything else is in `references/`, loaded only when you need it.
+Accumulated across about a hundred real ports. This file routes; the knowledge is in
+`references/`, one topic per file, loaded only when you need it.
 
 **Most porting bugs are not in symbol names.** Hipify handles the renaming. The bugs are
-semantic differences where AMD is strict and CUDA is lenient, and most surface at runtime
-on a build that compiled cleanly, though some, like a 32-bit `*_sync` mask, fail to
-compile even after hipify runs clean. Read the fault-class index below before concluding a
-port works.
+semantic differences where AMD is strict and CUDA is lenient. Most surface at runtime on a
+build that compiled cleanly, but a clean hipify is not a clean build either: hipify leaves
+literals and types alone, so some idioms (a 32-bit `*_sync` mask is the common one) hipify
+without complaint and then fail to compile under HIP.
 
 ## Naming: ROCm or HIP?
 
-They name different things and reviewers notice.
-
-- **HIP** is the programming model: the kernel dialect plus the `hipXxx` runtime API. The
+- **HIP** is the programming model: the kernel dialect plus the `hipXxx` runtime API, the
   analogue of CUDA C++ and the CUDA runtime.
-- **ROCm** is the platform: compiler, runtime, driver, and the roc*/hip* libraries. The
+- **ROCm** is the platform: compiler, runtime, driver and the roc*/hip* libraries, the
   analogue of the CUDA Toolkit.
 
-So the CODE port is "to HIP" (hipify, the compat header, runtime symbols), while the
-TARGET, build flag and libraries are "ROCm" (`USE_HIP`/`USE_ROCM`, "ROCm 7.2.1",
-cuFFT -> hipFFT). A language+runtime port is precisely "a HIP port targeting ROCm". Never
-call the platform "HIP" or the kernel dialect "ROCm". Details: `references/naming.md`.
+The CODE port is "to HIP"; the TARGET, build flag and libraries are "ROCm". Never call the
+platform "HIP" or the kernel dialect "ROCm". Details: `references/naming.md`.
+
+## ROCm version numbers in this skill
+
+Entries say where they were seen. The numbers compare the ordinary way: 7.2 < 7.13 < 7.14 <
+10.0 < 10.1 < 10.2 < 10.3. Three things can mislead:
+
+- **Dates do not order them.** The 7.2.x patch releases (7.2.1 to 7.2.4, March to May 2026)
+  came out alongside 7.11, 7.12 and 7.13, so 7.13 (May 2026) is newer code than 7.2.4
+  (also May 2026).
+- **The major number jumps from 7 to 10.** 7.14 was released in July 2026 (with a 7.14.1
+  patch in August), and the next releases are 10.0 (August 2026), 10.1 (October 2026) and
+  10.2 (November 2026). Nothing was released in between.
+- **A date suffix marks a nightly build, not a different series.** `7.14.0a20260612` is a
+  pre-release build of 7.14 and `10.3.0a20261118` one of 10.3; every version has such builds
+  before its release. An entry seen on a nightly says so, and may or may not hold on the
+  release of the same number.
+
+HIP has its own version number, which stayed on the 7.x line when ROCm's went to 10: ROCm
+7.14 carries HIP 7.14, ROCm 10.1 carries HIP 7.16, and the 10.2 and 10.3 builds carry 7.17
+and 7.18. So gate code on a feature test or on `HIP_VERSION_*`, never on the ROCm number. A
+workaround tagged with a version or a date may have expired: re-check it on a newer ROCm
+before carrying it.
 
 ## Which strategy
 
-Classify the build first -- implementing the wrong strategy correctly is still wrong.
+Classify the build first; implementing the wrong strategy correctly is still wrong.
 
 | build | strategy | shape |
 |---|---|---|
 | pure CMake | **A** (preferred) | one `cuda_to_hip.h` compat header, `enable_language(HIP)`, `set_source_files_properties(... LANGUAGE HIP)`; sources keep CUDA spelling |
 | pytorch extension | **B** | rely on torch's build-time hipify; fix only what it cannot |
-| anything else | neither | driver-API, runtime PTX, Go/cgo, qmake and codegen builds exist -- see the runtime-PTX fault class |
+| anything else | neither | driver-API, runtime PTX, Go/cgo, qmake and codegen builds: `references/platform-limits.md`, "Runtime-compiled kernels" |
 
-**How to tell:** look for `find_package(Torch)`, `torch.utils.cpp_extension`,
-`CUDAExtension`, or a torch dependency in `setup.py`/`pyproject.toml`. If any is present it
-is a pytorch extension -- Strategy B. Otherwise treat it as a pure CMake (or Makefile, or
-meson) project -- Strategy A. The build system does not pick the strategy; what the sources
-look like does. lc0 is meson and ports Strategy-A-shaped -- it just means writing by hand
-what `enable_language(HIP)` would have given you, and `references/strategy-a-cmake.md` says
-what.
+**How to tell:** `find_package(Torch)`, `torch.utils.cpp_extension`, `CUDAExtension`, or a
+torch dependency in `setup.py`/`pyproject.toml` means a pytorch extension, Strategy B.
+Otherwise treat it as Strategy A, whatever the build system: a meson or Makefile project
+ports Strategy-A-shaped, writing by hand what `enable_language(HIP)` would have given.
 
 Strategy A is the minimal-footprint model: the compat header is a no-op on NVIDIA, so the
 CUDA build is untouched. Where the project includes CUDA headers by name, prefer the
-**shim-header method** -- shadow headers on the HIP include path only -- which leaves the
-source tree byte-identical to upstream and produces a far more mergeable diff. Full recipes: `references/strategy-a-cmake.md`,
+shim-header method (shadow headers on the HIP include path only), which leaves the sources
+byte-identical to upstream. Recipes: `references/strategy-a-cmake.md`,
 `references/strategy-b-torch.md`.
 
 ## Before porting
 
-Check whether an AMD port already exists, and whether it is authoritative. The deciding
-axis is authoritativeness, not existence -- an AMD-official work-in-progress shifts the
-value to validating and improving it, while a one-off community fork is a hint, never code
-to inherit. Cheapest high-signal check first: grep the upstream's own docs for
-`amd|rocm|hip|gfx[0-9]`, because reference repos routinely link platform forks.
-`references/assess-existing-support.md`.
+Check whether an AMD port already exists and whether it is authoritative: an AMD-official
+work in progress shifts the value to validating and improving it, while a one-off community
+fork is a hint, never code to inherit. `references/assess-existing-support.md`.
 
-Some CUDA has no HIP analogue to translate INTO, so hipify succeeds at doing nothing and the port looks small. CUTLASS reimplements against Composable Kernel; CuTe has a real structural correspondence in AMD's FlyDSL, whose layout algebra is modelled on it. That is a reimplementation with a defined target, not the same verdict as "no target exists" -- and both get written off as "not portable" unless you say which. `references/no-hip-equivalent.md`.
+Some CUDA has no HIP analogue to translate INTO (CUTLASS, CuTe, TensorRT, raw PTX), so
+hipify succeeds at doing nothing and the port looks small. A reimplementation against an
+AMD-native target is not the same verdict as "no target exists"; say which.
+`references/no-hip-equivalent.md`.
 
-## Fault classes -- the index
+## Where to look
 
-Scan this list against what you are doing. If any line could apply, open
-`references/fault-classes.md` for the full entry with evidence and fix.
+| you have | open |
+|---|---|
+| wrong results, a hang or a fault on one wavefront width; code with `warpSize`, a literal 32, `__shfl*`, `__ballot`, lane masks | `references/faults-wavefront.md` |
+| a crash, a hang, stale or garbage data, an intermittent failure; streams, events, async copies, graph capture, managed memory, several GPUs | `references/faults-memory-streams.md` |
+| textures (also `tex*` compile errors on gfx94x), OpenGL or Vulkan interop | `references/faults-textures-interop.md` |
+| numbers that differ from CUDA or the CPU: FMA contraction, rounding, `min`/`max`, half-precision GEMM, big-integer arithmetic | `references/faults-numerics.md` |
+| a compile error, or code silently skipped: macros HIP does not define, includes, `__CUDA_ARCH__`, `helper_math.h`, C++23 | `references/build-headers-macros.md` (C++23: `assets/HipCxx23Shim.cmake`) |
+| CMake, link or load errors: `LANGUAGE HIP`, `-fgpu-rdc`, OpenMP, RUNPATH, LibTorch, installed packages, submodules | `references/build-cmake-link.md` |
+| anything on Windows: SDK install, clang drivers, CRT and link errors, DLL loading, Windows-only wrong results, debugging | `references/windows.md` (link wrapper: `assets/hip_link_win.py`) |
+| a CUDA library to replace, or a missing routine or mode: cuBLAS, cuSOLVER, cuDNN, cuSPARSE, Thrust/CUB, cuRAND, NCCL, RAPIDS, nvJPEG, NVDEC, NVML | `references/libraries.md` |
+| a device query that answers differently, `clock64`, occupancy, kernels compiled at run time (PTX, NVRTC), an integrated APU | `references/platform-limits.md` |
+| a failure you cannot place yet, or a suspected ROCm bug | `references/diagnosis.md` |
+| what counts as validated; compiling the CUDA path with nvcc | `references/validation.md` |
+| a headless Linux GPU host that needs a GL or Vulkan context | `references/linux-host-setup.md` |
+| an open PR that upstream has moved under | `references/upstream-sync.md` |
 
-**Wavefront and warp semantics**
-- Warp size: NVIDIA is always 32; AMD is 64 on CDNA (gfx9xx) and 32 on RDNA. Never hardcode.
-- Warp-derived array sizing: quantities scaling WITH `warpSize` need the 64 upper bound, quantities scaling as `blockDim/warpSize` need the 32 LOWER bound. Getting it backwards writes out of bounds.
-- HIP's `*_sync` warp functions reject a 32-bit mask at compile time; CUDA's `0xffffffff` needs a 64-bit spelling on HIP.
-- A compat `__ballot_sync` that casts `__ballot()` to `uint32_t` returns the wrong 32 lanes on wave64.
-- An over-wide `__shfl*` width silently clamps to the physical wavefront instead of erroring; the symptom is a metric shift, not a crash.
-- A full 64-bit `*_sync` mask in 32-lane group code traps in a HIP debug build on wave64 when the halves diverge; pass the group mask.
-- Intra-wave barrier divergence: a per-row early return before `__syncthreads()` is benign on CUDA, faults on wave64.
-- `cub`/`hipCUB` block-collective `TempStorage` reuse races on a 64-thread block without an explicit `__syncthreads`.
-- `__smid()` can EXCEED `multiProcessorCount` on AMD, unlike NVIDIA.
-- HIP's device `warpSize` is not an `int`; cast it at any `printf` vararg.
+## Reviewing a port
 
-**Memory and lifetime**
-- Out-of-bounds reads: CUDA often tolerates one element past an allocation; AMD faults.
-- Fresh device allocations are NOT zeroed on ROCm, where CUDA's allocator often hands back zeroed pages. Whenever you port or review code, trace every allocation whose first use is a read-modify-write -- an `atomicAdd` counter, an accumulator, histogram bins, a `+=` output -- and confirm a memset or init kernel runs first on the same stream. Report a missing one even when the rest of the review is about something else.
-- `cudaMemcpy*Async` from a soon-freed pageable host buffer: CUDA stages synchronously, HIP does not. The same hides an unsynchronized upload on one stream feeding a kernel on another.
-- Bitwise/min/max atomics on `hipMallocManaged` memory are silently dropped on discrete xnack- cards (PCIe AtomicOps); whether a build is hit depends on optimization level, so check the app's ISA.
-- Rule-of-five on resource handles: CUDA tolerates double-destroy of a texture/stream/event; AMD does not.
-- `hipEventQuery`/`hipEventSynchronize` dereference the event's recording stream: querying an event after that stream is destroyed (legal on CUDA) hangs or crashes intermittently. Keep destroyed streams alive: route stream create/destroy through a sync-park-reuse pool in the compat header, not per-holder sweeps.
-- A functor returning a reference to a by-value parameter (lifetime UB) is tolerated by nvcc, not by clang/HIP.
-- `hipLaunchHostFunc` callback threads must not call ANY runtime API.
-- A `hipLaunchHostFunc` callback must not block either: ROCr runs it on the async-events thread, so a callback waiting on a host gate stalls every later event on the device (a multi-stream test hung on gfx1100).
-- HIP after `fork()` crashes in the child (segfault in hipEventQuery); a test that forks and then touches the GPU fails on ROCm.
-- A query HIP reports as unsupported (`cudaLimitPrintfFifoSize` -> hipErrorUnsupportedLimit) leaves a sticky last error that the NEXT launch check reports; clear it under the HIP branch.
+A review is a sweep, not a diagnosis. Finding one fault that explains the reported symptom
+does not end it; ported code usually carries several independent faults, and the one nobody
+asked about is the one that ships.
 
-**Textures**
-- Texture pitch alignment: AMD requires 256-byte row pitch for pitched 2D binds (32 on NVIDIA).
-- Layered `cudaArray` collapses across kernel launches -- use a non-layered 3D array (confirmed gfx90a bug).
-- Hardware linear-filter texture over an element-read float array is arch-specific, not a blanket AMD limitation.
-- Gate hardware-vs-software texture paths on a VERIFIED runtime self-test, never on creation success or `_WIN32`.
-
-**Floating point**
-- `__fsqrt_rn` is not always correctly rounded on gfx90a or gfx1100 (1 ULP high); CUDA's is IEEE-correct. Map it to `sqrtf` when a test compares against host sqrt.
-- Without `__HIP_DEFINE_EXTENDED_HOST_MIN_MAX__` HIP's HOST `min`/`max` take int, so `min(float, float)` in `__host__ __device__` code silently truncates on the host (whole-pixel camera errors); define it for the HIP build.
-- clang(HIP) defaults to `-ffp-contract=fast` and forms FMAs ACROSS expressions; nvcc contracts expression-only.
-- Exact float-equality branches fed by `__fdividef` produce out-of-range indices.
-- HIP device `cuda::min`/`max` NaN-selection can differ from host `std::min`/`max`.
-- HIP host `min`/`max` in `.cu` files exist only for `(int, int)`: float arguments silently truncate. Fix the call sites with `fmin`/`fmax`; the macro is ROCm >= 7.2 only and defaults off.
-
-**Headers, includes and build**
-- A shared compat header must be host-includable: gate device-only includes behind `__CUDACC__`/`__HIPCC__`, or CUB leaks into host TUs. Hit independently by two projects.
-- `__HIP_PLATFORM_AMD__` is undefined until `hip_runtime.h` is included; a gate placed before it silently picks the CUDA branch.
-- Missing includes in a HIP port are usually pre-existing upstream omissions unmasked by the narrower include graph.
-- A `-include`d compat header creates no dependency edge: wipe objects after editing it or you validate stale code.
-- clang type-checks kernel bodies in the HIP host pass, where `__CUDA_ARCH__` is unset: a `__CUDA_ARCH__`-split debug macro calling host code fails only in Debug.
-- The CUDA Samples `helper_math.h` operators tie with `HIP_vector_type`'s own: guard its arithmetic block off on HIP, wholesale.
-
-**Types, dispatch and platform limits**
-- Never name the pointee struct of an opaque handle (`CUstream_st`); use `std::remove_pointer_t<cudaStream_t>`.
-- CUPTI has no ROCm analogue; ck_tile fmha ships headers but no instance library (generate the instances; MIOpen's MHA has no FP16 path).
-- CUTLASS-style GEMMs map to CK device ops (XDL on CDNA, WMMA on RDNA, DL for RDNA FP32 with padded copies).
-- cuDF/cuVS/RMM: hipDF, hipVS, hipMM ship as C++ wheels on AMD's package index, with a few API gaps.
-- hipSPARSE breaks HIP graph capture where cuSPARSE does not (destroying a CSR SpMat syncs, default-algorithm analysis, size-0 buffers).
-- Pick a library's NVIDIA or AMD build per device, never by starting every backend; a HIP port that keeps the soname (hipVS, hipDF) allows one per process.
-- NVML -> AMD SMI, keyed by PCI address, not device index.
-- `clock64()` is a 20-bit wrapping counter on RDNA3; cycle-bounded spins and delays end early. Use `wall_clock64()`.
-- `char` vs `signed char` vector base types differ between HIP and CUDA.
-- AMD compute-capability values COLLIDE with NVIDIA arch numbers, so CC-keyed dispatch picks the wrong path.
-- Library swaps: cuBLAS -> hipBLAS, cuFFT -> hipFFT, cuRAND -> hipRAND, cuSPARSE -> hipSPARSE, cuDNN -> MIOpen, Thrust/CUB -> rocThrust/hipCUB. Handle types and v2-enum signatures differ.
-- nvJPEG/nvImageCodec -> rocJPEG for JPEG decode only (VCN; baseline SOF0 only: no SOF1 or progressive, nothing under 64x64, no encoder, no JPEG 2000); the rest needs a named CPU path, chosen from the frame header, not a catch-all. A JPEG with no scan hangs the VCN engine: validate markers on the host first. NVDEC -> FFmpeg demux + rocDecode's parser and decoder (no FFmpeg hwaccel); gate on profile as well as `rocDecGetDecoderCaps`, which has no profile and lets unsupported H.264 profiles decode wrong, and whose size limits are coded sizes (round the display size up to the block size); a success status can still carry wrong pixels on some GPU and VA driver pairs, so decode a reference clip per codec once per process before trusting it; the CPU path needs libdav1d for AV1. NVENC has no ROCm equivalent: name the software encoder path. See fault-classes "Vulkan interop and image codecs".
-- Runtime PTX + CUDA Driver API is a third build class beyond A and B.
-- MSVC-only upstreams accept code gcc/clang reject; the HIP build is a stricter compiler.
-- No graphics pipeline on compute-only CDNA: OpenGL/Vulkan-interop apps build but cannot run on gfx90a.
-- Vulkan timeline semaphores do not import into HIP on either OS, and the Windows OpaqueWin32 import can silently miss a wait: order on the host.
-- An arch-specific fix keyed on OS or ROCm version can BREAK an already-validated arch.
-
-Two diagnostic methods in `references/validation.md` are worth knowing before you escalate a
-suspected AMD fault: a per-tile "later data corrupts earlier" signature usually means the
-reproducer's input dtype is wrong, and SP-vs-DP triangulation distinguishes FP reassociation
-from a genuine wavefront bug. Both were learned the expensive way.
+1. Walk the index below against the code, file by file, and note a hit or a clean pass for
+   each group.
+2. Check what will not compile under HIP separately from what will misbehave at runtime.
+   "Hipify ran clean" says nothing about the first.
+3. For each fresh device allocation, find its first access. If that is a read-modify-write
+   (an `atomicAdd` counter, an accumulator, a histogram bin, `+=`), a memset or an init
+   kernel must precede it on the same stream: ROCm does not hand back zeroed memory.
+4. Report every hit with its fix, even when it is unrelated to the question asked.
 
 ## Portability rule for shared code
 
 Any fix to code that is not arch-guarded must be correct on **both** wavefront sizes. A
 per-arch hack that fixes wave32 and regresses wave64 makes the archs ping-pong, and each
-"fix" then costs a full re-test on every architecture. Prefer a runtime `warpSize` query on the
-host and a compile-time constant in device code.
+"fix" then costs a full re-test on every architecture. Prefer a runtime `warpSize` query on
+the host and a compile-time constant in device code.
 
 ## Validation bar
 
-A real-GPU test run is the only evidence that counts. Lint is not validation, and a
-CPU-only build proves compilation and nothing else. Cover both wavefront widths and each
-OS the project supports: at least one wave64 (CDNA) GPU, one wave32 (RDNA) GPU, and Windows
-when the project builds there. Also compile the
-CUDA path with nvcc as a no-regression gate: an additive ROCm port must leave the CUDA
-build a pure passthrough. `references/validation.md`.
+A real-GPU test run is the only evidence that counts. Lint is not validation, and a CPU-only
+build proves compilation and nothing else. Cover both wavefront widths and each OS the
+project supports: at least one wave64 (CDNA) GPU, one wave32 (RDNA) GPU, and Windows when
+the project builds there. Also compile the CUDA path with nvcc as a no-regression check: an
+additive ROCm port must leave the CUDA build a pure passthrough. `references/validation.md`.
 
 ## Keeping an open PR mergeable
 
-Upstream moves while a PR is in review. Sync with a MERGE of upstream's default branch,
-never a rebase on a published branch, and treat the clean auto-merge as the risk: upstream
-writes new code against the surfaces the port multiplexed (per-vendor backends, platform
-predicates), so it lands the NVIDIA half only. `references/upstream-sync.md`.
+Sync with a MERGE of upstream's default branch, never a rebase on a published branch, and
+treat the clean auto-merge as the risk: upstream writes new code against the surfaces the
+port multiplexed, so it lands the NVIDIA half only. `references/upstream-sync.md`.
 
 ## Writing it up
 
-Commit messages, PR bodies and code comments go to upstream maintainers who do not know
-your team's vocabulary. Before pushing, check the whole branch -- not just the commit you
-wrote last -- for in-house terms: internal stage or state names, tool names, and this
-skill's own labels such as "Strategy A" or "fault class". A term list with a replacement
-for each is worth keeping and running mechanically.
+Commit messages, PR bodies and code comments go to upstream maintainers who do not know your
+team's vocabulary. Before pushing, check the whole branch, not just the last commit, for
+in-house terms: internal stage or state names, tool names, and this skill's own labels such
+as "Strategy A" or "fault class". Also grep new comments for the names of OTHER projects you
+have ported: "the same fix as in project X" is a dangling reference to an upstream reader.
+State the hazard itself. `references/naming.md`.
 
-A term list does not catch a comment that explains a hazard by naming ANOTHER ported
-project as shorthand for it. arrayfire carried eleven such comments; the six saying "fault
-class" were caught by a term check and five saying "the amgcl void*-aliasing fix" or "the
-gsplat target-attribute rule" were not. To an upstream reader both are dangling
-references to a codebase they have never seen. State the hazard itself -- "hipSPARSE typedefs
-several descriptor types to the same void*, so a wrapper keyed on the handle type cannot
-separate them" -- and before pushing, grep new comments for the names of other projects you
-have ported.
+## Index
+
+One line per entry of the reference files above, generated from the entry titles (do not
+edit by hand). Scan it for your symptom, then open the file for the cause and the fix.
+
+<!-- index:begin -->
+**`references/faults-wavefront.md`** -- Faults: wavefront and warp width
+
+- Never hardcode 32
+- A static array sized from the warp width needs the bound that matches the DIRECTION the ...
+- A block NARROWER than one wavefront makes `blockDim.x / warpSize` zero, and a block ...
+- Warp-tiled dispatch tables written for 32 lanes break when `kWarpSize` becomes 64
+- Special case: a warp-width-dependent SERIALIZED FORMAT
+- HIP's device `warpSize` is not a plain `int`
+- Lane masks are 64-bit on HIP: `__ballot` and `__activemask` RETURN `unsigned long long` ...
+- And the mask VALUE must be built in 64 bits, which the destination type does not do for ...
+- A 32-bit literal COMBINED with a 64-bit mask is the same class in a second shape, and it ...
+- Sweep for THREE patterns, not one, and sweep the vendored subtrees the port ships
+- A compat `__ballot_sync` that casts `__ballot()` to `uint32_t` takes the LOW 32 lanes
+- A full 64-bit `*_sync` mask in 32-lane group code traps in a HIP debug build on wave64
+- Width-32 LOGICAL warp ops are arch-agnostic and fine
+- An over-wide `__shfl*` width does not error, it silently degenerates
+- Do not hardcode wave64 GEOMETRY either
+- Intra-wave barrier divergence
+- `cub`/`hipCUB` block collectives race on a 64-thread block without an explicit ...
+- `__smid()` can EXCEED `multiProcessorCount` on AMD
+- Validate wave-size work on BOTH widths, and where there is no host reference use a ...
+
+**`references/faults-memory-streams.md`** -- Faults: memory, lifetime and streams
+
+- Out-of-bounds reads
+- A latent OOB that stopped reproducing is still there, and index math on `size_t` operands ...
+- An allocation sized by a different expression than the launch indexes it by
+- Fresh device allocations are NOT zero on ROCm
+- An uninitialised local passed by value lets clang delete a padding-lane guard, and the ...
+- Rule-of-five on resource handles
+- A functor returning a reference to a by-value or forwarded parameter
+- Querying an event after its recording stream was destroyed is a use-after-free on HIP
+- Using a stream after `hipDeviceReset` corrupts the heap (Windows shows it)
+- A duplicate `hipFree` in one thread can crash a different thread
+- `cudaMemcpy*Async` from a soon-freed pageable host buffer
+- The same staging difference hides a cross-stream race with no free involved
+- An init-time kernel launched on the legacy null stream is NOT ordered against streams ...
+- A zero-filling allocator helper races a non-blocking upload the same way
+- A plain device-to-device copy is the same race in a less suspicious costume
+- `hipFree` is synchronizing
+- `cudaLaunchHostFunc`/`hipLaunchHostFunc` callback threads must not call ANY runtime API
+- A host-function callback must not block either
+- HIP after `fork()` crashes in the child
+- Creating a hipBLASLt or MIOpen handle while ANY thread captures a graph exits the process
+- hipFFT plan creation fails the same way, but quietly
+- Bitwise and min/max atomics on `hipMallocManaged` memory are silently dropped on a ...
+- Cross-GPU flags in ordinary device memory are never seen by the peer on MI250X
+- The DATA a peer reads, not only the flags, needs uncached memory -- and on gfx1100 ...
+- Streams share hardware queues on HIP, so a spinning kernel can block another stream's ...
+
+**`references/faults-textures-interop.md`** -- Faults: textures and graphics interop
+
+- Texture pitch alignment is 256 bytes on AMD against 32 on NVIDIA
+- A hardware linear-filter texture over an element-read float array is ARCH-SPECIFIC, not a ...
+- Gate the hardware-vs-software texture path on a VERIFIED runtime self-test
+- A layered `cudaArray` collapses across kernel launches -- use a non-layered 3D array
+- gfx94x+ (CDNA3 and newer: MI300-class) disables the HIP image/texture object API at ...
+- A project that reads EVERYTHING through texture objects, with address modes, needs more ...
+- A global-memory texture replacement must COPY the source, never alias it
+- A graphics-interop device pointer dies at the unmap
+- Compute-only CDNA has no graphics pipeline
+- External memory ports 1:1; external semaphores do not
+- HIP VMM memory exported to Vulkan works on Linux
+- Match HIP and Vulkan devices by PCI location (Linux) or LUID (Windows), never by UUID
+
+**`references/faults-numerics.md`** -- Faults: floating point and integer arithmetic
+
+- clang for HIP defaults to `-ffp-contract=fast`
+- One contraction setting cannot satisfy both kinds of bit-exact test
+- `__fsqrt_rn` is not always correctly rounded on gfx90a
+- Device `cuda::min`/`cuda::max` NaN-selection can differ from host `std::min`/`std::max`
+- An exact float-equality branch fed by approximate division can HANG, not just drift
+- Host `min`/`max` on floating-point values truncate to int under hipcc
+- A HIP workaround in shared host code must not change CUDA's numbers
+- Converting a NEGATIVE float to an UNSIGNED integer diverges silently between the back ends
+- PTX carry-chain arithmetic (multi-word integers)
+- Shift counts of 0 or >= 64 in hand-rolled 128-bit arithmetic
+- rocBLAS `gemm_ex` rounds a 16-bit output once per k-chunk when k is long
+- gfx11 and gfx12 WMMA drift over long k, in every library, with any output type
+- A GEMM workaround covers every entry point that reaches the library, fused epilogues ...
+
+**`references/build-headers-macros.md`** -- Build: headers, macros and source compatibility
+
+- A shared compat header must be host-includable
+- Missing-include errors are usually pre-existing upstream omissions
+- cuRAND's device header is host-includable only AFTER the CUDA runtime headers
+- For plain C++ TUs the HIP headers `#define __noinline__ __attribute__((noinline))`
+- CUDA error codes HIP lacks still appear in switch labels
+- Never name the pointee struct of an opaque CUDA handle
+- `char` vs `signed char` vector base types differ
+- A torch header the compat layer already aliases for can grow new symbols: alias the whole ...
+- A macro that nvcc or a CUDA header defines and HIP does not reads as 0, and every gate on ...
+- `__HIP_PLATFORM_AMD__` is undefined until `hip/hip_runtime.h` has been included in that TU
+- Defining `__CUDA_ARCH__` for the HIP device pass also feeds every numeric gate
+- Audit every macro class that gates a dtype or arch path, not just `__CUDA_ARCH__`
+- `CUDART_VERSION` is undefined under HIP, so every `#if CUDART_VERSION >= N` guard ...
+- Project code that splits on `__CUDACC__` means "compiled by the device compiler", and HIP ...
+- nvcc accepts a split launch chevron, `kernel << <grid, block >> >(args)`; clang does not
+- Three CUDA spellings that do not resolve under HIP, all cheap to guard
+- Count cooperative-groups call sites per feature before calling them a blocker
+- MSVC-only upstreams accept code that clang and gcc reject
+- An uninitialised header-only submodule fails as a HIP error, not as a missing file
+- clang checks kernel bodies in the HIP host pass; nvcc does not
+- The CUDA Samples `helper_math.h` makes vector arithmetic ambiguous under HIP
+- Extend a CUDA guard for HIP; never re-key it
+- A ROCm-only branch inside a shared template still COMPILES on the CUDA path
+- An arch-specific fix keyed on the OS or the ROCm version can BREAK an already-validated ...
+- rocRAND's device headers need C++14 from ROCm 10.1
+- HIP + C++23 on an older toolchain: `isfinite cannot overload` (and how to stay ...
+
+**`references/build-cmake-link.md`** -- Build: CMake, device linking and dependencies
+
+- A force-included compat header creates no build dependency edge
+- Use the CUDA build's host compiler for host C++ in a large app
+- The vcpkg toolchain already overrides `add_library`/`add_executable`
+- Never mark the host `.cpp` files `LANGUAGE HIP` to dodge the flag leak
+- A `__device__` body in its own `.cu` has two answers on AMD, and the choice is about ...
+- `-fgpu-rdc` changes the consumer contract, so the project's downstream docs owe a line ...
+- Cross-TU `__device__` calls ARE inlined on AMD under `-fgpu-rdc`
+- Moving the bodies into a host-reachable header UNGUARDED silently breaks the CUDA build
+- No AMD build, review round or GPU validation can detect this class
+- One OpenMP runtime per binary; which one follows from who compiles the files that use ...
+- OpenMP in a mixed g++/HIP library: one runtime only
+- CMake `LANGUAGE HIP` on host `.cpp` files drops OpenMP
+- A HIP-linked shared library gets no RUNPATH to the ROCm lib dir
+- With the ROCm clang as the host compiler, a found system libunwind links but does not load
+- LibTorch's CMake package adds `-D__HIP_NO_HALF_OPERATORS__=1 ...
+- On a multi-GPU host a rapids-cmake HIP dependency fails configure with `mismatch between ...
+- LibTorch on the include path shadows the system `fmt`, and spdlog stops compiling
+- Submodules pinned to commits that do not exist
+- Install and consume the port, not just build it
+- Every optional target the project can build, not just the one you build
+- A cached build-script decision from a wrong env var survives fixing the env var
+
+**`references/windows.md`** -- Windows
+
+- Use TheRock ROCm, not the Windows HIP SDK
+- TheRock's devel wheel can ship with hipCUB/rocThrust headers missing
+- A torch wheel needs the matching `[device-<gfx>]` extra
+- A dev package neither TheRock nor vcpkg ships
+- An all-clang Windows HIP build hides three CMake/export faults that MSVC builds never hit
+- CMake's HIP language on Windows needs ONE clang driver for every language, and ROCm's ...
+- Keep one clang driver across every CMake language, and check the CMake version
+- CRT flags, compiler-rt builtins and Git Bash flag mangling in a CMake HIP build
+- TheRock clang 23 can hang in x86 register allocation
+- CMake's HIP link rule mangles MSVC-style flags and paths
+- A fetched ROCm-DS dependency has to be built static
+- A C++ LibTorch consumer must force the torch_hip.dll import
+- Stage the ROCm runtime next to the .exe, kpack included
+- A null top frame above a vendored DLL means a runtime library was never loaded
+- `hipcc.exe` and hiprtc traps for setuptools/Python builds
+- A buffer that crosses into Python and gets released with `free()` must come from `malloc`
+- Linux-only host APIs and LLP64 truncation inside third-party C APIs
+- A `core.autocrlf` mismatch can break `git apply` of a committed patch
+- A `std::stringstream` can fail on a multi-GB payload on Windows only
+- Kernels on different streams run one after another
+- VMM address ranges that were mapped are never reused
+- A crash trace without a PDB names the wrong function
+- A CPU crash that Linux never shows is often a heap over-read
+- A hang can be one kernel that never finishes
+
+**`references/libraries.md`** -- Libraries: substitutions and gaps
+
+- Library swaps
+- Negative entries for that table
+- Choosing the NVIDIA or AMD build of a library at run time
+- A scalar's WIDTH follows the compute/scale type, not the matrix type
+- hipBLASLt epilogues are not cuBLASLt's, per type and per format
+- Generic GEMM on CK device operations
+- Fused FP16 attention (cuDNN SDPA, flash attention): MIOpen has no path, CK's FMHA does
+- A "find the best algorithm" call WRITES to the tensor named as its output
+- MIOpen honours only a unit alpha and a zero beta for 2D convolution, pooling and bias
+- MIOpen runs a convolution only on a handle where Find ran for it
+- MIOpen 3.6 (ROCm 10.1) lacks several cuDNN operations outright
+- Two ROCm library headers can collide
+- A zero workspace size does not mean "skip the operation"
+- hipSPARSE has no uniform half-precision SpMM
+- Library calls inside HIP graph capture
+- rocThrust's `thrust/system/cuda/error.h` is CUDA-only
+- rocPRIM never asks for less than 4 bytes of temp storage
+- hipCUB's segmented `ArgMax` returns an out-of-range key for a segment of NaNs
+- Code that reads cuRAND's device generator state internals needs a rocRAND translation ...
+- NVTX -> roctx
+- GPU power (the NVML replacement) is AMD SMI
+- RAPIDS libraries: hipDF, hipVS and hipMM as C++ wheels
+- RMM -> hipMM (and check ROCm-DS before stubbing any RAPIDS library)
+- RCCL collectives need the whole multi-GPU host at once
+- rocJPEG writes past the row pitch
+- Fall back to the CPU only for JPEGs rocJPEG cannot decode, and say so
+- A JPEG that ends before its scan hangs the VCN JPEG engine
+- NVDEC through FFmpeg becomes FFmpeg demux plus rocDecode
+- rocDecode's capability query is not a support check by itself
+- A rocDecode success status does not mean right pixels: check a reference clip once per ...
+- The software fallback for AV1 needs libdav1d
+
+**`references/platform-limits.md`** -- Platform limits and other build classes
+
+- AMD compute-capability values COLLIDE with NVIDIA arch numbers
+- A query HIP reports as unsupported leaves a sticky error that the NEXT check reports
+- `clock64()` is a 20-bit wrapping counter on RDNA3, so a cycle-bounded spin, delay or ...
+- On RDNA, a nonzero occupancy does not mean the dynamic shared memory fits
+- `__launch_bounds__(1024)` changes nothing on HIP and something on CUDA
+- Runtime PTX plus the CUDA Driver API is a THIRD build class
+- NVRTC (CUDA C++ generated at run time) ports to hipRTC
+- Runtime-compiled kernels inherit nothing from the host build
+- An integrated APU reports the whole shared memory pool as device memory
+- An integrated APU can crash the device linker under build parallelism
+- A low-CU integrated GPU can outrun a fixed upstream test timeout without any fault
+
+**`references/diagnosis.md`** -- Diagnosing a suspected AMD fault
+
+- One architecture gets wrong numbers while the others pass
+- A "data-dependent, later-data-corrupts-earlier, per-tile" corruption signature is the ...
+- Triangulate single- against double-precision before blaming the wavefront
+- A once-per-suite host crash that stress reruns never reproduce: widen the suspected race ...
+- ROCm 10.1 `AMD_LOG_MASK` takes decimal only, and graph replays are invisible to it
+- Before blaming the code under test for a wrong result, save the output, the inputs as ...
+- When a wrong result survives a `hipDeviceSynchronize` on every device, probe the HIP copy ...
+- A kernel that hangs only in a Debug build: rebuild Debug at `-O2` before blaming an ...
+- An intermittent crash seen only in the GPU build needs a CPU-only build control, run as ...
+- A probe that contradicts a passing test, or that newly fails on a second arch, is wrong ...
+- A cascading wall of SegFault/OOM/"no kernel image available" partway through a long ...
+- A hang that depends on inlining: long branches clobber the return address
+- A fault inside a vendored JIT entry point: rebuild-with-a-forced-throw beats a debugger
+- Failures that appear only when the whole suite runs in one process
+- A free-memory leak check measures the whole GPU, not your process
+- A free-memory-delta test can fail once per process on gfx90a
+- Two GPUs visible to one process can crash the runtime
+
+**`references/validation.md`** -- Validation
+
+- Compile and link the CUDA path with nvcc before claiming the CUDA build is unchanged
+- A CUDA toolkit for the check on a machine with no NVIDIA GPU
+- The newest toolkit is not the whole check when the port touches `__half` in host code
+- A legacy `FindCUDA` project fails the CUDA configure under CMake 3.27 or newer; that is ...
+- A dependency that FetchContent-clones with full history can eat the whole time budget of ...
+- A torch extension needs a CUDA-built torch for this check, not just the toolkit
+- CUDA gate for torch-extension ports: the host's installed PyTorch itself can be the wall
+- A Windows machine can syntax-check the Linux HIP host pass of a `.cu` without a Linux box
+- A passing assertion COUNT is not a list of what was tested
+- Read what the project's own cross-backend checker actually compares
+- A project with no test suite: author the harness, then ship it WITH the port
+
+**`references/linux-host-setup.md`** -- Linux host setup for graphics and interop tests
+
+- Getting a real hardware GL context on a headless RDNA host
+- Headless Vulkan on a Linux GPU host: Xvfb plus Mesa's software WSI
+- HIP and Vulkan in one process can oops the kernel on an old amdgpu-dkms
+<!-- index:end -->
