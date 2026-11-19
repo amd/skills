@@ -4,7 +4,7 @@ Magpie connects model-serving benchmarks to graphics processing unit (GPU) kerne
 walkthrough follows the complete workflow:
 
 ```mermaid
-flowchart LR
+flowchart TD
     A["Benchmark baseline"] --> B["Profile the same workload"]
     B --> C["TraceLens stage and roofline analysis"]
     C --> D["Find top-k kernels and source"]
