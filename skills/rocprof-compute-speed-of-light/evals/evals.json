@@ -1,0 +1,49 @@
+{
+  "evaluations": [
+    {
+      "id": "sol-end-to-end",
+      "skill_should_trigger": true,
+      "prompt": "How close to peak is the hottest kernel in my application? Give me a short efficiency summary.\n\nThe application is ./vcopy.cpp, a single-file HIP program that is not built yet. Run it as ./vcopy -n 1048576 -b 256, which takes a few seconds. Answer with the kernel and the percent of peak of its main metrics.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "summarizes one kernel's efficiency using the Percent of Peak values the report printed"
+      ],
+      "logs_contain": ["--speed-of-light", "-k"]
+    },
+    {
+      "id": "sol-percent-of-peak-routing",
+      "skill_should_trigger": true,
+      "prompt": "how close to peak is this kernel running in my rocprof-compute workload?"
+    },
+    {
+      "id": "sol-overall-efficiency-routing",
+      "skill_should_trigger": true,
+      "prompt": "give me an overall efficiency summary of this rocprofiler-compute capture"
+    },
+    {
+      "id": "sol-mfma-zero-routing",
+      "skill_should_trigger": true,
+      "prompt": "my rocprof-compute report shows MFMA FLOPs at zero, is that a bug?"
+    },
+    {
+      "id": "sol-threshold-pushback-routing",
+      "skill_should_trigger": true,
+      "prompt": "my kernel is at 62% of peak memory bandwidth, is that good enough?"
+    },
+    {
+      "id": "sol-instruction-level",
+      "skill_should_trigger": false,
+      "prompt": "which individual instruction in this kernel stalls the most?"
+    },
+    {
+      "id": "sol-cuda-peak",
+      "skill_should_trigger": false,
+      "prompt": "what percent of peak is my CUDA kernel hitting in Nsight Compute?"
+    },
+    {
+      "id": "sol-hardware-spec-lookup",
+      "skill_should_trigger": false,
+      "prompt": "what is the theoretical peak FP64 throughput of an MI300X?"
+    }
+  ]
+}

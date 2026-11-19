@@ -1,0 +1,44 @@
+{
+  "evaluations": [
+    {
+      "id": "mem-end-to-end",
+      "skill_should_trigger": true,
+      "prompt": "This kernel looks memory bound. Where is the bandwidth going, and what are its cache hit rates?\n\nThe application is ./vrandom_access.cpp, a single-file HIP program that is not built yet. It takes no arguments and runs in a few seconds. Answer with the memory level the traffic reaches and the hit rates the report shows.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "names the memory level the traffic reaches and cites cache hit rates the report printed"
+      ],
+      "logs_contain": ["--memory-chart", "rocprof-compute analyze"]
+    },
+    {
+      "id": "mem-access-inefficiency-routing",
+      "skill_should_trigger": true,
+      "prompt": "find the memory access inefficiencies in this rocprofiler-compute capture"
+    },
+    {
+      "id": "mem-cache-hit-rates-gfx115x-routing",
+      "skill_should_trigger": true,
+      "prompt": "what are my GL1 and GL2 hit rates for this kernel and are they bad?"
+    },
+    {
+      "id": "mem-bandwidth-bound-gfx115x-routing",
+      "skill_should_trigger": true,
+      "prompt": "this kernel looks memory bound, where is the bandwidth going?"
+    },
+    {
+      "id": "mem-host-memory",
+      "skill_should_trigger": false,
+      "prompt": "my application is leaking host memory, help me find it"
+    },
+    {
+      "id": "mem-cuda-memory",
+      "skill_should_trigger": false,
+      "prompt": "analyze the memory throughput of my CUDA kernel with Nsight"
+    },
+    {
+      "id": "mem-gpu-oom",
+      "skill_should_trigger": false,
+      "prompt": "why does my model run out of GPU memory during training?"
+    }
+  ]
+}
