@@ -1,0 +1,22 @@
+{
+  "get namespaces -o json": [
+    1,
+    "",
+    "Error from server (Forbidden): namespaces is forbidden: User \"oidc:reader@example.com\" cannot list resource \"namespaces\" in API group \"\" at the cluster scope"
+  ],
+  "get namespaces -l airm.silogen.ai/project-id -o json": [
+    1,
+    "",
+    "Error from server (Forbidden): namespaces is forbidden: User \"oidc:reader@example.com\" cannot list resource \"namespaces\" in API group \"\" at the cluster scope"
+  ],
+  "get clusterrole e2e-aim-test-author -o json": [
+    1,
+    "",
+    "Error from server (Forbidden): clusterroles.rbac.authorization.k8s.io \"e2e-aim-test-author\" is forbidden: User \"oidc:reader@example.com\" cannot get resource \"clusterroles\" in API group \"rbac.authorization.k8s.io\" at the cluster scope"
+  ],
+  "get externalsecret -n aiwb -o json": [
+    1,
+    "",
+    "Error from server (Forbidden): externalsecrets.external-secrets.io is forbidden: User \"oidc:reader@example.com\" cannot list resource \"externalsecrets\" in API group \"external-secrets.io\" in the namespace \"aiwb\""
+  ]
+}

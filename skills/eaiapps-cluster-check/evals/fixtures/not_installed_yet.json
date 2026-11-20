@@ -1,0 +1,51 @@
+{
+  "get crd aimclustermodels.aim.eai.amd.com": [
+    1,
+    "",
+    "Error from server (NotFound): customresourcedefinitions.apiextensions.k8s.io \"aimclustermodels.aim.eai.amd.com\" not found"
+  ],
+  "get crd aimmodels.aim.eai.amd.com": [
+    1,
+    "",
+    "Error from server (NotFound): customresourcedefinitions.apiextensions.k8s.io \"aimmodels.aim.eai.amd.com\" not found"
+  ],
+  "get crd aimartifacts.aim.eai.amd.com": [
+    1,
+    "",
+    "Error from server (NotFound): customresourcedefinitions.apiextensions.k8s.io \"aimartifacts.aim.eai.amd.com\" not found"
+  ],
+  "get crd applications.argoproj.io": [
+    1,
+    "",
+    "Error from server (NotFound): customresourcedefinitions.apiextensions.k8s.io \"applications.argoproj.io\" not found"
+  ],
+  "get deploy aiwb-api -n aiwb -o json": [
+    1,
+    "",
+    "Error from server (NotFound): deployments.apps \"aiwb-api\" not found"
+  ],
+  "get deploy aiwb-ui -n aiwb -o json": [
+    1,
+    "",
+    "Error from server (NotFound): deployments.apps \"aiwb-ui\" not found"
+  ],
+  "get deploy airm-api -n airm -o json": [
+    1,
+    "",
+    "Error from server (NotFound): deployments.apps \"airm-api\" not found"
+  ],
+  "get deploy airm-ui -n airm -o json": [
+    1,
+    "",
+    "Error from server (NotFound): deployments.apps \"airm-ui\" not found"
+  ],
+  "get pods -n aiwb -o json": [0, "{\"items\": []}", ""],
+  "get pods -n airm -o json": [0, "{\"items\": []}", ""],
+  "get externalsecret -n aiwb -o json": [0, "{\"items\": []}", ""],
+  "get deploy -A -o json": [0, "{\"items\": []}", ""],
+  "get pods -A --field-selector=status.phase=Running -o json": [
+    0,
+    "{\"items\": [{\"metadata\": {\"namespace\": \"project-example\", \"name\": \"gpu-workload\"}, \"spec\": {\"containers\": [{\"resources\": {\"requests\": {\"amd.com/gpu\": \"1\"}}}]}, \"status\": {\"phase\": \"Running\"}}]}",
+    ""
+  ]
+}

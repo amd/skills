@@ -1,0 +1,7 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# The probe scripts and the stubbed cluster in evals/hooks.py are bash, and the fake kubectl
+# is an extensionless Python file run through its shebang, which Windows cannot execute.
+os: [Linux]
