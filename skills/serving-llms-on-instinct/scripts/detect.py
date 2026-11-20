@@ -12,7 +12,7 @@ Exits 0 on success, 1 on failure.
 Env vars (used when --host is not given):
     ROCM_SSH_HOST  -- remote host
     ROCM_SSH_USER  -- SSH user (default: root)
-    ROCM_SSH_PORT  -- SSH port (default: 22)
+    ROCM_SSH_PORT  -- SSH port (default: from ~/.ssh/config, else 22)
 """
 
 import argparse
@@ -38,9 +38,10 @@ def _run(cmd, host, user, port, timeout=30):
                 "-o", "ConnectTimeout=15",
                 "-o", "BatchMode=yes",
                 "-o", "LogLevel=ERROR",
-                "-p", str(port),
                 ssh_target, cmd,
             ]
+            if port:  # an explicit -p would override a Port set in ~/.ssh/config
+                ssh[1:1] = ["-p", str(port)]
             r = subprocess.run(ssh, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
         return r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired:
@@ -62,7 +63,7 @@ def main():
 
     host = host or os.environ.get("ROCM_SSH_HOST", "")
     user = user or os.environ.get("ROCM_SSH_USER", "")
-    port = args.port or int(os.environ.get("ROCM_SSH_PORT", "22"))
+    port = args.port or int(os.environ.get("ROCM_SSH_PORT") or 0)
 
     rc, out, err = _run("amd-smi static --asic --vram --json", host, user, port)
     if rc != 0 and "required groups" in err:
