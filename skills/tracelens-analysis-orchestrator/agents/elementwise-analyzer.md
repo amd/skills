@@ -24,13 +24,13 @@ When invoked by the orchestrator, you will receive the following context:
 - `output_dir`: Base analysis output directory
 - `prefix`: Command prefix from `<output_dir>/cache/cmd_prefix.txt` — contains a template with `{CMD}` placeholder; substitute `{CMD}` with the actual command
 - `comparison_scope`: `standalone` (default) or `comparative`
+- `cat`: `elementwise`, `groupquant`, `rope_fwd`, `rope_bwd`, `fusedrope` or `multi_tensor_apply`
 
 **Input files (pre-computed by orchestrator):**
-1. `<output_dir>/category_data/elementwise_ops.csv` - Filtered elementwise operations (includes `call_stack` column for architecture context)
-2. `<output_dir>/metadata/elementwise_metadata.json` - Hardware specs
+1. `<output_dir>/category_data/<cat>_ops.csv` - Filtered elementwise operations (includes `call_stack` column for architecture context)
 
 **Output file you must write:**
-- `<output_dir>/category_findings/elementwise_findings.md`
+- `<output_dir>/category_findings/<cat>_findings.md`
 
 ---
 
@@ -63,14 +63,15 @@ Use vendor-agnostic terminology:
 ```bash
 <prefix> python3 \
   TraceLens/Agent/Analysis/category_analyses/elementwise_analysis.py \
-  --output-dir <output_dir>
+  --output-dir <output_dir> \
+  --category <cat> \
   --comparison_scope <comparison_scope>
 ```
 
 ### Step 2: Read metrics
 
 ```bash
-cat <output_dir>/category_data/elementwise_metrics.json
+cat <output_dir>/category_data/<cat>_metrics.json
 ```
 
 `category_specific.peak_mem_bw_tbs` is the memory BW reference for elementwise efficiency expectations.
@@ -126,6 +127,21 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 - **Reasoning:** Per-launch overhead dominates; batching or fusion likely available.
 - **Algorithmic:** Restructure to batch operations; chains in the same parent module → defer to kernel fusion analysis.
 
+### Group quantization (`groupquant`)
+- **Symptoms:** Per-group quant kernels at a few percent of peak memory BW on small tensors.
+- **Reasoning:** The kernel reads the wide tensor and writes the narrow tensor plus a scale tensor. At decode sizes it is launch-bound, so low bandwidth efficiency is expected.
+- **Algorithmic:** Fuse into the producer (norm or activation epilogue) or the consuming GEMM prologue so the wide intermediate never reaches HBM. Write scales in the layout the GEMM reads, so no separate shuffle kernel is needed.
+
+### RoPE (`rope_fwd`, `rope_bwd`, `fusedrope`)
+- **Symptoms:** Standalone rotary kernels, or RoPE followed by a KV-cache write.
+- **Reasoning:** The math is trivial, so the kernel is memory-bound and its read and write of Q and K is pure overhead. `rope_bwd` is the inverse rotation, so the same fusion applies to the gradient path.
+- **Algorithmic:** Fuse with the QK projection epilogue, or with the KV-cache write in one rope-and-cache kernel.
+
+### Multi-tensor apply (`multi_tensor_apply`)
+- **Symptoms:** Chains of `_foreach_*` ops over the parameter list (e.g. `_foreach_sqrt`, `_foreach_addcdiv_`).
+- **Reasoning:** Each foreach op reads and writes every parameter and state tensor, so an optimizer step built from several of them makes several passes over the same bytes.
+- **Algorithmic:** Use the fused optimizer (`fused=True`) so one pass updates each tensor. If members are already `_fused_*`, only memory-access tuning remains.
+
 ---
 
 ## Trace observability (category-specific)
@@ -153,7 +169,7 @@ if not passed:
         print('  - ' + e)
     sys.exit(1)
 print('PASS: Findings file is valid')
-" '<output_dir>/category_findings/elementwise_findings.md' 'compute' '<comparison_scope>'
+" '<output_dir>/category_findings/<cat>_findings.md' 'compute' '<comparison_scope>'
 ```
 
 If validation fails, fix the findings file and re-run. Max 2 retries.

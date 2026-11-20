@@ -1,0 +1,193 @@
+{
+  "evaluations": [
+    {
+      "id": "review-kernel-for-wave64",
+      "skill_should_trigger": true,
+      "prompt": "We're porting this CUDA kernel to HIP so the same code runs on an MI300X as well as our NVIDIA cards. hipify ran clean. Before we spend time building, review it for what will go wrong on the AMD side and write the findings to review.md. There is no GPU or ROCm on this machine, so don't try to build or install anything.\n\n```cpp\n#define WARP_SIZE 32\n\n__device__ float warp_sum(float v) {\n  for (int o = WARP_SIZE / 2; o > 0; o /= 2) v += __shfl_down_sync(0xffffffff, v, o);\n  return v;\n}\n\n__global__ void count_positive(const float* x, unsigned* count, int n) {\n  int i = blockIdx.x * blockDim.x + threadIdx.x;\n  uint32_t mask = (uint32_t)__ballot_sync(0xffffffff, i < n && x[i] > 0.f);\n  if (threadIdx.x % WARP_SIZE == 0) atomicAdd(count, __popc(mask));\n}\n\n// host side\ncudaMalloc(&d_count, sizeof(unsigned));\ncount_positive<<<blocks, 256>>>(d_x, d_count, n);\n```",
+      "expected_behavior": [
+        "Flag the hardcoded warp size of 32 as wrong on MI300X, whose wavefront is 64 lanes wide, and recommend deriving the width from the device's warpSize instead of hardcoding a different constant",
+        "Flag that the 32-bit mask 0xffffffff passed to __shfl_down_sync and __ballot_sync fails HIP's compile-time check that warp-sync masks are 64-bit, so the kernel will not build under HIP even though hipify ran clean, and recommend a mask that is 64-bit on HIP while staying 32-bit for CUDA",
+        "Flag that casting the ballot result to a 32-bit integer keeps only half of a 64-lane wavefront's bits, so the positive count comes out wrong on MI300X",
+        "Flag that the counter allocated with cudaMalloc is never zeroed before atomicAdd accumulates into it"
+      ],
+      "unexpected_behavior": [
+        "Conclude the kernel is ready for AMD because hipify translated its symbols without errors",
+        "Recommend fixing the warp size by hardcoding 64, which would break the NVIDIA build and 32-lane AMD GPUs"
+      ],
+      "files_exist": [
+        "review.md"
+      ]
+    },
+    {
+      "id": "plan-torch-extension-port",
+      "skill_should_trigger": true,
+      "prompt": "Our repo is a PyTorch C++/CUDA extension. setup.py is essentially this:\n\n```python\nfrom setuptools import setup\nfrom torch.utils.cpp_extension import BuildExtension, CUDAExtension\n\nsetup(\n    name=\"fused_ops\",\n    ext_modules=[CUDAExtension(\"fused_ops\", [\"csrc/ops.cpp\", \"csrc/fused_kernel.cu\"])],\n    cmdclass={\"build_ext\": BuildExtension},\n)\n```\n\nWe want it to also build and run on AMD Instinct GPUs without breaking the NVIDIA build. Write a short porting plan to plan.md. Don't install or build anything; this machine has no GPU and the sources aren't here.",
+      "expected_behavior": [
+        "Identify the project as a PyTorch extension and plan to rely on PyTorch's own build-time hipify (the same CUDAExtension, built against a ROCm build of PyTorch), changing only what that translation cannot handle",
+        "State that the port is finished only when the extension's tests pass on a real AMD GPU, not when it compiles"
+      ],
+      "unexpected_behavior": [
+        "Make a standalone CMake build with enable_language(HIP) and a hand-written CUDA-to-HIP compatibility header the primary plan for this extension",
+        "Plan to run hipify-perl or hipify-clang over the sources and commit the converted copies, or to maintain a separate HIP copy of the kernels"
+      ],
+      "files_exist": [
+        "plan.md"
+      ]
+    },
+    {
+      "id": "hip-port-misbehaves-at-runtime",
+      "skill_should_trigger": true,
+      "prompt": "My HIP port of a CUDA particle simulation compiles cleanly with hipcc, but the results on a Radeon RX 7900 XTX drift away from the NVIDIA run, and on an MI250X it sometimes dies with a memory access fault. Where should I start looking?"
+    },
+    {
+      "id": "add-amd-build-to-cmake-cuda-project",
+      "skill_should_trigger": true,
+      "prompt": "Our CMake project has a dozen .cu files and builds with nvcc. We'd like an AMD GPU build alongside it, without forking the sources or breaking the NVIDIA build. How should we set that up?"
+    },
+    {
+      "id": "texture-fetch-fails-only-on-mi300",
+      "skill_should_trigger": true,
+      "prompt": "Our HIP port builds and passes on an MI250X (gfx90a) and on a Radeon RX 7900 XTX, but the same CMake command with -DCMAKE_HIP_ARCHITECTURES=gfx942 for our MI300X fails to compile:\n\n```\nerror: 'tex1Dfetch<float, nullptr>' is unavailable: The image/texture API not supported on the device\n```\n\nThe kernel only does `float w = tex1Dfetch<float>(lut_tex, idx);` on a 64k-entry lookup table: no filtering, no normalized coordinates. Write what is going on and the fix to answer.md. There is no GPU or ROCm on this machine, so don't try to build or install anything.",
+      "expected_behavior": [
+        "Explain that this is expected on MI300-class (gfx942 and later) targets, where ROCm's own headers disable the texture/image API at compile time, rather than a misconfigured build or a wrong architecture flag",
+        "Recommend replacing the point-sampled texture fetch with a plain indexed read from a device pointer and dropping the texture object, on every architecture rather than behind a per-GPU #ifdef"
+      ],
+      "unexpected_behavior": [
+        "Recommend building for a different --offload-arch or CMAKE_HIP_ARCHITECTURES so the texture call compiles and running that binary on the MI300X",
+        "Diagnose a broken or mismatched ROCm installation and recommend reinstalling it"
+      ],
+      "files_exist": [
+        "answer.md"
+      ]
+    },
+    {
+      "id": "cudnn-cusolver-substitution-plan",
+      "skill_should_trigger": true,
+      "prompt": "We're scoping an AMD GPU build of a CUDA project. Besides its own kernels it calls three NVIDIA libraries: cuBLAS (`cublasSgemm`), cuDNN (`cudnnConvolutionForward` with a fixed `CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM`), and cuSOLVER (`cusolverDnSpotrf`). For each one, which ROCm library replaces it and how much of our calling code has to change? Write the answer to libraries.md. There is no GPU or ROCm on this machine, so don't try to build or install anything.",
+      "expected_behavior": [
+        "Map cuBLAS to hipBLAS (backed by rocBLAS) and describe it as a close, largely rename-level substitution",
+        "Map cuDNN to MIOpen and state that MIOpen is not API-compatible with cuDNN, so the convolution call layer has to be rewritten (for example MIOpen's find step in place of a fixed algorithm enum) rather than renamed",
+        "Map cuSOLVER to hipSOLVER (backed by rocSOLVER) and say the specific routine should be checked for availability instead of assumed"
+      ],
+      "unexpected_behavior": [
+        "Describe MIOpen as a drop-in or mostly one-to-one replacement for cuDNN that only needs symbols renamed"
+      ],
+      "files_exist": [
+        "libraries.md"
+      ]
+    },
+    {
+      "id": "windows-cmake-hip-machine-x64",
+      "skill_should_trigger": true,
+      "prompt": "I'm building our CMake project's new HIP backend on Windows with the pip-installed ROCm SDK. I configure with -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_HIP_COMPILER=clang++ and it dies before compiling a single file of ours:\n\n```\nclang++: error: no such file or directory: '/machine:x64'\n```\n\nWhat is wrong and how do I fix it? Write it to answer.md. Don't try to build anything here.",
+      "expected_behavior": [
+        "Identify the cause as mixing two clang drivers across CMake languages (MSVC-style clang-cl for C++ and GNU-style clang++ for HIP), which makes CMake hand MSVC-style link arguments to the GNU-style driver",
+        "Recommend using one clang driver for C, C++ and HIP alike, such as the GNU-style clang/clang++ from the ROCm SDK for all of them"
+      ],
+      "unexpected_behavior": [
+        "Recommend switching the C++ compiler to MSVC cl.exe while keeping clang++ for HIP",
+        "Conclude that CMake's HIP language cannot be used on Windows"
+      ],
+      "files_exist": [
+        "answer.md"
+      ]
+    },
+    {
+      "id": "rdc-static-library-consumer-link",
+      "skill_should_trigger": true,
+      "prompt": "Our HIP port of a static library keeps `__device__` function definitions in their own .cu files, so we compile it with -fgpu-rdc. The library's own tests pass on an MI250X. A downstream user who links the installed libfoo.a into a plain C++ program with g++ reports:\n\n```\nundefined reference to `__hip_fatbin_5a3c...'\nundefined reference to `__hip_gpubin_handle_5a3c...'\n```\n\nWhy, and what are our options as the library authors? Write it to answer.md. There is no GPU or ROCm on this machine, so don't try to build or install anything.",
+      "expected_behavior": [
+        "Explain that an archive of relocatable device code has no complete device image, so the device link happens at the consumer's final link and has to be done by the HIP compiler driver in HIP link mode, which a g++ link does not do",
+        "Tell the consumer side what is required: the HIP language enabled in the consuming CMake project and the link driven by the HIP compiler with --hip-link, and say the library's documentation has to state this",
+        "Offer the alternative of not using -fgpu-rdc: move the device function definitions into headers guarded so that only a CUDA or HIP compiler parses them, which puts no requirement on consumers"
+      ],
+      "unexpected_behavior": [
+        "Tell the user to add -fgpu-rdc or --hip-link to the g++ command line as the fix"
+      ],
+      "files_exist": [
+        "answer.md"
+      ]
+    },
+    {
+      "id": "cutlass-kernel-port-verdict",
+      "skill_should_trigger": true,
+      "prompt": "We want an AMD Instinct build of our inference library. Most of it is ordinary CUDA and hipify handles it, but the attention and GEMM kernels are written against CUTLASS and CuTe. A teammate says to mark those kernels 'not portable' and ship the rest. Is that the right call? Write a short verdict to verdict.md. There is no GPU or ROCm on this machine, so don't try to build or install anything.",
+      "expected_behavior": [
+        "State that CUTLASS and CuTe code does not translate through hipify, so those kernels cannot be ported mechanically",
+        "State that AMD-native targets exist to reimplement against (Composable Kernel for CUTLASS-style kernels, FlyDSL for CuTe-style layouts), so the accurate verdict is a reimplementation with its own scope and estimate, not 'not portable'"
+      ],
+      "unexpected_behavior": [
+        "Agree that the kernels are simply not portable to AMD without naming any AMD-native alternative",
+        "Claim that hipify or a compatibility header can translate the CUTLASS or CuTe templates"
+      ],
+      "files_exist": [
+        "verdict.md"
+      ]
+    },
+    {
+      "id": "claim-cuda-build-unchanged",
+      "skill_should_trigger": true,
+      "prompt": "We finished adding a HIP backend to our CMake project: a new Foo_hip.cpp beside the existing Foo_cuda.cpp, plus one shared compatibility header. Every test passes on our MI300X. The draft PR description says 'The CUDA build is unchanged.' We have no NVIDIA GPU. What still has to happen before we open the PR? Write a checklist to checklist.md. Don't install or run anything here.",
+      "expected_behavior": [
+        "Require compiling and linking the CUDA configuration with real nvcc before making that claim, and note that this needs only the CUDA toolkit, not an NVIDIA GPU",
+        "Explain that tests passing on an AMD GPU cannot reveal a broken CUDA path, in particular for the CUDA-only source file that the HIP build never compiles",
+        "Point out that one MI300X run covers only 64-lane wavefronts, so the port also needs a run on a 32-lane (RDNA) AMD GPU or the gap stated"
+      ],
+      "unexpected_behavior": [
+        "Accept 'the CUDA build is unchanged' on the strength of the AMD test results or of reading the diff alone"
+      ],
+      "files_exist": [
+        "checklist.md"
+      ]
+    },
+    {
+      "id": "sync-open-rocm-pr-with-upstream",
+      "skill_should_trigger": true,
+      "prompt": "Our ROCm support PR has been open for six weeks and the maintainer now asks us to resolve conflicts with main. Our port turned the project's single CUDA runtime binding file into separate CUDA and HIP backends, and upstream has added new CUDA calls since. How should we bring the branch up to date, and what should we check afterwards? Write the steps to sync.md. Don't run anything here.",
+      "expected_behavior": [
+        "Recommend merging upstream's default branch into the PR branch rather than rebasing a branch the maintainer has already reviewed",
+        "Warn that a merge with no conflicts can still be wrong: code upstream added against the CUDA side has no HIP counterpart yet, so upstream's own changes since the last sync must be reviewed against each backend the port introduced"
+      ],
+      "unexpected_behavior": [
+        "Recommend rebasing onto main and force-pushing as the way to update the branch"
+      ],
+      "files_exist": [
+        "sync.md"
+      ]
+    },
+    {
+      "id": "thrust-cub-errors-under-hipcc",
+      "skill_should_trigger": true,
+      "prompt": "After switching our CMake build to enable_language(HIP), the Thrust and CUB heavy parts stopped compiling. g++ now complains about an unrecognized --offload-arch option on host files that link roc::rocthrust, and one file that includes thrust/system/cuda/error.h fails on cudaError enums. What's the right way to wire rocThrust and hipCUB into a mixed C++/HIP target?"
+    },
+    {
+      "id": "wave32-only-wrong-results",
+      "skill_should_trigger": true,
+      "prompt": "Our HIP port links and passes every test on an MI250X, but on a Radeon RX 7900 XTX the block reductions come out wrong with no error. The kernels use __shfl_down and a ballot packed into a 64-bit mask. Where do I start?"
+    },
+    {
+      "id": "cuda-bank-conflicts-on-rtx",
+      "skill_should_trigger": false,
+      "note": "CUDA kernel work with no AMD target anywhere in sight. Tuning for NVIDIA is not porting.",
+      "prompt": "Nsight Compute says my CUDA GEMM kernel on an RTX 4090 has heavy shared-memory bank conflicts. How should I change the tile layout to get rid of them?"
+    },
+    {
+      "id": "pytorch-cuda-to-apple-mps",
+      "skill_should_trigger": false,
+      "note": "Moving CUDA code off NVIDIA, but onto Apple's GPU rather than an AMD one.",
+      "prompt": "My PyTorch training script calls .cuda() everywhere. Make it run on the GPU in my M3 MacBook instead."
+    },
+    {
+      "id": "cuda-kernel-to-cpu-openmp",
+      "skill_should_trigger": false,
+      "note": "Porting a CUDA kernel, but to a CPU with no GPU at all.",
+      "prompt": "Rewrite this CUDA vector add as a plain C++ loop parallelised with OpenMP so it runs on a laptop that has no GPU:\n\n```cpp\n__global__ void add(const float* a, const float* b, float* c, int n) {\n  int i = blockIdx.x * blockDim.x + threadIdx.x;\n  if (i < n) c[i] = a[i] + b[i];\n}\n```"
+    },
+    {
+      "id": "rocm-install-no-gpu-detected",
+      "skill_should_trigger": false,
+      "note": "ROCm and an AMD GPU, but an installation problem with no CUDA code being ported.",
+      "prompt": "I installed ROCm on Ubuntu 24.04 but rocminfo says no GPU was found and PyTorch reports torch.cuda.is_available() False on my RX 7900 XT. How do I fix my setup?"
+    }
+  ]
+}

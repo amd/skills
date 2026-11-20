@@ -11,12 +11,13 @@ with numeric tolerance.
 """
 
 import argparse
-import csv
 import os
 import re
 import sys
 
 import pandas as pd
+
+from TraceLens.Agent.Analysis.utils import write_csv
 
 CSV_COLUMNS = [
     "index",
@@ -169,10 +170,7 @@ def run(
                 "recommended_fix": "Fix pre-check gate failure before running evals",
             }
         )
-        with open(results_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-            writer.writeheader()
-            writer.writerows(rows)
+        write_csv(results_path, rows, CSV_COLUMNS)
         return rows
 
     if comparison_scope == "standalone":
@@ -216,10 +214,7 @@ def run(
                 }
             )
 
-    with open(results_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
+    write_csv(results_path, rows, CSV_COLUMNS)
     return rows
 
 

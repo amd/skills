@@ -20,6 +20,10 @@ import os
 import re
 import sys
 
+from TraceLens.Agent.Analysis.category_analyses.analysis_utils import PEAK_MEM_BW_KEY
+from TraceLens.Agent.Analysis.utils import write_csv
+from TraceLens.Agent.Analysis.utils.report_utils import MODEL_INFO_FIELDS
+
 CSV_COLUMNS = [
     "index",
     "category",
@@ -29,7 +33,7 @@ CSV_COLUMNS = [
     "root_cause",
     "recommended_fix",
 ]
-_REQUIRED_MODEL_KEYS = {"model", "architecture", "scale", "precision"}
+_REQUIRED_PLATFORM_SPECS = {PEAK_MEM_BW_KEY, "max_achievable_tflops", "memory_gb"}
 
 _MIN_REPORT_BYTES = 100
 _GARBLED_THRESHOLD = 0.50
@@ -97,60 +101,37 @@ def _load_manifest(output_dir: str) -> dict | None:
         return json.load(f)
 
 
-def _rebase_path(manifest_path: str, output_dir: str) -> str:
-    """Rebase an absolute manifest path to the actual output_dir.
-
-    The manifest stores absolute paths using the original output_dir.
-    When evaluating against a different directory (e.g. analysis_output_ref),
-    we extract the relative suffix and resolve it against the actual dir.
-    """
-    for marker in (
-        "category_data/",
-        "metadata/",
-        "system_findings/",
-        "category_findings/",
-    ):
-        idx = manifest_path.find(marker)
-        if idx != -1:
-            return os.path.join(output_dir, manifest_path[idx:])
-    return manifest_path
-
-
 def _check_directories(output_dir: str) -> tuple[str, str]:
-    required = ["metadata", "category_data", "system_findings", "category_findings"]
+    required = ["category_data", "system_findings", "category_findings"]
     missing = [d for d in required if not os.path.isdir(os.path.join(output_dir, d))]
     if missing:
         return "FAIL", f"Missing directories: {', '.join(missing)}"
     return "PASS", ""
 
 
-def _check_metadata_files(output_dir: str) -> tuple[str, str]:
+def _check_platform_specs(output_dir: str) -> tuple[str, str]:
     manifest = _load_manifest(output_dir)
     if manifest is None:
         return "FAIL", "category_manifest.json not found"
-    missing = []
-    for cat in manifest.get("categories", []):
-        mf = cat.get("metadata_file", "")
-        if mf and not os.path.isfile(_rebase_path(mf, output_dir)):
-            missing.append(os.path.basename(mf))
+    missing = _REQUIRED_PLATFORM_SPECS - manifest.get("platform_specs", {}).keys()
     if missing:
-        return "FAIL", f"Missing metadata files: {', '.join(missing)}"
+        return "FAIL", f"platform_specs missing keys: {', '.join(sorted(missing))}"
     return "PASS", ""
 
 
 def _check_model_info(output_dir: str) -> tuple[str, str]:
-    path = os.path.join(output_dir, "metadata", "model_info.json")
+    path = os.path.join(output_dir, "cache", "model_info.json")
     if not os.path.isfile(path):
-        return "FAIL", "metadata/model_info.json not found"
+        return "FAIL", "cache/model_info.json not found"
     try:
         with open(path) as f:
             data = json.load(f)
     except json.JSONDecodeError as e:
         return "FAIL", f"Invalid JSON: {e}"
-    missing = _REQUIRED_MODEL_KEYS - data.keys()
+    missing = [k for k in MODEL_INFO_FIELDS if k not in data]
     if missing:
         return "FAIL", f"Missing keys: {', '.join(missing)}"
-    empty = [k for k in _REQUIRED_MODEL_KEYS if not str(data[k]).strip()]
+    empty = [k for k in MODEL_INFO_FIELDS if not str(data[k]).strip()]
     if empty:
         return "FAIL", f"Empty values: {', '.join(empty)}"
     return "PASS", ""
@@ -169,20 +150,6 @@ def _check_unified_perf_report(
         label = "perf_report_csvs/unified_perf_summary.csv"
     if not os.path.isfile(path):
         return "FAIL", f"{label} not found"
-    return "PASS", ""
-
-
-def _check_tree_data_files(output_dir: str) -> tuple[str, str]:
-    manifest = _load_manifest(output_dir)
-    if manifest is None:
-        return "FAIL", "category_manifest.json not found"
-    missing = []
-    for cat in manifest.get("categories", []):
-        tf = cat.get("tree_data_file")
-        if tf and not os.path.isfile(_rebase_path(tf, output_dir)):
-            missing.append(os.path.basename(tf))
-    if missing:
-        return "FAIL", f"Missing tree data files: {', '.join(missing)}"
     return "PASS", ""
 
 
@@ -273,32 +240,25 @@ EVAL_REGISTRY = [
         False,
     ),
     (
-        "Metadata files exist on disk",
-        _check_metadata_files,
+        "Platform specs recorded in manifest",
+        _check_platform_specs,
         "pipeline",
-        "Re-run orchestrator_prepare.py to regenerate metadata",
+        "Re-run orchestrator_prepare.py to regenerate the manifest",
         False,
     ),
     (
         "Model info JSON exists and valid",
         _check_model_info,
         "pipeline",
-        "Check model-identification subagent; add fallback skeleton in prepare step",
+        "Check model-identification subagent",
         False,
     ),
     (
         "Unified perf. report exists",
         _check_unified_perf_report,
         "pipeline",
-        "Re-run TraceLens_generate_perf_report_pytorch (Step 1)",
+        "Re-run TraceLens_generate_perf_report_from_config (Step 1)",
         True,
-    ),
-    (
-        "Tree data files exist on disk",
-        _check_tree_data_files,
-        "pipeline",
-        "Re-run orchestrator_prepare.py to regenerate tree data",
-        False,
     ),
     (
         "Categorical findings .md files exist",
@@ -318,14 +278,14 @@ EVAL_REGISTRY = [
         "Plot generated on disk",
         _check_plot,
         "pipeline",
-        "Check priority_data.json; add fallback empty plot_data.json",
+        "Check priority_data.json",
         False,
     ),
 ]
 
 
 # ---------------------------------------------------------------------------
-# Helpers for per-item deterministic checks (evals 9-14, excl. 12 = LLM)
+# Helpers for per-item deterministic checks (evals 8-12, excl. 11 = LLM)
 # ---------------------------------------------------------------------------
 
 
@@ -462,7 +422,7 @@ def _check_p_item_fields(p_text, is_compute):
 
 
 # ---------------------------------------------------------------------------
-# Per-item check functions (evals 9, 10, 11, 13, 14)
+# Per-item check functions (evals 8, 9, 10, 12)
 # ---------------------------------------------------------------------------
 
 _REPORT_HEADERS = {
@@ -476,14 +436,14 @@ _REPORT_HEADERS = {
 
 
 def _check_report_template(output_dir, comparison_scope="standalone"):
-    """Eval 9 — per-header check for required section headers + table presence."""
+    """Eval 8 — per-header check for required section headers + table presence."""
     content = _read_report(output_dir)
     rows = []
     for key, header_text in _REPORT_HEADERS.items():
         found = bool(re.search(rf"^## {re.escape(header_text)}", content, re.MULTILINE))
         rows.append(
             _make_row(
-                f"workflow_eval_9_{key}",
+                f"workflow_eval_8_{key}",
                 f"Report header: {header_text}",
                 "PASS" if found else "FAIL",
                 "" if found else f"Missing '## {header_text}' header",
@@ -496,7 +456,7 @@ def _check_report_template(output_dir, comparison_scope="standalone"):
     has_table = bool(re.search(r"\|.*\|", exec_section)) if exec_section else False
     rows.append(
         _make_row(
-            "workflow_eval_9_metrics_table",
+            "workflow_eval_8_metrics_table",
             "Metrics table in Executive Summary",
             "PASS" if has_table else "FAIL",
             "" if has_table else "No markdown table in Executive Summary",
@@ -548,13 +508,13 @@ _EXEC_SUMMARY_CHECKS_COMPARATIVE = [
 
 
 def _check_exec_summary(output_dir, comparison_scope="standalone"):
-    """Eval 10 — per-row check for exec summary metrics + CSV cross-validation."""
+    """Eval 9 — per-row check for exec summary metrics + CSV cross-validation."""
     content = _read_report(output_dir)
     exec_section = _extract_section(content, "## Executive Summary")
     if not exec_section:
         return [
             _make_row(
-                "workflow_eval_10",
+                "workflow_eval_9",
                 "Executive Summary has metrics table",
                 "FAIL",
                 "Executive Summary section not found",
@@ -576,7 +536,7 @@ def _check_exec_summary_standalone(output_dir, exec_section):
         if value_str is None:
             rows.append(
                 _make_row(
-                    f"workflow_eval_10_{key}",
+                    f"workflow_eval_9_{key}",
                     f"Exec Summary row: {labels[0]}",
                     "FAIL",
                     f"Row not found (looked for: {', '.join(labels)})",
@@ -608,7 +568,7 @@ def _check_exec_summary_standalone(output_dir, exec_section):
 
         rows.append(
             _make_row(
-                f"workflow_eval_10_{key}",
+                f"workflow_eval_9_{key}",
                 f"Exec Summary row: {labels[0]}",
                 result,
                 detail,
@@ -637,7 +597,7 @@ def _check_exec_summary_comparative(output_dir, exec_section):
         if cells is None:
             rows.append(
                 _make_row(
-                    f"workflow_eval_10_{key}",
+                    f"workflow_eval_9_{key}",
                     f"Exec Summary row: {labels[0]}",
                     "FAIL",
                     f"Row not found (looked for: {', '.join(labels)})",
@@ -717,7 +677,7 @@ def _check_exec_summary_comparative(output_dir, exec_section):
 
         rows.append(
             _make_row(
-                f"workflow_eval_10_{key}",
+                f"workflow_eval_9_{key}",
                 f"Exec Summary row: {labels[0]}",
                 result,
                 "; ".join(detail_parts),
@@ -729,7 +689,7 @@ def _check_exec_summary_comparative(output_dir, exec_section):
 
 
 def _check_issue_template(output_dir, comparison_scope="standalone"):
-    """Eval 11 — per-P-item check for correct bold fields in each priority item."""
+    """Eval 10 — per-P-item check for correct bold fields in each priority item."""
     content = _read_report(output_dir)
     compute_section = _extract_section(content, "## Compute Kernel Optimizations")
     system_section = _extract_section(content, "## System-Level Optimizations")
@@ -741,7 +701,7 @@ def _check_issue_template(output_dir, comparison_scope="standalone"):
             result = "PASS" if not missing else "FAIL"
             rows.append(
                 _make_row(
-                    f"workflow_eval_11_compute_P{pnum}",
+                    f"workflow_eval_10_compute_P{pnum}",
                     f"Compute P{pnum} template",
                     result,
                     f"Missing: {', '.join(missing)}" if missing else "",
@@ -756,7 +716,7 @@ def _check_issue_template(output_dir, comparison_scope="standalone"):
             result = "PASS" if not missing else "FAIL"
             rows.append(
                 _make_row(
-                    f"workflow_eval_11_system_P{pnum}",
+                    f"workflow_eval_10_system_P{pnum}",
                     f"System P{pnum} template",
                     result,
                     f"Missing: {', '.join(missing)}" if missing else "",
@@ -773,7 +733,7 @@ def _check_issue_template(output_dir, comparison_scope="standalone"):
         )
         rows.append(
             _make_row(
-                "workflow_eval_11",
+                "workflow_eval_10",
                 "Issue Template rendering",
                 "PASS" if intentionally_empty else "FAIL",
                 "" if intentionally_empty else "No P-items found in report",
@@ -784,21 +744,18 @@ def _check_issue_template(output_dir, comparison_scope="standalone"):
     return rows
 
 
-_MODEL_INFO_FIELDS = ["model", "architecture", "scale", "precision"]
-
-
 def _check_model_id(output_dir, comparison_scope=None):
-    """Eval 13 — per-field check for model_info.json values in Appendix."""
-    model_info_path = os.path.join(output_dir, "metadata", "model_info.json")
+    """Eval 12 — per-field check for model_info.json values in Appendix."""
+    model_info_path = os.path.join(output_dir, "cache", "model_info.json")
     report_path = os.path.join(output_dir, "analysis.md")
 
     if not os.path.isfile(model_info_path):
         return [
             _make_row(
-                "workflow_eval_13",
+                "workflow_eval_12",
                 "Model identification in report",
                 "FAIL",
-                "metadata/model_info.json not found",
+                "cache/model_info.json not found",
                 "pipeline",
                 "Run model identification subagent",
             )
@@ -806,7 +763,7 @@ def _check_model_id(output_dir, comparison_scope=None):
     if not os.path.isfile(report_path):
         return [
             _make_row(
-                "workflow_eval_13",
+                "workflow_eval_12",
                 "Model identification in report",
                 "FAIL",
                 "analysis.md not found",
@@ -821,7 +778,7 @@ def _check_model_id(output_dir, comparison_scope=None):
     except (json.JSONDecodeError, OSError):
         return [
             _make_row(
-                "workflow_eval_13",
+                "workflow_eval_12",
                 "Model identification in report",
                 "FAIL",
                 "Invalid model_info.json",
@@ -837,7 +794,7 @@ def _check_model_id(output_dir, comparison_scope=None):
     if not appendix:
         return [
             _make_row(
-                "workflow_eval_13",
+                "workflow_eval_12",
                 "Model identification in report",
                 "FAIL",
                 "Appendix section not found in report",
@@ -848,12 +805,12 @@ def _check_model_id(output_dir, comparison_scope=None):
 
     appendix_lower = appendix.lower()
     rows = []
-    for field in _MODEL_INFO_FIELDS:
+    for field in MODEL_INFO_FIELDS:
         value = str(model_info.get(field, "")).strip()
         if not value or value.lower() == "cannot be inferred from trace":
             rows.append(
                 _make_row(
-                    f"workflow_eval_13_{field}",
+                    f"workflow_eval_12_{field}",
                     f"Model ID: {field}",
                     "PASS",
                     f"Field not determined ('{value}') — skipped",
@@ -866,7 +823,7 @@ def _check_model_id(output_dir, comparison_scope=None):
         found = value.lower() in appendix_lower
         rows.append(
             _make_row(
-                f"workflow_eval_13_{field}",
+                f"workflow_eval_12_{field}",
                 f"Model ID: {field}",
                 "PASS" if found else "FAIL",
                 "" if found else f"'{value}' not found in Appendix",
@@ -932,17 +889,16 @@ def _check_marker_top_ops(output_dir, comparison_scope=None):
         )
 
     errors = []
-    top_ops_begin = None
+    top_ops_begins = []
     for m in _MV_BEGIN_RE.finditer(content):
         inner = m.group(1)
         km = _MV_KIND_ATTR_RE.search(inner)
         if km and km.group(1) == "top_ops":
-            top_ops_begin = m
-            break
+            top_ops_begins.append(m)
 
-    if top_ops_begin is None:
+    if not top_ops_begins:
         errors.append("No <!-- impact-begin kind=top_ops --> marker found")
-    else:
+    for top_ops_begin in top_ops_begins:
         end_after = _MV_END_RE.search(content, top_ops_begin.end())
         if end_after is None:
             errors.append("kind=top_ops marker has no matching <!-- impact-end -->")
@@ -1067,6 +1023,13 @@ def _check_marker_p_items(output_dir, comparison_scope=None):
     return rows
 
 
+def _p_blocks(tier, subsection, matches):
+    """(tier, P number, block text) for each P-item header in a Detailed Analysis subsection."""
+    for i, match in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(subsection)
+        yield tier, int(match.group(1)), subsection[match.start() : end]
+
+
 def _check_marker_detail_estimates(output_dir, comparison_scope=None):
     """Marker eval 3: kind=detail_estimate markers in Detailed Analysis."""
     content = _read_report(output_dir)
@@ -1089,7 +1052,7 @@ def _check_marker_detail_estimates(output_dir, comparison_scope=None):
         ]
 
     m = re.search(
-        r"^### Compute Kernel Insights[^\n]*\n(.*?)(?=^### (?!.*P\d)|^## |\Z)",
+        r"^### Compute Kernel Insights[^\n]*\n(.*?)(?=^### (?![^\n]*P\d)|^## |\Z)",
         detailed_section,
         re.MULTILINE | re.DOTALL,
     )
@@ -1099,7 +1062,15 @@ def _check_marker_detail_estimates(output_dir, comparison_scope=None):
     if not matches:
         matches = list(_DETAIL_P_HEADER_FALLBACK_RE.finditer(compute_subsection))
 
-    if not matches:
+    blocks = list(_p_blocks("compute", compute_subsection, matches))
+    fusion_subsection = _extract_detailed_analysis_subsection(
+        content, "### Kernel Fusion Insights"
+    )
+    if fusion_subsection:
+        fusion_matches = list(_DETAIL_P_HEADER_RE.finditer(fusion_subsection))
+        blocks += _p_blocks("fusion", fusion_subsection, fusion_matches)
+
+    if not blocks:
         intentionally_empty = (
             "No compute kernel optimization opportunities identified"
             in compute_subsection
@@ -1124,13 +1095,8 @@ def _check_marker_detail_estimates(output_dir, comparison_scope=None):
         ]
 
     rows = []
-    for i, match in enumerate(matches):
-        pnum = int(match.group(1))
-        start = match.start()
-        end = (
-            matches[i + 1].start() if i + 1 < len(matches) else len(compute_subsection)
-        )
-        block = compute_subsection[start:end]
+    for tier, pnum, block in blocks:
+        pname = f"P{pnum}" if tier == "compute" else f"{tier} P{pnum}"
 
         errors = []
         detail_markers = []
@@ -1150,8 +1116,7 @@ def _check_marker_detail_estimates(output_dir, comparison_scope=None):
         elif detail_markers:
             for inner in detail_markers:
                 attrs = _marker_attrs_from_inner(inner)
-                required = ("low", "high")
-                missing = [a for a in required if a not in attrs]
+                missing = [a for a in ("low", "mid", "high") if a not in attrs]
                 if missing:
                     errors.append(
                         f"kind=detail_estimate marker missing attributes: "
@@ -1167,13 +1132,13 @@ def _check_marker_detail_estimates(output_dir, comparison_scope=None):
         details = "; ".join(errors) if errors else ""
         rows.append(
             _make_marker_row(
-                f"marker_eval_3_P{pnum}",
-                f"Detailed Analysis P{pnum} estimate marker (kind=detail_estimate)",
+                f"marker_eval_3_{pname.replace(' ', '_')}",
+                f"Detailed Analysis {pname} estimate marker (kind=detail_estimate)",
                 result,
                 details,
                 "template" if result == "FAIL" else "",
                 (
-                    f"Fix kind=detail_estimate marker for P{pnum} in Detailed Analysis"
+                    f"Fix kind=detail_estimate marker for {pname} in Detailed Analysis"
                     if result == "FAIL"
                     else ""
                 ),
@@ -1424,10 +1389,10 @@ _MULTI_EVAL_CHECKS = [
 ]
 
 _GATE_FAIL_NEW_EVALS = [
-    ("workflow_eval_9", "Report Template Rendering"),
-    ("workflow_eval_10", "Executive Summary has metrics table"),
-    ("workflow_eval_11", "Issue Template rendering"),
-    ("workflow_eval_13", "Model identification in report"),
+    ("workflow_eval_8", "Report Template Rendering"),
+    ("workflow_eval_9", "Executive Summary has metrics table"),
+    ("workflow_eval_10", "Issue Template rendering"),
+    ("workflow_eval_12", "Model identification in report"),
     ("marker_eval_1", "Top Operations markers (kind=top_ops)"),
     ("marker_eval_2", "P-item markers (kind=p_item)"),
     ("marker_eval_3", "Detail estimate markers (kind=detail_estimate)"),
@@ -1470,10 +1435,7 @@ def run(
                     "recommended_fix": "Fix pre-check gate failure before running evals",
                 }
             )
-        with open(results_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-            writer.writeheader()
-            writer.writerows(rows)
+        write_csv(results_path, rows, CSV_COLUMNS)
         return rows
 
     for i, (summary, func, rc, fix, mode_aware) in enumerate(EVAL_REGISTRY, start=1):
@@ -1495,10 +1457,7 @@ def run(
     for check_fn in _MULTI_EVAL_CHECKS:
         rows.extend(check_fn(output_dir, comparison_scope))
 
-    with open(results_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
+    write_csv(results_path, rows, CSV_COLUMNS)
     return rows
 
 

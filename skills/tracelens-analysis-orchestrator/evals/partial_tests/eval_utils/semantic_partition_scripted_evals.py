@@ -33,9 +33,10 @@ output missing, no matched keys).
 """
 
 import argparse
-import csv
 import os
 import sys
+
+from TraceLens.Agent.Analysis.utils import write_csv
 
 # compare_lca_partitions lives two dirs up in eval_utils/ (not a package).
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -63,10 +64,7 @@ CANDIDATE_RELPATH = os.path.join("tracediff_output", "diff_stats.csv")
 
 
 def _write(results_path: str, rows: list[dict]) -> None:
-    with open(results_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
+    write_csv(results_path, rows, CSV_COLUMNS)
 
 
 def run(output_dir: str, reference_dir: str, results_path: str) -> list[dict]:

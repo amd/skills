@@ -1,0 +1,5 @@
+Kernel_Name,Dispatch_Id,Counter_Name,Counter_Value
+sample_kernel,3,TCC_HIT_sum,20
+sample_kernel,3,TCC_MISS_sum,980
+sample_kernel,3,TCC_REQ_sum,1000
+unrelated_kernel,3,TCC_HIT_sum,99999

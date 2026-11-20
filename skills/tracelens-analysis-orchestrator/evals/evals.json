@@ -9,7 +9,7 @@
         "analysis_output/perf_report.xlsx",
         "analysis_output/category_data/category_manifest.json",
         "analysis_output/priority_data.json",
-        "analysis_output/metadata/model_info.json",
+        "analysis_output/cache/model_info.json",
         "analysis_output/perf_improvement.png"
       ],
       "expected_behavior": [

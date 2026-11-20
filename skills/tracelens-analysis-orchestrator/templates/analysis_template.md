@@ -34,16 +34,15 @@ section that has STANDALONE / COMPARATIVE variants. Delete the unused variant.
    P-item Impact line uses the canonical mid `impact_score` value; low/high values appear only
    in Detailed Analysis. Cards join the corresponding sub-agent's Detailed Analysis block by
    `(findings[i].category, findings[i].category_rank)`.
-5. System-Level Optimizations: If all system-level analyses report no actionable issues
-   (NONE/N/A severity), use a single "✅ No system-level bottlenecks detected" summary instead of
-   P1/P2/P3 recommendations. Only generate numbered priorities when at least one actionable issue
-   exists (number sequentially from P1, including CPU/Idle first if invoked).
+5. System-Level Optimizations: One card per entry in `priority_data.json::system_findings`, in array
+   order (already globally sorted by share); the P-number is the entry's `rank`. Copy the card and its
+   Detailed Analysis block from the findings file whose card has the same title, renumbering the card
+   heading, the Detailed Analysis heading and the marker `rank=` to the entry's `rank`. A failed analyzer is listed in
+   the rule 1 warning and gets no card; if the list is empty because of a failure, keep the heading and
+   note and add no card.
 6. Each section is independently composable -- can be shared standalone.
 7. All three tiers (Compute, Kernel Fusion, System) use separate sequential P1/P2/P3 numbering (no gaps).
-8. Priority icons are assigned by PRIORITY NUMBER, not severity:
-   - Compute Kernel: 🔴 P1 → 🟡 P2 → 🟢 P3 → 🟢 P4 ...
-   - Kernel Fusion: icon by confidence (🔴 high → 🟡 medium → 🟢 low), not priority number
-   - System-Level: 🔴 P1 → 🟡 P2 → 🟢 P3 → 🟢 P4 ... (only when actionable issues exist)
+8. Priority icons are assigned by PRIORITY NUMBER, not severity, in every section (Compute Kernel, Kernel Fusion, System-Level): 🔴 P1 → 🟡 P2 → 🟢 P3 → 🟢 P4 ...
 9. Field labels — each section uses EXACTLY these labels:
 
    OPTIMIZATION CARDS (§Compute Kernel Optimizations, §Kernel Fusion, §System-Level):
@@ -53,16 +52,23 @@ section that has STANDALONE / COMPARATIVE variants. Delete the unused variant.
 
    DETAILED ANALYSIS (§Detailed Analysis only):
    - Compute / System blocks: **Identification:** / **Data:** / **Reasoning for Slowdown:** / **Resolution:** / **Impact estimate:**
-   - Kernel Fusion blocks:    **Identification:** / **Data:** / **Impact estimate:**
+   - Kernel Fusion blocks:    **Identification:** / **Data:** / **Resolution:** / **Impact estimate:**
 
 10. Detailed Analysis: three subsections (`### Compute Kernel Insights`, `### Kernel Fusion Insights`, `### System-Level Insights`) with `#### 🔴/🟡/🟢 Pn: <Brief Title>` blocks matching card titles and order.
-11. Model and appendix: Use `model_info["model"]` from `metadata/model_info.json` for the
+11. Model and appendix: Use `model_info["model"]` from `cache/model_info.json` for the
     report title (fall back to "Workload" if "Cannot be inferred from trace"). Fill Appendix
     **Model Architecture** with the raw `model`, `architecture`, `scale`, `precision` values.
 12. Library parenthetical: Compute Kernel card titles and Detailed Analysis headings must include
     the library name(s) in parentheses when present in the sub-agent findings. Omit when no
     library is identified. System-Level and Kernel Fusion titles do NOT include a library
     parenthetical.
+13. Multi-trace standalone (`multi_trace` scope): use the STANDALONE blocks and the MULTI_TRACE
+    blocks. Each job is one node. Impact scores are a percent of the combined time of all nodes
+    (`gpu_utilization.total_time_ms`). Compute and Kernel Fusion P-items carry their node. Fusion and
+    System sections cover the focus node only (`gpu_utilization.nodes[<focus_job>]`) and open with a
+    scope line.
+14. Numbers: never use thousands separators (`1996.42`, not `1,996.42`).
+15. Markers: put a space before the closing `-->` (`node=prefill -->`).
 -->
 
 <!-- === STANDALONE title === -->
@@ -103,6 +109,17 @@ section that has STANDALONE / COMPARATIVE variants. Delete the unused variant.
 | Exposed Communication % | W% |
 | Top Bottleneck Category | Category (V%) |
 
+<!-- === MULTI_TRACE Executive Summary: replaces the table above; the paragraph adds one sentence giving each node's time, compute % and idle %, from `gpu_utilization.nodes`. Total column = `gpu_utilization`; node columns = `gpu_utilization.nodes[<node>]`, in that order. A node's Top Bottleneck Category V% = its top `categories[].nodes[<node>].gpu_kernel_time_ms` / (`nodes[<node>].total_time_ms * nodes[<node>].computation_time_percent / 100`). Row labels appear only in this table. === -->
+| Metric | Total | <node_0> | <node_1> |
+|--------|-------|----------|----------|
+| Total Time | X ms | X_0 ms | X_1 ms |
+| Compute % | Y% | Y_0% | Y_1% |
+| Idle % | Z% | Z_0% | Z_1% |
+| Exposed Communication % | W% | W_0% | W_1% |
+| Top Bottleneck Category | Category (V%) | Category_0 (V_0%) | Category_1 (V_1%) |
+
+Total is the sum of node times, not wall time.
+
 <!-- === COMPARATIVE Executive Summary === -->
 [1 paragraph comparative overview: summarize which trace is faster overall, by how much, and the dominant gap categories]
 
@@ -135,6 +152,15 @@ One row per entry in `priority_data.json::priorities[]`, in array order (no mani
 | 1 | ... | ... | ... | ... | <!-- top-ops-row low=<impact_score_low> high=<impact_score_high> -->
 <!-- impact-end -->
 
+<!-- === MULTI_TRACE Top Operations: one table per node in `gpu_utilization.nodes` order, replacing the standalone table; skip a node with no rows. Rows are the `priorities[]` entries whose `node` is that node, in array order; `Rank` = `rank` (global). `Time (ms)` = `categories[].nodes[<node>].gpu_kernel_time_ms`; `Ops` = `categories[].nodes[<node>].ops_count`; `% of Compute Time` divides by `nodes[<node>].total_time_ms * nodes[<node>].computation_time_percent / 100`. The bold line sits outside the marker. === -->
+**<node_0>** (<gpu_utilization.nodes[node_0].total_time_ms> ms)
+
+<!-- impact-begin kind=top_ops node=<node_0> -->
+| Rank | Category | Time (ms) | % of Compute Time | Ops |
+|------|----------|-----------|-------------------|-----|
+| 1 | ... | ... | ... | ... | <!-- top-ops-row low=<impact_score_low> high=<impact_score_high> -->
+<!-- impact-end -->
+
 <!-- === COMPARATIVE Top Operations === -->
 `Trace 2 Time (ms)` = matching `manifest.trace2_ops_summary_by_category[]["total_direct_kernel_time_ms"]` where `"op category"` matches the row Category **case-insensitively**; use — if no match.
 `Difference (ms)` = Trace 2 Time − Trace 1 Time.
@@ -152,15 +178,20 @@ One row per entry in `priority_data.json::priorities[]`, in array order (no mani
 <!-- Icon mapping by PRIORITY NUMBER (not severity): P1=🔴, P2=🟡, P3+=🟢 -->
 <!-- One card per entry in priority_data.findings[] in array order. Title uses the entry's category and library; Action text is category-appropriate. Do NOT recommend "fuse the SDPA kernel" (already fused — defer upstream/downstream fusion to Kernel Fusion section). -->
 <!-- Skip categories that have empty category_findings[] in category_data/<cat>_metrics.json (no P-items for that category). -->
+<!-- The **Node** line and `node=` appear only when the finding has a node. -->
 <!-- Heuristic findings (priority_data.findings[i].estimate_method == "heuristic") carry a numeric estimated impact and sort by impact_score like any other compute finding; render per sub_agent_spec.md § Heuristic findings. -->
+<!-- === MULTI_TRACE: add this line above the first card === -->
+Ordered by estimated ms saved.
 
 ### 🔴 P1: <Brief Title> (<Library>)
+
+**Node**: <priority_data.findings[0].node>
 
 **Insight**: [1 sentence - what's wrong]
 
 **Action**: [1-2 sentences - category-appropriate: GEMM fusion/tile/library; SDPA tile/backend; elementwise fusion; etc.]
 
-<!-- impact-begin kind=p_item category=<priority_data.findings[0].category> low=<priority_data.findings[0].impact_score_low> mid=<priority_data.findings[0].impact_score> high=<priority_data.findings[0].impact_score_high> -->
+<!-- impact-begin kind=p_item category=<priority_data.findings[0].category> low=<priority_data.findings[0].impact_score_low> mid=<priority_data.findings[0].impact_score> high=<priority_data.findings[0].impact_score_high> node=<priority_data.findings[0].node> -->
 **Impact**: [impact_score: X.X, OR "Not quantifiable from trace data"]
 <!-- impact-end -->
 
@@ -174,7 +205,7 @@ One row per entry in `priority_data.json::priorities[]`, in array order (no mani
 
 **Action**: [1-2 sentences]
 
-<!-- impact-begin kind=p_item category=<priority_data.findings[1].category> low=<priority_data.findings[1].impact_score_low> mid=<priority_data.findings[1].impact_score> high=<priority_data.findings[1].impact_score_high> -->
+<!-- impact-begin kind=p_item category=<priority_data.findings[1].category> low=<priority_data.findings[1].impact_score_low> mid=<priority_data.findings[1].impact_score> high=<priority_data.findings[1].impact_score_high> node=<priority_data.findings[1].node> -->
 **Impact**: [impact_score: X.X, OR "Not quantifiable from trace data"]
 <!-- impact-end -->
 
@@ -188,7 +219,7 @@ One row per entry in `priority_data.json::priorities[]`, in array order (no mani
 
 **Action**: [1-2 sentences]
 
-<!-- impact-begin kind=p_item category=<priority_data.findings[2].category> low=<priority_data.findings[2].impact_score_low> mid=<priority_data.findings[2].impact_score> high=<priority_data.findings[2].impact_score_high> -->
+<!-- impact-begin kind=p_item category=<priority_data.findings[2].category> low=<priority_data.findings[2].impact_score_low> mid=<priority_data.findings[2].impact_score> high=<priority_data.findings[2].impact_score_high> node=<priority_data.findings[2].node> -->
 **Impact**: [impact_score: X.X, OR "Not quantifiable from trace data"]
 <!-- impact-end -->
 
@@ -200,23 +231,28 @@ One row per entry in `priority_data.json::priorities[]`, in array order (no mani
 
 ## Kernel Fusion Opportunities (Experimental)
 <!-- === STANDALONE Kernel Fusion === -->
-> **Note:** Kernel fusion analysis is experimental. impact_score projections estimate the recoverable fraction of E2E with 85% memory/compute pipeline overlap. Kernels without perf models use their measured trace time as-is. Candidates where fewer than 75% of kernels have perf models are not reported. Actual recoverable time depends on implementation feasibility and interaction effects.
+> **Note:** Kernel fusion analysis is experimental. impact_score projections estimate the recoverable fraction of E2E with <kernel_fusion_metrics.overlap_efficiency as a percent> memory/compute pipeline overlap. Kernels without perf models use their measured trace time as-is. Candidates are not reported unless at least 50% of their kernels have perf models (75% for candidates of 5 or more kernels). Actual recoverable time depends on implementation feasibility and interaction effects.
+<!-- === MULTI_TRACE scope line (after the note; the same line goes under the System-Level note) === -->
+Scope: node <focus_job> (trace `<focus trace>`, capture `<manifest.capture_folder or raw>`)
 <!-- === COMPARATIVE Kernel Fusion === -->
 > **Note:** Kernel fusion analysis is experimental.
 
 <!-- Populate from system_findings/kernel_fusion_findings.md if kernel_fusion category exists in manifest. -->
 <!-- Each finding uses Insight / Action / Impact / Confidence format, with Impact from kernel_fusion_metrics.json. -->
-<!-- P1/P2/P3+ ordered by confidence then kernel time. -->
-<!-- Icon mapping by CONFIDENCE (not priority number): 🔴 high → 🟡 medium → 🟢 low. -->
+<!-- P1/P2/P3+ ordered by impact_score, highest first. -->
+<!-- Icon mapping by PRIORITY NUMBER (not severity): P1=🔴, P2=🟡, P3+=🟢 -->
+<!-- The **Node** line and `node=` appear only when `kernel_fusion_metrics.node` is set. -->
 <!-- If no findings or kernel_fusion category not in manifest, replace the cards below with: "No kernel fusion opportunities detected." -->
 
 ### 🔴 P1: <Candidate Name>
+
+**Node**: <kernel_fusion_metrics.node>
 
 **Insight**: [1 sentence - what fusion pattern was detected]
 
 **Action**: [1-2 sentences - which kernels to fuse and how]
 
-<!-- impact-begin kind=p_item low=<kernel_fusion_metrics.impact_estimates[0].impact_score_low> mid=<kernel_fusion_metrics.impact_estimates[0].impact_score> high=<kernel_fusion_metrics.impact_estimates[0].impact_score_high> -->
+<!-- impact-begin kind=p_item low=<kernel_fusion_metrics.impact_estimates[0].impact_score_low> mid=<kernel_fusion_metrics.impact_estimates[0].impact_score> high=<kernel_fusion_metrics.impact_estimates[0].impact_score_high> node=<kernel_fusion_metrics.node> -->
 **Impact**: [impact_score: X.X (perf-model coverage Y/Z kernels)]
 <!-- impact-end -->
 
@@ -232,7 +268,7 @@ One row per entry in `priority_data.json::priorities[]`, in array order (no mani
 
 **Action**: [1-2 sentences]
 
-<!-- impact-begin kind=p_item low=<kernel_fusion_metrics.impact_estimates[1].impact_score_low> mid=<kernel_fusion_metrics.impact_estimates[1].impact_score> high=<kernel_fusion_metrics.impact_estimates[1].impact_score_high> -->
+<!-- impact-begin kind=p_item low=<kernel_fusion_metrics.impact_estimates[1].impact_score_low> mid=<kernel_fusion_metrics.impact_estimates[1].impact_score> high=<kernel_fusion_metrics.impact_estimates[1].impact_score_high> node=<kernel_fusion_metrics.node> -->
 **Impact**: [impact_score: X.X (perf-model coverage Y/Z kernels)]
 <!-- impact-end -->
 
@@ -248,7 +284,7 @@ One row per entry in `priority_data.json::priorities[]`, in array order (no mani
 
 **Action**: [1-2 sentences]
 
-<!-- impact-begin kind=p_item low=<kernel_fusion_metrics.impact_estimates[2].impact_score_low> mid=<kernel_fusion_metrics.impact_estimates[2].impact_score> high=<kernel_fusion_metrics.impact_estimates[2].impact_score_high> -->
+<!-- impact-begin kind=p_item low=<kernel_fusion_metrics.impact_estimates[2].impact_score_low> mid=<kernel_fusion_metrics.impact_estimates[2].impact_score> high=<kernel_fusion_metrics.impact_estimates[2].impact_score_high> node=<kernel_fusion_metrics.node> -->
 **Impact**: [impact_score: X.X (perf-model coverage Y/Z kernels)]
 <!-- impact-end -->
 
@@ -264,6 +300,7 @@ One row per entry in `priority_data.json::priorities[]`, in array order (no mani
 
 > **Note:** System-level analysis is exploratory. The patterns and recommendations below are under active development and may be refined as system-level analysis matures.
 
+<!-- === MULTI_TRACE: add the scope line from Kernel Fusion here === -->
 <!-- === COMPARATIVE system-level note === -->
 <!-- In comparative mode, add this note immediately after the blockquote above: -->
 <!-- > **Comparative Note:** System-level analysis is performed on the primary trace (Trace 1) only. Cross-trace system-level comparison is not yet supported. -->
@@ -271,28 +308,23 @@ One row per entry in `priority_data.json::priorities[]`, in array order (no mani
 Findings from system-level analysis (GPU utilization, memory transfer patterns,
 communication/compute overlap). These affect the GPU pipeline as a whole.
 
-<!-- CONDITIONAL: If NO actionable system-level issues found (idle <= 15% and all multi-kernel assessments flagged: false), use Template A. -->
-<!-- Otherwise, number priorities sequentially: CPU/Idle first (if idle > 15%), then multi-kernel issues by severity. -->
 <!-- Icon mapping by PRIORITY NUMBER (not severity): P1=🔴, P2=🟡, P3+=🟢 -->
-<!-- Title format: Descriptive name only. -->
-<!-- System-level recommendations always include **Impact**: "Not quantifiable from trace data" with null markers. -->
-<!-- De-dup rule: If CPU/Idle and Multi-Kernel propose the same mechanism/action, keep one merged system card with combined evidence (do not render two near-duplicate cards). -->
+<!-- Title format: the entry's title verbatim. -->
+<!-- System-level recommendations always include **Impact**: "Not quantifiable from trace data" with null markers; `node=` appears only when the findings card's marker carries it. -->
 
-<!-- === TEMPLATE A: No actionable system-level issues === -->
-<!-- Use this when idle <= 15% and all multi-kernel assessments have flagged: false -->
+<!-- === TEMPLATE A: Empty system_findings, every invoked analyzer succeeded === -->
 
 ✅ No system-level bottlenecks detected. GPU activity breakdown shows X% computation, with negligible memcpy and communication overhead.
 
-<!-- === TEMPLATE B: Actionable issues found === -->
-<!-- Use this when idle > 15% or at least one multi-kernel assessment has flagged: true -->
+<!-- === TEMPLATE B: One or more system_findings entries === -->
 
-### 🔴 P1: <CPU/Idle Title OR Multi-Kernel Issue Title>
+### 🔴 P1: <title>
 
 **Insight**: [1-2 sentences - what's wrong]
 
 **Action**: [1-2 sentences - what to do]
 
-<!-- impact-begin kind=p_item low=null mid=null high=null -->
+<!-- impact-begin kind=p_item low=null mid=null high=null node=<node> -->
 **Impact**: Not quantifiable from trace data
 <!-- impact-end -->
 
@@ -300,13 +332,13 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 ---
 
-### 🟡 P2: <Multi-Kernel Issue Title>
+### 🟡 P2: <title>
 
 **Insight**: [1 sentence - what's wrong]
 
 **Action**: [1-2 sentences - what to do]
 
-<!-- impact-begin kind=p_item low=null mid=null high=null -->
+<!-- impact-begin kind=p_item low=null mid=null high=null node=<node> -->
 **Impact**: Not quantifiable from trace data
 <!-- impact-end -->
 
@@ -314,13 +346,13 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 ---
 
-### 🟢 P3: <Next Multi-Kernel Issue>
+### 🟢 P3: <title>
 
 **Insight**: [1 sentence]
 
 **Action**: [1-2 sentences]
 
-<!-- impact-begin kind=p_item low=null mid=null high=null -->
+<!-- impact-begin kind=p_item low=null mid=null high=null node=<node> -->
 **Impact**: Not quantifiable from trace data
 <!-- impact-end -->
 
@@ -334,7 +366,7 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 <!-- Paste reasoning blocks from sub-agent findings, augment headings with P-numbers, icons, and HTML anchors. Everything else should be copied verbatim-->
 <!-- Detailed Analysis labels per rule 9 — do not use these labels in optimization cards above -->
-<!-- Impact estimate bullets are rendered by each sub-agent from metadata/*.json → impact_estimates (same source as card Impact). -->
+<!-- Impact estimate bullets are rendered by each sub-agent from category_data/*_metrics.json → impact_estimates (same source as card Impact). -->
 <!-- MARKER CONTRACT: Every #### P<N>: heading in Detailed Analysis MUST be
      preceded by  <!-- reasoning-candidate tier=<TIER> rank=<R> --> where TIER = compute | fusion | system (matching the ### subsection), R= 1, 2, 3, … incrementing per tier (rank=1 for first item, rank=2 for second, etc.). -->
 
@@ -345,11 +377,12 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 <!-- Each block has an HTML anchor: <a id="detailed-analysis-compute-pN"></a> -->
 <!-- If the Compute Kernel Optimizations section rendered the no-opportunities summary, mirror it here: "✅ No compute kernel optimization opportunities identified. All categories are within target performance bounds." -->
 
-<!-- === STANDALONE Compute Kernel Data table === Use this schema for standalone mode ONLY. Use these 10 exact columns (must match sub_agent_spec.md § Operations Table Schema) -->
+<!-- === STANDALONE Compute Kernel Data table === Use this schema for standalone mode ONLY. Use these 10 exact columns (must match sub_agent_spec.md § Operations Table Schema). MULTI_TRACE: the sixth header is `% of Node`. -->
 
 <a id="detailed-analysis-compute-p1"></a>
 <!-- reasoning-candidate tier=compute rank=1 -->
 #### 🔴 P1: <Brief Title> (<Library>)
+**Node**: <priority_data.findings[0].node>
 **Identification:**
 **Data:**
 
@@ -378,7 +411,7 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 **Reasoning for Slowdown:** [2-3 sentences - Why Trace 1 is slower than Trace 2 for these operations as the traces show. No micro-architecture speculation.]
 **Resolution:** [1-2 sentences - Why the suggested optimization helps close the gap — not merely restating what to do.]
-**Impact estimate:** [Rendered from metadata → impact_estimates]
+**Impact estimate:** [Rendered from category_data/*_metrics.json → impact_estimates]
 
 <a id="detailed-analysis-compute-p2"></a>
 <!-- reasoning-candidate tier=compute rank=2 -->
@@ -400,51 +433,51 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 ### Kernel Fusion Insights
 <!-- === STANDALONE Kernel Fusion === -->
-> **Note:** Kernel fusion analysis is experimental. impact_score projections estimate the recoverable fraction of E2E with 85% memory/compute pipeline overlap. Kernels without perf models use their measured trace time as-is. Actual recoverable time depends on implementation feasibility and interaction effects.
+> **Note:** Kernel fusion analysis is experimental. impact_score projections estimate the recoverable fraction of E2E with <kernel_fusion_metrics.overlap_efficiency as a percent> memory/compute pipeline overlap. Kernels without perf models use their measured trace time as-is. Actual recoverable time depends on implementation feasibility and interaction effects.
 <!-- === COMPARATIVE Kernel Fusion === -->
 > **Note:** Kernel fusion analysis is experimental.
 
-<!-- Paste reasoning blocks from kernel_fusion_findings.md, ordered by confidence then kernel time (matching card order). -->
-<!-- Each block uses three required labels: **Identification:**, **Data:**, **Impact estimate:** -->
+<!-- Paste reasoning blocks from kernel_fusion_findings.md, ordered by impact_score, highest first (matching card order). -->
+<!-- Comparative: replace the single Data table with a **Trace 1** (E2E <ms> ms) table and a **Trace 2** (E2E <ms> ms) table. -->
 <!-- If kernel_fusion category is not in the manifest or findings are empty, show "No fusion impact estimates available." -->
 
 <a id="detailed-analysis-fusion-P1"></a>
 <!-- reasoning-candidate tier=fusion rank=1 -->
-#### 🔴/🟡/🟢 P1: <Candidate Name> (<time_ms> ms, <instance_count> instances)
+#### 🔴 P1: <Candidate Name>
 
 **Identification:**
 
-**Data:**
+**Data:** <!-- MULTI_TRACE: the sixth header is `% of Node` -->
 
-| Kernel | Type | Duration (us) | Perf model |
-|--------|------|--------------|------------|
-| <kernel name (truncated to ~60 chars)> | <type> | X.X | Yes/No |
+| Operation | Args | Kernel Path | Kernel Name | Time (ms) | %E2E | Count | FLOPS/Byte | Efficiency | Bound |
+|---|---|---|---|---|---|---|---|---|---|
+| <op> | <args> | <kernel path> | <kernel name (truncated)> | X.XXX | X.XX | N | X.XX | X.XX% of Y TFLOPS/TB/s | compute/memory-bound |
+
+**Resolution:**
 
 **Impact estimate:**
 
 <a id="detailed-analysis-fusion-P2"></a>
 <!-- reasoning-candidate tier=fusion rank=2 -->
-#### 🔴/🟡/🟢 P2: <Candidate Name> (<time_ms> ms, <instance_count> instances)
-
+#### 🟡 P2: <Candidate Name>
 **Identification:**
-
 **Data:**
-
-| Kernel | Type | Duration (us) | Perf model |
-|--------|------|--------------|------------|
-| <kernel name (truncated to ~60 chars)> | <type> | X.X | Yes/No |
-
+**Resolution:**
 **Impact estimate:**
 
 <a id="detailed-analysis-fusion-P3"></a>
 <!-- reasoning-candidate tier=fusion rank=3 -->
-#### 🔴/🟡/🟢 P3: <Candidate Name> (<time_ms> ms, <instance_count> instances)
+#### 🟢 P3: <Candidate Name>
+**Identification:**
+**Data:**
+**Resolution:**
+**Impact estimate:**
 
-*Repeat the same Identification + Data + Impact estimate format for each candidate, with anchors `detailed-analysis-fusion-PN`.*
+<!-- Repeat for P4 onward with anchor detailed-analysis-fusion-PN. -->
 
 ### System-Level Insights
 
-<!-- One #### 🔴/🟡/🟢 Pn: <title> block per promoted system P-item, in priority order. -->
+<!-- One #### 🔴/🟡/🟢 Pn: <title> block per System-Level card, same order. Its marker is `tier=system rank=<P-number>`. -->
 <!-- Each block has an HTML anchor: <a id="detailed-analysis-system-pN"></a> -->
 <!-- System-level detailed analysis uses the same format for both standalone and comparative modes.
      In comparative mode, system-level analysis covers Trace 1 () only. -->
@@ -452,7 +485,7 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 <a id="detailed-analysis-system-p1"></a>
 <!-- reasoning-candidate tier=system rank=1 -->
-#### 🔴 P1: <Brief Title>
+#### 🔴 P1: <title>
 **Identification:**
 **Data:**
 **Reasoning for Slowdown:**
@@ -461,7 +494,7 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 <a id="detailed-analysis-system-p2"></a>
 <!-- reasoning-candidate tier=system rank=2 -->
-#### 🟡 P2: <Brief Title>
+#### 🟡 P2: <title>
 **Identification:**
 **Data:**
 **Reasoning for Slowdown:**
@@ -470,7 +503,7 @@ communication/compute overlap). These affect the GPU pipeline as a whole.
 
 <a id="detailed-analysis-system-p3"></a>
 <!-- reasoning-candidate tier=system rank=3 -->
-#### 🟢 P3: <Brief Title>
+#### 🟢 P3: <title>
 **Identification:**
 **Data:**
 **Reasoning for Slowdown:**

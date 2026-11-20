@@ -60,5 +60,6 @@ python3 -m unittest discover -s .github/scripts -p 'test_orchestrai*.py'
 "${SKILLSCOPE[@]}" structural "${SKILLSCOPE_ARGS[@]}"
 uv run .github/scripts/federate_skills.py --check-catalog
 uv run .github/scripts/validate_marketplace.py
+uv run .github/scripts/generate_claude_plugin.py --check
 uv run .github/scripts/generate_cursor_marketplace.py --check
 uv run .github/scripts/generate_codex_plugin.py --check

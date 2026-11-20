@@ -24,7 +24,10 @@ external_projects_current_project = "amd-skills"
 extensions = [
     "rocm_docs",
     "sphinx_design",
+    "sphinxcontrib.mermaid",
 ]
+# Render ```mermaid fences (as written for GitHub) as diagrams.
+myst_fence_as_directive = ["mermaid"]
 exclude_patterns = []
 
 # -- Sphinx setup ----------------------------------------------------------

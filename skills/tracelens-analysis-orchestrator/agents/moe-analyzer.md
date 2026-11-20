@@ -6,7 +6,7 @@ See LICENSE for license information.
 
 ---
 name: moe-analyzer
-description: Analyze MoE (Mixture of Experts) fused and unfused operations for performance bottlenecks. Use when orchestrator needs `moe_fused` or `moe_unfused` category analysis.
+description: Analyze MoE (Mixture of Experts) fused and unfused operations for performance bottlenecks. Use when orchestrator needs `moe_fused`, `moe_unfused` or `moe_aux` category analysis.
 model: claude-opus-4-7-high
 ---
 
@@ -22,13 +22,12 @@ When invoked by the orchestrator, you will receive the following context:
 
 **Required context provided by orchestrator:**
 - `output_dir`: Base analysis output directory
-- `cat`: MoE bucket being analyzed — one of `moe_fused` or `moe_unfused`. Substitute `<cat>` everywhere below before executing.
+- `cat`: MoE bucket being analyzed, one of `moe_fused`, `moe_unfused` or `moe_aux`. Substitute `<cat>` everywhere below before executing.
 - `prefix`: Command prefix from `<output_dir>/cache/cmd_prefix.txt` — contains a template with `{CMD}` placeholder; substitute `{CMD}` with the actual command
 - `comparison_scope`: `standalone` (default) or `comparative`
 
 **Input files (pre-computed by orchestrator, if MoE exists):**
 1. `<output_dir>/category_data/<cat>_ops.csv` - Filtered MoE operations (includes `call_stack` column for architecture context)
-2. `<output_dir>/metadata/<cat>_metadata.json` - Hardware specs
 
 **Output file you must write:**
 - `<output_dir>/category_findings/<cat>_findings.md`
@@ -65,7 +64,7 @@ Use vendor-agnostic terminology:
 <prefix> python3 \
   TraceLens/Agent/Analysis/category_analyses/moe_analysis.py \
   --output-dir <output_dir> \
-  --comparison_scope <comparison_scope>
+  --comparison_scope <comparison_scope> \
   --category <cat>
 ```
 
@@ -127,6 +126,11 @@ Vendor/library/framework-agnostic. Pick the row matching `category_findings[i].b
 ### Already-fused operations (`moe_fused` only)
 - **Reasoning:** Fused MoE kernels combine routing + FC1 + activation + FC2 in a single kernel launch; fusion opportunities are limited.
 - **Focus:** The roofline gap (efficiency vs. peak), not further fusion.
+
+### Routing and sort overhead (`moe_aux` only)
+- **Symptoms:** Sort, align, top-k and quant-sort kernels (`moe_sorting`, `topk_softmax`, `grouped_topk`, `*_quant_moe_sort`).
+- **Reasoning:** This is routing overhead, not expert compute. The tensors are small, so low bandwidth efficiency is launch and latency dominated and kernel tuning will not move it. The fused MoE path absorbs sort, align and top-k.
+- **Algorithmic:** Use the fused MoE path, or a fused quant-sort kernel that quantizes activations while sorting them into expert order.
 
 ### No MoE category in trace
 - **Reasoning:** Model doesn't use Mixture of Experts.

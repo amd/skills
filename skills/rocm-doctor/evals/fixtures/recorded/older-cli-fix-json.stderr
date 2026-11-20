@@ -1,0 +1,7 @@
+error: unexpected argument '--json' found
+
+  tip: to pass '--json' as a value, use '-- --json'
+
+Usage: rocm fix [OPTIONS] [FIX_ID]
+
+For more information, try '--help'.

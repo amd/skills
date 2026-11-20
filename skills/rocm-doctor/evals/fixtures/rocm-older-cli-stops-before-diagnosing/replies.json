@@ -1,0 +1,22 @@
+{
+  "version": {
+    "stdout": "rocm 0.1.0\n",
+    "stderr": "",
+    "rc": 0
+  },
+  "fix_json": {
+    "stdout": "",
+    "stderr": "error: unexpected argument '--json' found\n\n  tip: to pass '--json' as a value, use '-- --json'\n\nUsage: rocm fix [OPTIONS] [FIX_ID]\n\nFor more information, try '--help'.\n",
+    "rc": 2
+  },
+  "diagnose_json": {
+    "stdout": "{\n  \"matched\": [\n    {\n      \"id\": \"fix-1-arch\",\n      \"title\": \"GPU gfx target not in framework's build arch list\",\n      \"score\": 45,\n      \"evidence\": [\n        \"error mentions hipErrorNoBinaryForGpu\"\n      ],\n      \"fix\": {\n        \"summary\": \"Reinstall the framework from a wheel index that includes this GPU's gfx target. Use HSA_OVERRIDE_GFX_VERSION ONLY as a temporary workaround when no native wheel exists.\",\n        \"commands\": [\n          \"# Recommended: a PyTorch ROCm nightly, which often carries kernels a\",\n          \"# release has not shipped yet. Pick the nightly for the ROCm major you\",\n          \"# have, not an older one.\",\n          \"pip uninstall -y torch torchvision torchaudio\",\n          \"pip install --pre torch torchvision torchaudio \\\\\\n  --index-url https://download.pytorch.org/whl/nightly/rocm7.14\",\n          \"# llama.cpp: rebuild with AMDGPU_TARGETS set to this GPU's gfx.\",\n          \"# cmake -B build -DGGML_HIP=ON -DAMDGPU_TARGETS=<gfx_target>\"\n        ],\n        \"needs_sudo\": false,\n        \"needs_reboot\": false,\n        \"needs_relogin\": false,\n        \"fix_id\": \"fix-1-arch\",\n        \"auto_applicable\": false,\n        \"class\": \"print-only\",\n        \"notes\": [\n          \"TheRock (rocm/TheRock) ships nightly per-gfx wheels and is the preferred fallback when the official pytorch wheel index does not yet cover your gfx target.\"\n        ],\n        \"verify\": \"python -c \\\"import torch; print(torch.cuda.is_available(), torch.cuda.get_arch_list())\\\"\"\n      }\n    }\n  ],\n  \"has_match\": false,\n  \"min_score_for_match\": 50,\n  \"high_confidence_threshold\": 75,\n  \"route_when_no_match\": {\n    \"target\": \"rocm-core\",\n    \"url\": \"https://github.com/ROCm/ROCm/issues\"\n  },\n  \"out_of_scope\": null,\n  \"model\": null\n}\n",
+    "stderr": "",
+    "rc": 0
+  },
+  "diagnose_text": {
+    "stdout": "#1 (fix-1-arch) [WEAK score=45/100] GPU gfx target not in framework's build arch list\n   id: fix-1-arch\n   - error mentions hipErrorNoBinaryForGpu\n   plan: Reinstall the framework from a wheel index that includes this GPU's gfx target. Use HSA_OVERRIDE_GFX_VERSION ONLY as a temporary workaround when no native wheel exists.\n     $ # Recommended: a PyTorch ROCm nightly, which often carries kernels a\n     $ # release has not shipped yet. Pick the nightly for the ROCm major you\n     $ # have, not an older one.\n     $ pip uninstall -y torch torchvision torchaudio\n     $ pip install --pre torch torchvision torchaudio \\\n  --index-url https://download.pytorch.org/whl/nightly/rocm7.14\n     $ # llama.cpp: rebuild with AMDGPU_TARGETS set to this GPU's gfx.\n     $ # cmake -B build -DGGML_HIP=ON -DAMDGPU_TARGETS=<gfx_target>\n   flags: manual only (`rocm fix` will NOT run it automatically)\n   note: TheRock (rocm/TheRock) ships nightly per-gfx wheels and is the preferred fallback when the official pytorch wheel index does not yet cover your gfx target.\n   verify after fix: python -c \"import torch; print(torch.cuda.is_available(), torch.cuda.get_arch_list())\"\n   apply with: rocm fix fix-1-arch\n\nHighest-scoring match is below the HIGH_CONFIDENCE threshold. Confirm one more piece of evidence before applying.\nWhen you are ready, run `rocm fix fix-1-arch` (the highest-scoring match), or use the `apply with:` line of whichever cause fits.\n",
+    "stderr": "",
+    "rc": 0
+  }
+}

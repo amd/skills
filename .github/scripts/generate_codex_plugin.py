@@ -68,6 +68,13 @@ POLICY = {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}
 # relative to the plugin root (the repo root, since source.path is "./"), per
 # the guide's path rules.
 LOGO = "./assets/amd.png"
+# Listing URLs the OpenAI plugin directory requires before submission
+# (https://developers.openai.com/plugins/deploy/submission#listing-metadata).
+# Terms point at the repo license because the bundle ships under MIT, not an
+# AMD software EULA.
+SUPPORT_URL = "https://github.com/amd/skills/issues"
+PRIVACY_POLICY_URL = "https://www.amd.com/en/legal/privacy.html"
+TERMS_OF_SERVICE_URL = "https://github.com/amd/skills/blob/main/LICENSE"
 # Starter prompts Codex surfaces on the install surface, one per published
 # focus area (server inference, local image gen, local-AI app integration).
 DEFAULT_PROMPT = [
@@ -163,6 +170,9 @@ def build_codex_plugin(metadata: dict, bundle: dict) -> dict:
             "category": CATEGORY,
             "capabilities": list(CAPABILITIES),
             "websiteURL": metadata.get("homepage"),
+            "supportURL": SUPPORT_URL,
+            "privacyPolicyURL": PRIVACY_POLICY_URL,
+            "termsOfServiceURL": TERMS_OF_SERVICE_URL,
             "brandColor": metadata.get("brandColor"),
             "logo": LOGO,
             "composerIcon": LOGO,

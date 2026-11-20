@@ -27,36 +27,22 @@ set -uo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(pwd)}"
 PARTIAL_DIR="$REPO_ROOT/TraceLens/Agent/Analysis/skills/analysis-orchestrator/evals/partial_tests"
+CASES_CSV="$PARTIAL_DIR/partial_test_cases.csv"
 GOLD_FILENAME="semantic_purity_gold_diff_stats.csv"
 ARCH_JSON="${ARCH_JSON:-$REPO_ROOT/TraceLens/Agent/Analysis/utils/arch/MI300X.json}"
 PERF_CLI="${PERF_CLI:-TraceLens_generate_perf_report_pytorch_inference}"
 
-# Original full-capture source locations (repo-relative). Override via env if
-# the traces move. Format: "<decode_a> <cap_a> <decode_b> <cap_b>".
-SEM_ROOT="tests/traces/semantic"
-declare -A SOURCES=(
-    [semantic_purity_deepseek_r1]="\
-$SEM_ROOT/deepseek_R1/Deepseek-R1-Distill-LLama-8B/MI300/torch_trace/1782841132.2905657-TP-0-DECODE.trace.json.gz \
-$SEM_ROOT/deepseek_R1/Deepseek-R1-Distill-LLama-8B/MI300/torch_trace/capture_traces \
-$SEM_ROOT/deepseek_R1/Deepseek-R1-Distill-LLama-8B/B300/torch_trace/1782843274.7730265-TP-0-DECODE.trace.json.gz \
-$SEM_ROOT/deepseek_R1/Deepseek-R1-Distill-LLama-8B/B300/torch_trace/capture_traces"
-    [semantic_purity_qwen3_30b_a3b]="\
-$SEM_ROOT/qwen3_30b_a3b/Qwen3-30B-A3B/MI300/torch_trace/1782859605.7198358-TP-0-DECODE.trace.json.gz \
-$SEM_ROOT/qwen3_30b_a3b/Qwen3-30B-A3B/MI300/torch_trace/capture_traces \
-$SEM_ROOT/qwen3_30b_a3b/Qwen3-30B-A3B/B300/torch_trace/1782799835.6885648-TP-0-DECODE.trace.json.gz \
-$SEM_ROOT/qwen3_30b_a3b/Qwen3-30B-A3B/B300/torch_trace/capture_traces"
-)
-
 generate_one() {
     local id="$1"
-    local spec="${SOURCES[$id]:-}"
-    if [[ -z "$spec" ]]; then
+    local trace_a trace_b
+    trace_a="$(awk -F, -v id="$id" 'NR>1 && $1==id {print $3; exit}' "$CASES_CSV")"
+    trace_b="$(awk -F, -v id="$id" 'NR>1 && $1==id {print $4; exit}' "$CASES_CSV")"
+    if [[ -z "$trace_a" || -z "$trace_b" ]]; then
         echo "ERROR: unknown test id '$id' (no source mapping)" >&2
         return 1
     fi
-    # shellcheck disable=SC2086
-    set -- $spec
-    local decode_a="$REPO_ROOT/$1" cap_a="$REPO_ROOT/$2" decode_b="$REPO_ROOT/$3" cap_b="$REPO_ROOT/$4"
+    local decode_a="$REPO_ROOT/$trace_a" decode_b="$REPO_ROOT/$trace_b"
+    local cap_a="$(dirname "$decode_a")/capture_traces" cap_b="$(dirname "$decode_b")/capture_traces"
 
     for p in "$decode_a" "$cap_a" "$decode_b" "$cap_b" "$ARCH_JSON"; do
         [[ -e "$p" ]] || { echo "ERROR [$id]: missing source $p" >&2; return 1; }
@@ -95,7 +81,7 @@ generate_one() {
 
 ids=("$@")
 if [[ ${#ids[@]} -eq 0 ]]; then
-    ids=("${!SOURCES[@]}")
+    mapfile -t ids < <(awk -F, 'NR>1 {print $1}' "$CASES_CSV")
 fi
 
 rc=0

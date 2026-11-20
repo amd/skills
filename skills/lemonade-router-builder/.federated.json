@@ -2,9 +2,9 @@
   "source": "lemonade-sdk-skills",
   "repo": "lemonade-sdk/skills",
   "ref": "main",
-  "commit": "17e5fc7644bb5dd431d2b6663c9d72635a1adb59",
+  "commit": "155eedce8dc2eebfbc56c7f7f67ec6a26849c3d8",
   "path": "skills/lemonade-router-builder",
   "license": "Apache-2.0",
-  "content_hash": "e48046b6559eac5946efabcdb4c0e752e0417e7e75ae822faa37f4d34c373cc2",
-  "imported_at": "2026-10-07T00:51:44Z"
+  "content_hash": "aef421822a23589573d47108739a401fedbe73aa9dcbb569c1bd8b9ccda924fb",
+  "imported_at": "2026-11-10T06:30:53Z"
 }

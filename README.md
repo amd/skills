@@ -33,7 +33,7 @@ Install AMD Skills with the [`skills` CLI](https://github.com/vercel-labs/skills
 npx skills add amd/skills
 ```
 
-This prompts you to pick a skill and an install destination. To install a specific skill into specific agents, pass `--skill` with one or more `--agent` flags (e.g. `cursor`, `claude-code`, `codex`):
+This prompts you to pick a skill and an install destination. To install a specific skill into specific agents, pass `--skill` with one or more `--agent` flags (for example, `cursor`, `claude-code`, or `codex`):
 
 ```bash
 npx skills add amd/skills --skill local-ai-use --agent claude-code
@@ -60,7 +60,9 @@ For hands-on, step-by-step guides that show a skill in action, see the [walkthro
 
 ## The catalog
 
-The initial catalog is organized into three focus areas, spanning the full stack from client to cloud. This catalog is expected to grow significantly as more skills land.
+The catalog is organized into three focus areas that span the full stack, from client to cloud. Expect it to grow as more skills land.
+
+The **Source** column shows where each skill is maintained. Most skills are federated: the product team maintains the skill in its own repository, and `amd/skills` vendors a copy. Skills marked *in-repo* are maintained directly in `amd/skills`.
 
 ### Client-native
 
@@ -78,10 +80,10 @@ Cross-stack skills, from client to cloud.
 | Skill | What it does | Source |
 | --- | --- | --- |
 | [`rocm-doctor`](https://github.com/amd/skills/blob/main/skills/rocm-doctor/SKILL.md) | Diagnose and fix common ROCm, HIP, PyTorch, and llama.cpp failures and misconfigurations on AMD GPUs. | [rocm-cli](https://github.com/ROCm/rocm-cli) |
+| [`moat-cuda-to-rocm`](https://github.com/amd/skills/blob/main/skills/moat-cuda-to-rocm/SKILL.md) | Add a ROCm/HIP backend to a CUDA project so it runs on AMD GPUs while the CUDA build keeps working side by side. | [moat](https://github.com/AMD-Ecosystem/moat) |
 | [`lemonade-router-builder`](https://github.com/amd/skills/blob/main/skills/lemonade-router-builder/SKILL.md) | Set up a Lemonade model router that handles requests based on content, sensitivity, or required capabilities. | [Lemonade](https://github.com/lemonade-sdk/skills) |
 | [`quark-install`](https://github.com/amd/skills/blob/main/skills/quark-install/SKILL.md) | Install or verify AMD Quark with an accelerator-matched PyTorch, from PyPI, a native-wheel index, a local wheel, or source, then verify imports, kernels, and `quark-cli`. | [Quark](https://github.com/amd/Quark) |
 | [`quark-torch-llm-ptq`](https://github.com/amd/skills/blob/main/skills/quark-torch-llm-ptq/SKILL.md) | Quantize PyTorch / Hugging Face LLMs with AMD Quark post-training quantization: inspect the model, pick a scheme (FP8, INT4, and more), and produce a verified quantized model. | [Quark](https://github.com/amd/Quark) |
-| `hrr-replay-analysis` | Record, replay, and analyze GPU workload behavior on ROCm across AMD Instinct, Radeon, and Ryzen hardware using HIP Record and Replay archives. | _planned_ |
 
 ### Server-native
 
@@ -89,11 +91,23 @@ Run and optimize on AMD Instinct.
 
 | Skill | What it does | Source |
 | --- | --- | --- |
-| [`serving-llms-on-instinct`](https://github.com/amd/skills/blob/main/skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end-to-end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine or backend selection in later phases. | in-repo |
-| [`serving-llms-on-epyc`](https://github.com/amd/skills/blob/main/skills/serving-llms-on-epyc/SKILL.md) | Serve LLMs on AMD EPYC CPUs with vLLM and zentorch, in a container (Docker or Podman) or conda. Handles CPU detection, runtime and env validation, vLLM model-support and RAM-fit checks, hardware-sized threads and KV, launch, and health verification. Single instance; reports and stops on failure. | in-repo |
+| [`serving-llms-on-instinct`](https://github.com/amd/skills/blob/main/skills/serving-llms-on-instinct/SKILL.md) | Deploy LLM inference on AMD Instinct GPUs end to end: detect hardware (or onboard via AMD Developer Cloud), validate model fit, apply the right vLLM recipe, and launch a benchmarked endpoint. SGLang and engine or backend selection in later phases. | in-repo |
+| [`serving-llms-on-epyc`](https://github.com/amd/skills/blob/main/skills/serving-llms-on-epyc/SKILL.md) | Serve LLMs on AMD EPYC CPUs with vLLM and zentorch, in a container (Docker or Podman) or conda. Handles CPU detection, runtime and env validation, vLLM model-support and RAM-fit checks, hardware-sized threads and KV, launch, and health verification. Single instance; reports and stops on failure. | [ZenDNN-pytorch-plugin](https://github.com/amd/ZenDNN-pytorch-plugin) |
 | [`hyperloom-workload-optimizer`](https://github.com/amd/skills/blob/main/skills/hyperloom-workload-optimizer/SKILL.md) | Set up Hyperloom and autonomously optimize end-to-end LLM inference throughput on AMD Instinct GPUs, reporting a validated gain. | [Hyperloom](https://github.com/AMD-AGI/Hyperloom) |
 | [`magpie-kernel-evaluator`](https://github.com/amd/skills/blob/main/skills/magpie-kernel-evaluator/SKILL.md) | Evaluate GPU kernel correctness and performance, compare kernel implementations, and benchmark vLLM or SGLang inference with profiling, TraceLens, and torch-trace gap analysis. | [Magpie](https://github.com/AMD-AGI/Magpie) |
 | [`tracelens-analysis-orchestrator`](https://github.com/amd/skills/blob/main/skills/tracelens-analysis-orchestrator/SKILL.md) | Orchestrate modular PyTorch profiler trace analysis with TraceLens: generate perf reports, run system-level and compute-kernel subagents in parallel, and write a prioritized stakeholder report. | [TraceLens](https://github.com/AMD-AGI/TraceLens) |
+| [`rocprofiler-pc-sampling`](https://github.com/amd/skills/blob/main/skills/rocprofiler-pc-sampling/SKILL.md) | Profile a GPU application with rocprofv3 program counter (PC) sampling, then analyze the samples to surface hotspots and stall reasons. | [rocprofiler-sdk](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk) |
+| [`rocprof-compute-kernel-bottleneck`](https://github.com/amd/skills/blob/main/skills/rocprof-compute-kernel-bottleneck/SKILL.md) | Profile a HIP/ROCm application with rocprof-compute to find which kernel is slow and why: memory throughput, compute efficiency, occupancy, and scheduler stalls. | [rocprofiler-compute](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute) |
+| [`rocprof-compute-speed-of-light`](https://github.com/amd/skills/blob/main/skills/rocprof-compute-speed-of-light/SKILL.md) | Read the rocprof-compute Speed-of-Light panel to show how close a kernel runs to hardware peak compute, bandwidth, and utilization. | [rocprofiler-compute](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute) |
+| [`rocprof-compute-roofline`](https://github.com/amd/skills/blob/main/skills/rocprof-compute-roofline/SKILL.md) | Place a kernel on a rocprof-compute roofline to tell whether it is compute-bound or memory-bound and how much headroom is left. | [rocprofiler-compute](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute) |
+| [`rocprof-compute-memory`](https://github.com/amd/skills/blob/main/skills/rocprof-compute-memory/SKILL.md) | Analyze the GPU memory hierarchy with rocprof-compute: vL1D and L2 caches, LDS bank conflicts, Infinity Fabric, and HBM traffic. | [rocprofiler-compute](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute) |
+| [`rocprof-compute-pc-sampling`](https://github.com/amd/skills/blob/main/skills/rocprof-compute-pc-sampling/SKILL.md) | Use rocprof-compute PC sampling to find the hot instructions inside a kernel and why wavefronts stall there, with ISA and source-line attribution. | [rocprofiler-compute](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute) |
+| [`rocprof-compute-torch-trace`](https://github.com/amd/skills/blob/main/skills/rocprof-compute-torch-trace/SKILL.md) | Map GPU kernel counters back to the PyTorch or Triton operators that launched them, using rocprof-compute ML API tracing. | [rocprofiler-compute](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute) |
+| [`rocprofiler-systems-choosing-a-profiling-preset`](https://github.com/amd/skills/blob/main/skills/rocprofiler-systems-choosing-a-profiling-preset/SKILL.md) | Pick the right rocprofiler-systems profiling preset for a workload and goal (GPU kernels, MPI, OpenMP, AI/ML training, and more), and return a ready-to-run command. | [rocprofiler-systems](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems) |
+| [`rocprofiler-systems-discovering-profiling-options`](https://github.com/amd/skills/blob/main/skills/rocprofiler-systems-discovering-profiling-options/SKILL.md) | Discover rocprofiler-systems settings, hardware counters, ROCm API tracing domains, and GPU metrics, and how to configure them. | [rocprofiler-systems](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems) |
+| [`rocprofiler-systems-instrumenting-binaries`](https://github.com/amd/skills/blob/main/skills/rocprofiler-systems-instrumenting-binaries/SKILL.md) | Instrument programs and libraries with `rocprof-sys-instrument`: choose runtime instrumentation or binary rewrite, filter functions and modules, preview with a dry run, and debug missing or noisy trace entries. | [rocprofiler-systems](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems) |
+| [`flydsl-kernel-authoring`](https://github.com/amd/skills/blob/main/skills/flydsl-kernel-authoring/SKILL.md) | Write, review, and understand FlyDSL GPU kernels for AMD GPUs: layout algebra, tiled copy and MMA, LDS allocation, and autotuning. | [FlyDSL](https://github.com/ROCm/FlyDSL) |
+| [`flydsl-kernel-trace-analysis`](https://github.com/amd/skills/blob/main/skills/flydsl-kernel-trace-analysis/SKILL.md) | Collect rocprofv3 instruction-level traces and counters for a GPU kernel, map the top stall hotspots back to source lines, and produce an optimization plan. | [FlyDSL](https://github.com/ROCm/FlyDSL) |
 
 ## What is a skill?
 
@@ -123,23 +137,23 @@ Skills earn their keep on repeated, opinionated workflows, exactly where the AMD
 
 The AMD stack is large and moves fast. ROCm, HIP, Ryzen AI, and framework integrations each have their own team, release cadence, and validation matrix. So skills here are **federated**: each skill is owned and versioned by the team that owns the product it describes, and this repository is the catalog that brings them together.
 
-```
-                ┌─────────────────────────────────────────────────────┐
-                │                amd/skills (this repo)               │
-                │                                                     │
-                │   skills/         .github/         .*-plugin/       │
-                │   vendored copies federation.json  agent manifests  │
-                └──────────────────────┬──────────────────────────────┘
-                                       │  one install
-                                       ▼
-                              your AI coding agent
-                                       ▲
-                                       │  resolves pointers to
-       ┌───────────────┬───────────────┼───────────────┬────────────────┐
-       │               │               │               │                │
-   ROCm/ROCm       ROCm/HIP        Ryzen AI repo   lemonade-sdk    ...more
-  rocm-doctor/    cuda-to-hip/    ryzen-ai-tools/   local-ai-app-   product
-   gfx-target-...  triton-amd-...  ...               integration/    repos
+```text
+  Product repositories (each team owns and versions its skills), for example:
+  ROCm/rocm-cli, ROCm/rocm-systems, ROCm/FlyDSL, amd/Quark,
+  lemonade-sdk/skills, AMD-AGI/Magpie, AMD-AGI/TraceLens
+                                 │
+                                 │  federate-skills workflow (nightly):
+                                 │  vendors only the skills that changed
+                                 ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │                    amd/skills (this repo)                    │
+  │                                                              │
+  │  skills/           .github/            .*-plugin/            │
+  │  vendored copies   federation.json     agent manifests       │
+  └──────────────────────────────┬───────────────────────────────┘
+                                 │  one install
+                                 ▼
+                       your AI coding agent
 ```
 
 [`.github/federation.json`](https://github.com/amd/skills/blob/main/.github/federation.json) is the whole registry: each
@@ -163,7 +177,7 @@ See [CONTRIBUTING.md](https://github.com/amd/skills/blob/main/CONTRIBUTING.md) t
 
 ## Manual installation
 
-Until marketplace integration lands, install skills manually: clone this repo, then copy (or symlink) the skill folders you want from `skills/` into your agent's skills directory. Each agent discovers `SKILL.md` automatically.
+To install without `npx`, clone the `amd/skills` repository, then copy (or symlink) the skill folders you want from `skills/` into your agent's skills directory. Each agent discovers `SKILL.md` automatically.
 
 ```bash
 git clone https://github.com/amd/skills.git amd-skills

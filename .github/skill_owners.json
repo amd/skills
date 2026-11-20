@@ -1,9 +1,34 @@
 {
   "repos": [
     {
+      "repo": "AMD-Ecosystem/moat",
+      "engineering_owner": "jeffdaily",
+      "product_release_owner": "jeffdaily"
+    },
+    {
+      "repo": "amd-enterprise-ai/aim-build",
+      "engineering_owner": "bjorn-amd",
+      "product_release_owner": "reiserm"
+    },
+    {
+      "repo": "amd-enterprise-ai/amd-eai-apps",
+      "engineering_owner": "kevinkswSiloAI",
+      "product_release_owner": "DavidPSilo"
+    },
+    {
       "repo": "amd/Quark",
       "engineering_owner": "amd-zhaofeng",
       "product_release_owner": "thiagocrepaldi"
+    },
+    {
+      "repo": "AMDResearch/intellikit",
+      "engineering_owner": "coleramos425",
+      "product_release_owner": "mawad-amd"
+    },
+    {
+      "repo": "ROCm/FlyDSL",
+      "engineering_owner": "coderfeli",
+      "product_release_owner": "coderfeli"
     },
     {
       "repo": "ROCm/rocm-cli",
@@ -12,8 +37,20 @@
     },
     {
       "repo": "ROCm/rocm-systems",
+      "path": "projects/rocprofiler-compute",
+      "engineering_owner": "feizheng10",
+      "product_release_owner": "serap-suvari"
+    },
+    {
+      "repo": "ROCm/rocm-systems",
       "path": "projects/rocprofiler-sdk",
       "engineering_owner": "sadikarmagan",
+      "product_release_owner": "serap-suvari"
+    },
+    {
+      "repo": "rocm/rocm-systems",
+      "path": "projects/rocprofiler-systems",
+      "engineering_owner": "dgaliffiamd",
       "product_release_owner": "serap-suvari"
     }
   ]

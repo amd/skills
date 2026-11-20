@@ -1,0 +1,15 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+---
+apiVersion: v2
+name: aiwb-cnpg
+description: CNPG PostgreSQL cluster infrastructure for AIWB
+
+type: application
+
+version: 0.0.0
+
+# Placeholder overridden during release packaging
+appVersion: "0.0.0"

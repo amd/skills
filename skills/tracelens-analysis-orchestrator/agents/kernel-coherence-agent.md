@@ -85,6 +85,12 @@ that are clearly different types.
   "fallback_remap_b": {
     "(likely gemm name platform 2)_..._(likely gemm signature)_...": "qkv_projection"
   },
+  "fallback_remap_regex_a": {
+    "^(likely gemm name platform 1)_": "qkv_projection"
+  },
+  "fallback_remap_regex_b": {
+    "^(likely gemm name platform 2)_": "qkv_projection"
+  },
   "notes": "optional rationale"
 }
 ```
@@ -97,13 +103,29 @@ Resolution order applied per kernel (see `apply`):
 2. **`fallback_remap_a` / `_b[symbol]`** -- blanket per-symbol remap, applied when
    no context id matched (empty windows at a sequence boundary) or when a symbol
    means the same thing everywhere and you don't need to split it by context.
-3. Otherwise the first-pass name is kept.
+3. **`fallback_remap_regex_a` / `_b`** -- ordered `{python_regex: final_block}`,
+   only tried when no exact `fallback_remap` match was found. Patterns are tried
+   in declaration order with `re.search` against the first-pass symbol; first
+   match wins. Use this for a whole vendor kernel-name **family** in one rule
+   instead of enumerating every exact mangled name -- vendor GEMM solution
+   libraries (e.g. `<vendor_gemm_prefix>_*`) emit a distinct, near-unique
+   name per tile-shape/tuning variant of the *same* logical op, so listing every
+   variant in `fallback_remap_a`/`_b` is impractical and silently leaves most
+   instances unmatched. One regex (e.g. `"^<vendor_gemm_prefix>_"`) covers the whole family.
+4. Otherwise the first-pass name is kept.
 
 ### Guidance
 
 - For a GEMM shape that has one dominant role across the trace, a single
   `fallback_remap` entry is cleaner than many identical `context_renames`; add
   `context_renames` only where a symbol genuinely changes role by context.
+- **Prefer a regex fallback over enumerating exact names** when a one-sided
+  bucket is one variant of a vendor kernel-name family with many tile-shape/
+  tuning variants (vendor GEMM solution libraries in particular). An exact
+  `fallback_remap` entry only catches the one variant you saw in the context
+  catalog; a `fallback_remap_regex` entry (e.g. `"^<vendor_gemm_prefix>_"`)
+  catches every variant of that family, including ones that didn't surface as
+  their own one-sided context.
 - Prefer merging a one-sided bucket into an **existing shared** symbol when the
   evidence supports it (e.g. an attention split-K/reduce kernel -> the shared
   `paged_attention` bucket).
@@ -130,8 +152,19 @@ prints the residual one-sided condensed symbols. If meaningful (non-singleton)
 symbols remain one-sided, revise the decisions and re-run; residual pre/post
 singletons may be accepted.
 
+## Verify
+
+The orchestrator validates `kernel_coherence_decisions.json`
+(`validate_kernel_coherence_decisions`) before applying and returns any errors
+for you to fix and re-emit: `context_renames` keys must be `context_catalog`
+ids, `fallback_remap_a` / `_b` keys must be one-sided symbols from the context,
+and every `fallback_remap_regex_a` / `_b` key must compile as a regex. **Prefer
+a `fallback_remap_regex` family rule over many long exact `fallback_remap`
+keys** (see above) -- one regex is shorter and catches every tile-shape variant.
+
 ## Return Value
 
 Return: `status`, `pairs_created` (new shared names used on both sides),
-`context_renames`, `fallback_a`, `fallback_b`, `shared_blocks_after`, and the
-residual one-sided symbols with a one-line reason for leaving each.
+`context_renames`, `fallback_a`, `fallback_b`, `fallback_regex_a`, `fallback_regex_b`,
+`shared_blocks_after`, and the residual one-sided symbols with a one-line reason
+for leaving each.
