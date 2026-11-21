@@ -20,6 +20,17 @@ Gate arch-specific selection on `__HIP_PLATFORM_AMD__` and force the portable co
 trust CC major/minor for arch dispatch on AMD. Found independently by both libmarv ports.
 (MMseqs2, foldseek: the CUDASW++ short2-DPX Smith-Waterman selector.)
 
+The values also collide AMD with AMD, so per-arch tuning tables cannot be keyed on them
+either: gfx900, gfx906, gfx908 and gfx90a all report 9.0, gfx1100-gfx1102 report 11.0, and
+gfx1150/gfx1151 11.5. A library that builds one tuned object per `--offload-arch` and picks
+the table by major/minor hands the gfx900 kernels to a gfx90a in a fat binary ("device
+kernel image is invalid"). Select by `hipDeviceProp_t::gcnArchName` with the feature suffix
+stripped (`gfx90a:sramecc+:xnack-` -> `gfx90a`), and give every requested target without
+its own table a generic build rather than a hard error. In CMake, `CMAKE_HIP_ARCHITECTURES`
+from native detection lists one entry per GPU (`gfx90a;gfx90a;gfx90a;gfx90a` on a four-GPU
+host): `list(REMOVE_DUPLICATES)` before creating per-arch targets (strategy-a-cmake.md).
+(MMseqs2: libmarv's per-arch AMD aligner tables.)
+
 **A query HIP reports as unsupported leaves a sticky error that the NEXT check reports.**
 Reading or setting `cudaLimitPrintfFifoSize` (`cudaDeviceGetLimit`/`cudaDeviceSetLimit`) maps
 to a call that returns `hipErrorUnsupportedLimit`. Code that ignores that return value and
@@ -80,6 +91,77 @@ the occupancy-based block-size choice and with it the reduction order. If a port
 put it behind a macro that is empty unless `USE_HIP`, so the CUDA kernels stay
 token-identical to upstream. (oneflow, ROCm SDK clang 24)
 
+**A kernel launched with fewer than 1024 threads needs `__launch_bounds__` on HIP to get its
+registers.** This is the converse of the previous entry. HIP-clang assumes a 1024-thread block when
+a kernel has no launch bounds and caps registers to fit it (64 VGPR + 64 AGPR on gfx942), where nvcc
+gives a kernel up to 255 registers regardless. A register-heavy kernel (FlashAttention-2 tiles, 128
+fp32 accumulators per lane) launched with 128 threads then spills to scratch. Fix:
+`__launch_bounds__(<actual block size>)` under the HIP guard; verify with
+`-Rpass-analysis=kernel-resource-usage`. A second spill source showed up in the same kernel:
+emulating a matrix instruction with shuffles inside fully unrolled fragment loops let the scheduler
+keep every shuffle result live (4.4 KB/lane scratch at 256 VGPR + 256 AGPR); `#pragma unroll 1` on
+the emulation's inner loop took it to 0 in a one-instantiation probe with the helper inlined. The
+shipped module keeps the helper out of line (for compile time) and its prefill kernels report
+240-848 B/lane of private segment (848 B for the instantiation the end-to-end run uses; read with
+`llvm-readelf --notes` on the gfx942 code object). (Quest, ROCm SDK 10.1)
+
+**A host-side launch heuristic keyed on the register count can break a kernel whose block width is a
+compile-time constant.** A launcher that doubles the block when `cudaFuncGetAttributes(...).numRegs
+<= 128` is harmless for kernels that read `blockDim.x`, but a kernel that hard-codes `constexpr int
+nsq_per_block = 256` then runs every task twice and overlaps its per-thread shared-memory slices.
+NVIDIA builds of those kernels sat above 128 registers, so the mismatch was latent; on gfx90a/gfx942
+one landed at exactly `.vgpr_count: 128` and the analytic gradient came out wrong by orders of
+magnitude, different on every run, while gfx1100 passed. When results are wrong and nondeterministic
+on one wave size only, compare each launcher's block geometry with the constants inside the kernel
+it launches; `llvm-readelf --notes` on the extracted code object gives the VGPR count. (gpu4pyscf)
+
+**Kernels that opt in to more than 64 KB of shared memory per block cannot launch on most AMD
+GPUs.** CUDA lets a kernel raise its dynamic shared memory with
+`cudaFuncSetAttribute(...MaxDynamicSharedMemorySize...)` up to `sharedMemPerBlockOptin` (99 KB to
+227 KB on recent NVIDIA GPUs). AMD gives a block 64 KB of LDS on gfx90a, gfx942 and RDNA (gfx950 has
+160 KB), and HIP counts the kernel's static `__shared__` arrays against the same limit, so a launch
+whose static plus dynamic size exceeds it fails even when the dynamic part alone fits. gpu4pyscf saw
+the failure at `hipFuncSetAttribute`, with invalid argument; oneflow on gfx1100 with ROCm 10.1.0
+(the entry "On RDNA, a nonzero occupancy does not mean the dynamic shared memory fits" above) saw
+that call succeed unenforced and the launch itself fail or abort the queue, so check both return
+values and do not rely on either call to refuse. Find the cases by computing the driver's size
+formula over the whole parameter range and adding each kernel's `.group_segment_fixed_size` (from
+`llvm-readelf --notes` on the extracted code object). CuPy-ROCm has no `sharedMemPerBlockOptin`, so
+a Python guard on it needs a fallback. Fix for the over-limit cases only, chosen at run time from
+`hipDeviceAttributeMaxSharedMemoryPerBlock` plus `hipFuncGetAttributes().sharedSizeBytes`: move the
+largest scratch arrays that the inner loop does not read to a per-block global-memory workspace,
+size the grid to the resident blocks (`hipOccupancyMaxActiveBlocksPerMultiprocessor` times CUs) with
+each block looping over tasks so the workspace does not scale with the task count, and allocate it
+with `hipMallocAsync`/`hipFreeAsync` on the launch stream. Put the variant in a HIP-only file so the
+CUDA translation unit stays identical. In gpu4pyscf's ECP derivative kernels the variant gave
+bit-identical results and, at a few hundred tasks or more, ran in 0.6x the time of the LDS-heavy
+kernel, because its smaller LDS footprint keeps more blocks resident. (gpu4pyscf)
+
+**AMD's 64 KB LDS breaks "half the per-SM shared memory" tile heuristics, and the dispatcher may
+then launch nothing.** FlashInfer-derived dispatchers size tiles from
+`cudaDevAttrMaxSharedMemoryPerMultiprocessor / 2` (two blocks per SM). MI300X reports 64 KB per CU
+for `hipDeviceAttributeMaxSharedMemoryPerMultiprocessor` (verified), so half leaves room for no tile
+at head_dim 128, and FlashInfer's `SWITCH_NUM_FRAGS_Z` then prints `Unsupported max_frags_z` to
+stderr and returns success without launching: the output tensor is whatever `torch::empty` held.
+Size for one block per CU under the HIP guard (the largest tile is exactly 64 KB). Quest did not
+record the RDNA values; the occupancy entry above measured 128 KiB for that attribute on gfx1100, so
+query it on each target (gfx1100, gfx1151) before reusing the sizing there. Check every such
+`SWITCH_*` default branch in a port: an unlaunched kernel looks like a numerics bug. (Quest)
+
+**gfx12 work-group IDs y and z are 16 bits: a grid y or z above 65536 is rejected or silently
+wraps.** On gfx12 (gfx1200/gfx1201) the compiler reads `blockIdx.y` as `ttmp7 & 0xffff` and
+`blockIdx.z` as `ttmp7 >> 16`; gfx11 and gfx9 receive 32-bit IDs in SGPRs (check with `hipcc
+--cuda-device-only -S` per arch). `hipGetDeviceProperties` reports `maxGridSize = (2^31-1, 65535,
+65535)`; 65536 still works. Above it the launch API decides what happens:
+`hipLaunchKernel`/`hipExtLaunchKernel` return hipErrorInvalidConfiguration and run nothing
+(unchecked, that is silently missing output: MIOpen's RNN bias op,
+https://github.com/ROCm/rocm-libraries/issues/10551), while `hipModuleLaunchKernel` and
+`hipExtModuleLaunchKernel` return success and run every work-group with the y/z index taken modulo
+65536, so work-group 65536 + i redoes work-group i and the tail is never touched. A kernel of your
+own that needs more than 65536 work-groups in y or z must fold them into x. A library kernel can hit
+it too: rocBLAS complex GEMM does (libraries.md, "On gfx12, rocBLAS complex GEMM with n > 2^21
+leaves columns unwritten"). (gpu4pyscf)
+
 ## Runtime-compiled kernels
 
 **Runtime PTX plus the CUDA Driver API is a THIRD build class** beyond Strategy A and B.
@@ -136,6 +218,34 @@ Two related traps in the same place:
   `using uint64_t = __hip_internal::uint64_t` (`unsigned long long`), because
   the HIP device headers are already in scope. Guard the typedefs out on the
   ROCm side rather than trying to match the type.
+
+hipRTC is not NVRTC in ways the API does not show, so a port that maps `nvrtcXxx` to
+`hiprtcXxx` and stops will build, load a 0-byte or wrong code object, and render nothing.
+A project whose whole pipeline is runtime-compiled hits all of these at once (CuRast):
+
+- **No `-default-device` equivalent.** NVRTC can make every unmarked free function
+  `__device__`; clang cannot. Wrap each block of helper functions in
+  `#pragma clang attribute push (__attribute__((device)), apply_to=function)` / `pop`,
+  guarded by `#if defined(__HIPCC_RTC__)`. The pragma conflicts with `__global__`, so the
+  regions must EXCLUDE the kernel entry points: regions, not whole files.
+- **Do not count on fixed-width types being predeclared.** NVRTC supplies
+  `uint32_t`/`uint64_t` implicitly. Under hipRTC a header that used them without
+  `#include <cstdint>` failed with a cascade of "unknown type name" in CuRast, while the
+  typedef collision above shows a hipRTC that had `uint64_t` in scope; which names arrive
+  for free evidently depends on the release and on what else the source includes. Add the
+  `<cstdint>` include: it is a real omission, it is correct either way, and it helps the
+  offline build too.
+- **A translated fast-math flag assumes finite math.** `-ffast-math` implies
+  `-ffinite-math-only` under clang where NVRTC's `--use_fast_math` does not, and sentinel
+  values then vanish (faults-numerics.md).
+- **The host runtime headers are not on the include path**, so a shared compat header must
+  skip its `hip/hip_runtime.h` include under `__HIPCC_RTC__` and provide the handful of
+  intrinsics that came with it (`__float_as_uint` and friends) as macros. Macros, not inline
+  functions: one combined TU can reach the same header by two relative paths, where
+  `#pragma once` does not dedupe and duplicate definitions are an error.
+- **Do not pass `-fgpu-rdc`** (it produces 0-byte code objects). Pass the clang resource
+  directory and the ROCm include root as absolute `-isystem`/`-I` (derive them from
+  `ROCM_PATH`), and NUL-terminate the `hiprtcGetProgramLog` buffer yourself.
 
 Diagnosing this is easy once you know to look: the runtime compiler's log is
 usually printed to stderr and then swallowed, and the visible symptom is a

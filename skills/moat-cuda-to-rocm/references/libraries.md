@@ -10,6 +10,7 @@ Contents:
 - MIOpen
 - hipSPARSE
 - rocThrust, hipCUB and rocPRIM
+- CuPy on ROCm
 - Random numbers, profiling and monitoring
 - RAPIDS (ROCm-DS)
 - RCCL
@@ -26,7 +27,7 @@ exists. A row marked "not verified" states what the library is, not what a port 
 |---|---|---|---|
 | cuBLAS | hipBLAS (rocBLAS underneath) | yes | handle types; the v2 enums change a few signatures; 16-bit GEMM accuracy (faults-numerics.md) |
 | cuBLASLt | hipBLASLt | mostly | epilogues, compute types, the ReLU aux format ("BLAS, hipBLASLt and Composable Kernel" below) |
-| cuFFT | hipFFT (rocFFT) | yes | plan creation during graph capture (faults-memory-streams.md) |
+| cuFFT | hipFFT (rocFFT) | yes | plan creation during graph capture (faults-memory-streams.md); hipFFT complex types under heFFTe (below) |
 | cuRAND | hipRAND (rocRAND) | yes | device generator state internals; C++14 from ROCm 10.1 |
 | cuSPARSE | hipSPARSE (rocSPARSE) | yes | half-precision SpMM, zero workspace sizes, graph capture ("hipSPARSE" below) |
 | cuSOLVER | hipSOLVER (rocSOLVER) | partly; not verified | hipSOLVER has a cuSOLVER-style dense API (`hipsolverDn*`). None of the ports behind this file exercised more than handle creation, so check every routine you call against hipSOLVER's function list, and its workspace-size and `info` conventions, before assuming a rename is enough. One gap is known: the low-level sparse factorization interface (`cusolverSpXcsrqr*` and `csrchol*`, with analysis, setup, factor and solve as separate calls), `csrlsvluHost` and `csrsymrcm` have no hipSOLVER counterpart (requested in ROCm/hipSOLVER issue 443), and cuDSS has none either; a sparse direct solve needs another library (RXMesh) |
@@ -49,6 +50,30 @@ per-kernel profiling path inert and let the timer fall back to `hipEvent` wall-c
 than substituting something. ck_tile's fused MHA ships headers but no prebuilt instance
 library in `/opt/rocm/lib`, so `fmha_fwd` is declared-only and using it means vendoring CK's
 codegen ("Fused FP16 attention" below). (cuSZ, lc0)
+
+**A swapped library may be less defensive about bad arguments than the CUDA one.** Where
+cuFFT returns an error code, rocFFT can hang. `hipfftPlan1d(&plan, 0, HIPFFT_C2C, 1)` --
+transform length zero -- never returns on ROCm 7.2.3, while cuFFT answers
+`CUFFT_INVALID_SIZE`; `hipfftPlan1d(..., batch=0)` returns SUCCESS rather than an error.
+This bites when you deliberately force an error to test a port's error-check macros or its
+failure paths: pick a trigger that is verified to return, such as
+`hipfftExecC2C(plan, nullptr, nullptr, dir)` (status 6, on a planned or unplanned handle).
+For hipBLAS the equivalent verified trigger is a GEMM with negative extents:
+`hipblasCgemm(handle, HIPBLAS_OP_N, HIPBLAS_OP_N, -1, -1, -1, &alpha, nullptr, 1, nullptr,
+1, &beta, nullptr, 1)` returns `HIPBLAS_STATUS_INVALID_VALUE` (3) on a valid handle and
+touches no device memory, so it is safe to fire from a probe. More generally, before
+concluding a port hangs, reproduce the hang in a few-line program that includes none of the
+project's headers: that separates a library bug from your change. (TurboFNO)
+
+**heFFTe's rocFFT backend does not accept hipFFT complex types.** heFFTe's cuFFT backend
+recognizes `cufftComplex`/`cufftDoubleComplex`, but its rocFFT backend registers no hipFFT
+type. A CUDA code that keeps its FFT buffers as `cufftComplex` and maps the name to
+`hipfftComplex` (which is `HIP_vector_type<float,2>`) fails to compile with `static assertion
+... check_types<rocfft, float, HIP_vector_type<float, 2>>: Using either an unknown complex
+type`. heFFTe documents `heffte::is_ccomplex<T>` and `is_zcomplex<T>` as the specialization
+point for custom complex types: specialize them for `hipfftComplex` and
+`hipfftDoubleComplex` in the HIP branch, with no patch to heFFTe. heFFTe then reinterprets
+the buffers as `std::complex`, whose layout they share. (ESPResSo)
 
 **Choosing the NVIDIA or AMD build of a library at run time.** A runtime with both a CUDA and a
 HIP backend must pick per device, from the device's own backend, and never by enumerating or
@@ -111,6 +136,66 @@ define `USE_NEW_UNIFIED_FRAMEWORK=0` (CK develop's unified framework needs a sin
 target, and `CK_CMAKE_GPU_TARGET_IDS` takes the first for every pass, failing the gfx11
 device pass). 139 FP16 inference instances for
 nine architectures build in about 2.5 minutes at 128 jobs. (TornadoVM)
+
+**rocBLAS `gemv` over more than 65535 batches returns wrong entries, and `cupy.einsum` reaches it.**
+Root cause (https://github.com/ROCm/rocm-libraries/issues/14819): for transA=N and m < 2n, rocBLAS
+selects `rocblas_gemvn_kernel<32,16>`, which loops over the batches inside the kernel in steps of
+65535 (the grid z limit) and has no `__syncthreads()` after its shared-memory reduction, so a wave
+starting the next batch overwrites partial sums another wave is still reading. Only non-final loop
+iterations are corrupted, so batch_count <= 65535 is always clean, and large m is affected too (m =
+n = 16 fails, m = 32 with n = 64 fails under load). `gemv_strided_batched` reaches it on
+gfx11xx/gfx12xx; on gfx942/gfx90a small shapes take a different kernel and the rest fail only under
+heavy load. `gemm_strided_batched_ex` with m or n = 1 reaches it where rocBLAS routes that call to
+gemv (gfx1100); on gfx1201 and gfx942 it goes to Tensile, which splits the batch on the host, and is
+clean. complex128 fails on an idle RDNA GPU; float64 mostly needs a second process on the GPU, so
+test-runner parallelism decides whether CI sees it.
+
+How a CuPy project reaches it: CuPy computes each einsum pairwise step as `(B, L, K) @ (B, K, R)`
+after dropping size-1 axes, so any step with L or R = 1 is a candidate, for example
+`einsum('xg,xg->g')`, and so is a structurally clean contraction whose free index has size 1 (one
+state, spin set or k-point). Fix it in the project, not in CuPy: do not replace `cupy.matmul` on the
+CuPy module (a process-global monkeypatch of a third-party library that misses `@`; a reviewer
+rejected it). Add a project-local `einsum` that follows CuPy's default pairwise order and, on ROCm,
+computes a matrix-vector step with more than 65535 batches as a broadcast multiply and sum (on CUDA
+it is `cupy.einsum` itself). Splitting the batch into chunks of 65535 also avoids the kernel loop,
+but measured on gfx1201 the multiply and sum is 4x to 250x faster than the rocBLAS call for these
+shapes. The simulation must drop each operand's size-1 axes before it decides which labels the
+operands still waiting keep: CuPy builds a step's kept labels from the squeezed subscripts, so a
+label of size 1 in an earlier operand is contracted, not batched. Taking the full subscripts misses
+steps such as `'da,deab,dac->'` with the first operand shaped (1, 4), a matrix-vector product over
+`a`, and reroutes some steps that are not one.
+
+Test the trigger differentially: record the shapes `cupy.matmul` receives inside `cupy.einsum` (it
+looks the attribute up per call) over random patterns with size-1 broadcasting, with the batch
+threshold lowered so small shapes reach it, and require the helper to reroute exactly the calls that
+issue a matrix-vector step. The recorder sees the pairwise steps only when cuTENSOR is not a CuPy
+routine accelerator (CUDA CI often sets `CUPY_ACCELERATORS=cub,cutensor`), so clear the list with
+`cupy._core._accelerator.set_routine_accelerators([])` for the test and restore it in a `finally`;
+CuPy reads it on every call. Bind the helper as the contraction wrapper's einsum and switch the
+direct `cupy.einsum` sites to it; find them statically by simulating CuPy's pairwise order from the
+subscripts, then judge `numpy.einsum` calls that may receive CuPy arrays. Do not hunt for sites with
+an LD_PRELOAD shim on rocBLAS that takes the GIL in every call: two W7800s wedged (first H2D copy
+never completes, 95% GFX activity with no process) during such a run with 8 to 12 workers.
+(gpu4pyscf)
+
+**On gfx12, rocBLAS complex GEMM with n > 2^21 leaves columns unwritten.** rocBLAS (5.7.0, TheRock
+10.1) has only generic `fallback` Tensile kernels for complex types on gfx12
+(`Cijk_..._ZB/CB_MT32x32x8_..._WG16_16_1_WGM8`), launched through `hipExtModuleLaunchKernel` with
+the 32-column tiles of n in grid y. gfx12 work-group IDs in y and z are 16 bits and that launch call
+wraps instead of failing (platform-limits.md, "gfx12 work-group IDs y and z are 16 bits"), so every
+zgemm/cgemm (all four transposes) with n > 65536 * 32 = 2^21 returns columns >= 2^21 unwritten (a
+poisoned output keeps its poison), independent of m and k. Real GEMMs run hipBLASLt-generated
+kernels with the tiles in grid x and are clean to n = 8M; batched complex GEMM over 65536 batches is
+clean (the batch is split on the host). `AMD_LOG_LEVEL=3` prints each `hipExtModuleLaunchKernel`
+with its global sizes, which shows the grid. CuPy's einsum reaches it through k-point transforms
+such as `einsum('Lk,pLqG->kpqG')`, where n = p*q*G is millions. In a CuPy port fix it in the
+project-local einsum of the previous entry: for a complex pairwise step whose row or column count
+exceeds 2^21, split the outermost free output axis of the larger side and recurse. Split the
+outermost axis, not the largest: splitting the innermost axis made the strided writes into the
+result cost 1.5x, the outermost-axis split costs 1.1x to 1.5x at 3.5M to 6.9M columns and is 0.26x
+(faster than the unsplit call) at 26M. Gate the split on the device's `gcnArchName` starting with
+`gfx12` (cached per device), so other GPUs keep the path they were tested on, and force the gate in
+the regression tests so CI on any GPU checks the split. (gpu4pyscf)
 
 ## MIOpen
 
@@ -201,6 +286,15 @@ reopen `namespace thrust { namespace hip {} }` to alias `thrust::cuda`: current 
 declares its systems in a versioned inline namespace, so the empty one makes every
 `thrust::hip` ambiguous (AMD's xgboost 2.1.3 ROCm branch hit this). (h2o4gpu)
 
+**Prefer the specific hipCUB algorithm header over the `<hipcub/hipcub.hpp>` umbrella.** The
+umbrella pulls in `device/device_for.hpp` -> `util_mdspan.hpp`, which needs C++23
+`std::extents` (`<mdspan>`, libstdc++ 15 or newer). With libstdc++ 13 that is about 20 errors
+("no template named 'extents' in namespace 'std'") in a TU that only wanted a radix sort.
+`#include <hipcub/device/device_radix_sort.hpp>` compiles cleanly. CUB's umbrella header does
+not have this problem, so the umbrella include is what the CUDA source will have. A
+`namespace cub = hipcub;` alias next to the guarded include keeps every call site in the CUB
+spelling on both back ends. (CuRast: `src/CubSort.cu`, ROCm 7.2.3 with GCC 13.)
+
 **rocPRIM never asks for less than 4 bytes of temp storage.** Every rocPRIM-backed hipCUB
 device algorithm (`DeviceReduce`, `DeviceSegmentedReduce`, ...) reports
 `max(needed, 4)` from its size query, even when it needs nothing; CUB reports 1 there.
@@ -215,6 +309,72 @@ greater, so an all-NaN row yields `INT_MAX - segment_begin`; CUB returns an inde
 row. Anything that then indexes with the result (one-hot scatter, gather) traps or faults.
 Clamp keys outside `[0, segment_size)` after the call. (oneflow: `gumbel_softmax(hard=True)`
 in half precision, where `rand` rounds to exactly 1.0 often enough to make a NaN column.)
+
+**`<complex.h>` defines the macro `I`, which rocPRIM uses as a template parameter name.** A
+translation unit that includes `<complex.h>` before a hipCUB shim fails deep inside
+`rocprim/types/tuple.hpp` with `expected ')'` and `_Complex float` conversion errors. If the
+translation unit does not use `I`, `#undef I` in the shim before including hipCUB. (gpu4pyscf)
+
+**Three rocPRIM radix sort defects give a wrong order or a broken permutation where CUB is
+correct.** They are the next three entries: float keys that mix signaling and quiet NaNs, a bit
+range on 64-bit keys that ends at bit 64 and starts above bit 0, and the choice of workaround for
+that bit range. All three are silent, so when a port's results go wrong after a `DeviceRadixSort`
+(or `torch.sort` on ROCm, which inherits the first), check the sort's output directly before looking
+further.
+
+**rocPRIM radix sort corrupts float keys that mix signaling and quiet NaNs.** hipCUB/rocPRIM
+`DeviceRadixSort::SortPairs` on float keys that contain both signaling and quiet NaNs returns a
+broken permutation: values duplicated and missing, and output slots never written. CUDA's cub sorts
+the bit patterns and is unaffected. Either NaN kind alone sorts correctly. Uninitialized device
+memory (a `torch::empty` buffer only partly written by a kernel) is where such keys come from, and
+`torch.sort` on ROCm inherits the defect. The symptom is usually far from the sort: a later gather
+on the sorted indices trips torch's device-side index assert (`HSA_STATUS_ERROR_EXCEPTION 0x1016`
+naming `index_elementwise_kernel`) only when the stale slot happens to hold an out-of-range value,
+so the failure looks intermittent. Diagnose by checking the sort output right after the sort for
+duplicates (`bincount(idx).max() > 1`), not only for range. Fix on the caller's side: never sort
+uninitialized data (zero-fill the buffer or sort only the valid prefix). Observed on the ROCm 10.1
+pip SDK (rocPRIM 4.6.0, hipCUB 4.7.0) on gfx90a, gfx942 and gfx1201, and unchanged on
+10.3.0a20261119 (rocPRIM 5.1.0); CUDA 12.9 sorts the same keys correctly. It affects float and
+double keys, pairs and keys-only, for 1025 to 1,048,576 elements: in that range rocPRIM merges
+radix-sorted 1024-item tiles with a comparator that adds zero to each key to fold -0.0, which
+quiets signaling NaNs, so the merge order disagrees with the tile order. Sizes outside the range
+take other paths and pass. Reported as ROCm/rocm-libraries#16364. Exact duplicate and missing
+counts vary run to run. (LiteGS)
+
+**rocPRIM radix sort of 64-bit keys is wrong when `end_bit` is 64 and `begin_bit` is not 0.** With
+rocPRIM 4.8 (ROCm 10.2), `hipcub::DeviceRadixSort::SortKeys` on 64-bit keys returns keys not ordered
+by the selected bits when `end_bit == 64` and `begin_bit > 0`, for more than 1024 keys; `[0,64)` and
+any range ending below bit 64 are correct. Code that sorts packed `{payload, key}` words by their
+high half (`begin_bit = 32, end_bit = 64`, common in BVH builders) silently mis-groups. Workaround
+when the key is the high half: sort all 64 bits. Check this in any port that passes a sub-range
+ending at bit 64. (warp-1.14)
+
+**Choosing the workaround for that bit-range defect: narrowing the range is only safe when the top
+key bit is 0 everywhere.** For the defect of the previous entry (64-bit keys, `end_bit` 64,
+`begin_bit` > 0; cuBQL records it at 1025 to 2^20 keys) two workarounds avoid the broken path: sort
+the full width (`begin_bit = 0`), or stop one bit short (`end_bit = width - 1`). The second is exact
+and stable but only when the top key bit is 0 for every element, and packed keys often break that: a
+sentinel such as `(uint32_t)-1` in the upper half ("invalid, sort last") sets it, and under the
+narrowed range the sentinel then ties with the largest valid value. A unit test at ordinary sizes
+passes either way, because the colliding valid value is near 2^31. Read where every packed field is
+written, sentinels included, before narrowing; otherwise sort the full width, which is correct
+whenever no caller depends on the order of keys equal in the selected bits (a 5-12% cost at up to
+2^20 64-bit keys on MI355X). (cuBQL)
+
+## CuPy on ROCm
+
+**CuPy-ROCm gaps a CuPy-based port meets at run time.** `cupy.cuda.runtime.deviceSetLimit` is a stub
+that always raises hipErrorUnknown (`cupy_backends/hip/cupy_hip_runtime.h`); call
+`hipDeviceSetLimit` through ctypes from `libamdhip64.so.<major>`, the library CuPy already loaded
+(`runtimeGetVersion() // 10000000`). RawKernel sources compile with hiprtc, which has no
+`cuComplex.h` (use `hip/hip_complex.h` and alias `cuDoubleComplex`, `make_cuDoubleComplex`,
+`cuCreal`, `cuCimag`) and rejects a 32-bit mask in `__shfl_down_sync`; prepend those definitions on
+ROCm only, leaving the CUDA source untouched. CuPy-ROCm ships no cuTENSOR binding (fall back to
+`cupy.einsum`), has no `sharedMemPerBlockOptin` device attribute, and CUTLASS-based extension
+kernels need a replacement such as one GEMM per group. Seeded `cupy.random` streams differ from
+CUDA's (diagnosis.md, "Seeded `cupy.random` inputs differ between CUDA and ROCm"), and two rocBLAS
+defects reached through `cupy.einsum` are under "BLAS, hipBLASLt and Composable Kernel" above.
+(gpu4pyscf)
 
 ## Random numbers, profiling and monitoring
 

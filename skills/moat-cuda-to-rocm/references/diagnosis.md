@@ -41,11 +41,73 @@ not against a fix. Stopping at the first step is how one value-head error stayed
 recorded as a BLAS-library problem for two months before it turned out to be a
 null-stream upload race that was latent on CUDA too (lc0).
 
+Stopping at a recorded magnitude is for small, deterministic deviations. An error that is large
+(orders of magnitude) or changes from run to run on one wave size is a defect until shown otherwise:
+gpu4pyscf's analytic gradients failed only on gfx90a/gfx942 for months and turned out to be a
+launch-geometry mismatch (platform-limits.md, "A host-side launch heuristic keyed on the register
+count"). Reduce it to the smallest input that still fails (H2/STO-3G reached a single kernel) before
+calling it numerical. (gpu4pyscf)
+
+### Rule out a stale tree and the toolchain version before accepting "arch-specific"
+
+GooFit's HIP backend was reported to drive an unbinned maximum-likelihood fit to a
+parameter's upper bound on gfx90a (`alpha` at the +10 bound instead of the true -1,
+`FunctionMinimum is invalid: Edm is above max`, 21/25 ctest failures) while the identical
+commit passed on gfx1100 (wave32) and on the CPU/OpenMP backend, both giving
+`alpha = -1.001102381`. It was recorded as wave64-specific, and that was wrong: the same
+commit on the same card under a later ROCm gives the correct answer. Two cheaper
+explanations come before "genuinely arch-specific", and both have produced a false report on
+that one project:
+
+1. **A stale or uncommitted tree.** Reproduce from a *fresh clone* of the exact commit, not
+   a working tree that may carry local edits from earlier debugging. A clean
+   `git status --porcelain` before the build is necessary but not sufficient.
+2. **Toolchain or driver version.** Compare `hipcc --version` against the version the
+   passing architecture ran. A divergence that appears only on a newer or older ROCm than
+   the passing run's is a toolchain difference to report, not an arch fault. Matching the
+   version of an earlier FAILING run does not rule this out: it only shows the failure
+   reproduces on that version, which is the wrong direction. The discriminating run is the
+   same arch on a DIFFERENT, current ROCm, because where there is one machine per
+   architecture the arch and its ROCm install are confounded: whatever is installed on the
+   only gfx90a box is a property of that box, not of gfx90a. Do that run before writing any
+   code. GooFit's divergence was accepted as gfx90a-specific on exactly the wrong-direction
+   reasoning (the failure reproduced again on the ROCm 7.2.1 series an earlier attempt had
+   used, which said nothing about the architecture); a later session on the same
+   hardware with ROCm 7.14 built the same commit from a fresh clone and got 25/25 with the
+   fitted parameter digit-identical to every passing arch, after someone had gone hunting
+   for a lifetime bug in code that had none.
+
+What the failing session did establish -- a fresh clone, and kernels demonstrably
+dispatching (`AMD_LOG_LEVEL=3` shows 112 `hipLaunchKernel` calls, `roc-obj-ls` shows one
+gfx90a code object) -- is only that real GPU execution produced the wrong answer, i.e. that
+it was not a stale tree or an "it never ran on the GPU" artifact. Use those checks to
+eliminate the build and the environment, then change the ROCm. Perturbing the allocator and
+serialising the runtime (`HSA_DISABLE_FRAGMENT_ALLOCATOR=1`,
+`AMD_SERIALIZE_KERNEL=3 AMD_SERIALIZE_COPY=3`) are the cheap follow-ups on the passing
+version that argue against latent undefined behaviour a newer runtime merely hides; they
+are evidence, not proof, so say so in the record. A divergence that survives a current,
+different ROCm on the same card is the one the entry above is about. (GooFit)
+
+The same class also shows up as a threshold-boundary detection COUNT, not only as a fit
+residual. PopSift's cross-architecture check is exact feature and descriptor counts on six
+reference images (the Oxford boat set). On gfx90a, the only wave64 architecture in the
+comparison, one image came back one feature and one descriptor short (7945/9451 against the
+7946/9452 that gfx1100, gfx1101, gfx1151 and gfx1201 all reported at the same commit), fully
+deterministic across 5 repeat runs, with the other five images exact. A single detection
+sitting right at a threshold flips between one wavefront width's warp reduction and the
+other's without being a correctness bug in either. Treat a single-digit count divergence on
+one input out of many, with everything else exact and deterministic, the same way: record it
+and stop. (popsift)
+
 ## Method
 
 **A "data-dependent, later-data-corrupts-earlier, per-tile" corruption signature is the fingerprint of a REPRODUCER bug, not a codegen fault.** cuSZ chased a suspected miscompile to a BLOCKED state and an IR bisect; the actual cause was the test input -- `np.arange(..., dtype=float32) * (python float)` promotes to float64, so `.tofile()` wrote 8 bytes per element and the tool read the stream as f32. Validate the byte width and dtype of any binary test input before escalating to an ISA bisect or a ROCm bug report. (cuSZ)
 
 **Triangulate single- against double-precision before blaming the wavefront.** When a warp-collective rewrite shows SP divergence, run a second GPU variant and compare both to the DP oracle. If both GPU variants diverge from DP identically at the same positions, and the DP path is bit-identical to the CPU oracle, it is floating-point reassociation at a comparison boundary -- not a wave-size fault. SCAMP used this to clear a ~0.5 divergence at 10/8093 positions as a threshold-boundary artifact. (SCAMP)
+
+**Test "it reads uninitialized device memory" with a fill-pattern differential, not an audit.** The hypothesis is common for an unattributed hang, crash or wrong result in a project that over-allocates worst-case buffers (a collision-pair or candidate-list buffer sized for the theoretical maximum and governed by a live counter is the classic shape), because ROCm does not hand back zeroed memory the way CUDA often does (faults-memory-streams.md, "Fresh device allocations are NOT zero on ROCm"). Auditing every `hipMalloc` for a matching `hipMemset` is slow, easy to get wrong, and proves nothing about whether an unaudited site matters at run time. Test it instead: temporarily wrap the allocator so every fresh allocation gets a controlled fill, behind a compile define so the unmodified build stays a pure passthrough (`#if defined(DEBUG_MALLOC_FILL)`: a template `debug_hipMalloc(T** ptr, size_t size)` that calls `hipMalloc` and, on `hipSuccess`, `hipMemset(*ptr, DEBUG_MALLOC_FILL, size)`, plus `#define cudaMalloc(ptr, size) debug_hipMalloc(ptr, size)`), and run the SAME source three ways: unmodified, zero-fill and 0xFF-fill. 0xFF is the decisive pattern, not 0x00: as an IEEE-754 float or double every all-0xFF value is NaN, and as an index it is -1 or UINT_MAX. A genuine live-uninitialized read on the hot path then shows as an immediate NaN cascade, a crash on an out-of-range index, or a wildly different run length, none of which a healthy program produces by chance. On GPU_IPC (gfx1100) the unmodified, zero-fill and 0xFF-fill builds all stalled in the same narrow frame window (31-37, inside the pre-existing 25-36 range) with zero NaN and zero HIP errors across hundreds of recorded lines each, and every reported index in all three was small and in range: that is what a buffer correctly gated behind a live counter looks like under adversarial fill, and it rules the hypothesis OUT instead of leaving it unaudited. Revert the wrapper afterwards; it is a throwaway diagnostic, not something to land. (GPU_IPC)
+
+**To close an "it might silently fall back" risk, trace it; then bound it from the code, not from the trace.** A dispatch count (validation.md, "A green result does not prove a GPU test ran") proves which backend ran on the run you measured. When the worry is that some ORDER of events could flip a global backend flag ("if the fallback initializes first, the compute flag is cleared and the suite still goes green"), a Release build with no debug info is enough for a trace: statics like `Foo::_UseBackend` and ordinary member functions are in the symbol table, so gdb can breakpoint the decision function (`break *0x<addr>` with `commands` / `silent` / `printf "decide(arg=%d) flag=%d\n", (int)$rdi, *(int*)0x<addr of flag>` / `continue` / `end`), breakpoint each backend's constructor, and `watch *(int*)0x<addr of flag>`. The counts answer outright: how often the decision function was entered and with what argument, how often each backend was constructed, and every value the flag took. In colmap that turned "did not materialise on the machine we happened to use" into "the clearing line did not run once in this binary, and the flag was written exactly once, `0 -> 1`". Then be careful what you claim, because this is where a trace gets oversold: it covers the paths the binary took with the options it ran with, so it is evidence for "not reached in this configuration" and never for "unreachable". colmap's first write-up made that jump ("the clearing line is unreachable, because the only caller always requests the compute backend") and review disproved it with one probe: a public option (`darkness_adaptivity`, with the default negative GPU index) makes the caller omit the flag that selects the compute backend, and the supposedly dead line runs. Upgrading "not reached here" to "cannot happen" takes an argument from the CODE; the one that held was that the API re-asserts the flag on every freshly constructed object that requests the compute backend, so no earlier user can leave it cleared for a later one. When such an argument holds, ask what ELSE the failing path wrote: the initialization that clears flag A usually sets siblings in the same function. In colmap the failed GLSL init also zeroes a second global meaning "this process has no usable GL"; it is sticky (the init returns immediately once it is 0 and never retries), and every later extractor, the compute ones included, early-returns on it and is constructed as a null: a hard failure with nothing extracted, not the silent degrade the risk was written about, and still a live defect. Enumerate every write on the failure path, and for each ask who resets it and who reads it later; sticky-on-failure, process-wide and consulted by a user that would otherwise have worked is the shape that bites. Two traps each produce a confidently wrong answer. Reading a global AFTER the inferior exits gives the ELF initial value, not the last live value: gdb falls back to the executable's `.data`/`.bss` image and prints it without complaint (in colmap, exactly the cleared-flag state the reviewer had predicted, from a run where the flag was never cleared), so read the flag at a breakpoint inside the live process, or watch it. And `LD_PRELOAD` on a GL or driver entry point does not intercept a Qt (or any `GetProcAddress`-style) caller: Qt resolves GL through `QOpenGLFunctions`/`eglGetProcAddress`, so the preloaded symbol is bypassed while a directly-linked caller in the same process IS intercepted; prove a preload shim fires with a positive control first. (colmap)
 
 **A once-per-suite host crash that stress reruns never reproduce: widen the suspected race window instead of rerunning.** If the stack sits in runtime code the port does not touch (`git diff` empty there), read it for a publish-before-register ordering, insert a temporary sleep between the two steps, rebuild, and run a tiny loop. A crash that becomes deterministic, and also happens with CPU-only work, is an upstream race that a fast GPU merely exposes; revert, rebuild and record it. oneflow's `LaunchLazyJob` pushed a graph's SourceTick before `EnqueueNNGraph`, so a tiny graph's finish callback could pop an empty queue: 1 crash in ~550 suite files on two arches, 0 in 70 stress reruns, 5 of 5 with a 20 ms sleep (CPU graphs included). (oneflow)
 
@@ -63,11 +125,21 @@ null-stream upload race that was latent on CUDA too (lc0).
 
 **A cascading wall of SegFault/OOM/"no kernel image available" partway through a long serial suite can be one poisoned physical card, not a port defect -- check `rocm-smi --showpids` against `--showmeminfo vram` before concluding anything.** arrayfire on a host with eight MI300X cards: a full `ctest` run started clean, crashed (SegFault) on an early binary, and every binary after it degraded -- more SegFaults, a "no kernel image is available for execution on the device" (hipErrorNoBinaryForGpu) on a JIT op, then explicit "Device out of memory". `rocm-smi --showmeminfo vram` showed that GPU pinned near its full capacity; `rocm-smi --showpids` showed *no process attached to it at all*, including after `kill -9` of every test binary -- the VRAM was orphaned at the KFD/driver level, not held by a live allocator, and a process crash should not leak GPU memory past its own exit. Re-running the identical suite (fresh JIT disk cache) on a different, verified-idle card on the same host, same build, same commit, came back 131/132 clean with no crash, no OOM, and no "no kernel image" anywhere. The disagreement between the two `rocm-smi` views is the tell: if `--showmeminfo` says a card is nearly full but `--showpids` shows nothing on it, that card's state cannot be trusted for this session -- switch cards to disambiguate before spending time on the port. (arrayfire)
 
+**A "fixed seed" run that relies on C `rand()` is not reproducible on some ROCm builds: the HIP runtime's compiler library reseeds it.** Projects often get reproducible runs in a debug build by simply not calling `srand()` and seeding device RNGs from `rand()`. Some ROCm builds break that. On the first kernel launch the HIP runtime compiles its internal copy kernels through comgr, and each comgr action makes a temp directory via LLVM `sys::fs::createUniquePath` -> `sys::Process::GetRandomNumber`, which calls `srand(<random seed>)` and then `rand()` (38 times on HIP 7.16) whenever LLVM was built without `arc4random` (glibc < 2.36 at LLVM build time, as in TheRock's manylinux SDK). It is not the application's code objects loading: `rand()` after `hipMalloc` is still the default stream. Any `srand()` the program made before its first launch is overridden too. Two runs of the same input then draw different random streams, and a self-comparison suite (same binary as baseline and candidate) fails exactly the stochastic cases. Check a host with `nm -D --undefined-only libLLVM*.so* libamd_comgr.so* | grep -w -e srand -e arc4random`: `arc4random` present is what decides, since a libLLVM can import both (Ubuntu's `libLLVM.so.20.1` does). Ubuntu 24.04's distro comgr is unaffected: it imports only `rand` itself, and the `libLLVM-17.so.1` it loads imports `arc4random`. To classify, rerun the failing cases with an `LD_PRELOAD` shim whose `srand()` is a no-op: if they pass, it is this, not the port. Before trusting a single-directory rerun, check that the outputs are not appended to (GPUMD's `dump_xyz` appends). (GPUMD)
+
+**Seeded `cupy.random` inputs differ between CUDA and ROCm.** CuPy-ROCm draws from hipRAND/rocRAND, so `cp.random.seed(n)` gives different numbers than CUDA's cuRAND. A test that hard-codes a fingerprint of results computed from such inputs fails on ROCm even when the computation is right. Do not count it as a GPU failure or edit it away: rerun the same inputs through the CPU reference (or the test's own CPU cross-check with only the fingerprint assertion disabled, in a scratch copy) and record that comparison. `np.random`-seeded tests are unaffected. (gpu4pyscf)
+
 ## Hangs and crashes
 
 ### A hang that depends on inlining: long branches clobber the return address
 
 **A kernel that never finishes, or a device function that returns to the wrong place, only at the default inlining level can be llvm/llvm-project#224205.** In a large device function that is not a kernel (the callee of `s_swappc_b64 s[30:31]`, for example a library reduction body with a big functor inlined into it), AMDGPU long-branch relaxation can use `s[30:31]`, the return address, as its scratch pair. Confirm it in the asm: compile the file with its real compile line plus `--cuda-device-only -S` for the target, and in each non-kernel function count `s_getpc_b64 s[30:31]` ... `s_setpc_b64 s[30:31]` long-branch sequences with no save or restore of `s30`/`s31` anywhere in that function. Any count above zero is the defect pattern. It appears on RDNA (gfx11, gfx12) targets in Linux builds as well as Windows ones, and it does not always hang, so a passing run does not clear a build that shows the pattern. Workaround: limit inlining for that one translation unit, through `COMPILE_OPTIONS` on the source, `/Ob1` for clang-cl and `-finline-hint-functions` for clang or hipcc on Linux. The function stays out of line, small enough that no long branch is left; recount in the asm to confirm zero. (h2o4gpu: the `FuncEvalF` reduction in `h2o4gpuglm.cu`, float and double; the double-precision fit hung on gfx1151 on Windows, and gfx1100/gfx1201 Linux builds carry the same pattern without an observed hang.)
+
+Limiting inlining does not help when the out-of-line device function is large by itself: QUICK's `ERint_vertical_spd` (189 KB of VRR code) kept all 6 long branches through `s[30:31]` with `-finline-hint-functions`, at -O1, -O2, -O3 and -Os. A workaround that does not depend on inlining is `-mllvm -amdgpu-long-branch-factor=0` (defined in `GCNPreRALongBranchReg.cpp` since ROCm 6.0's LLVM): it turns off the pre-RA reservation, so branch relaxation takes a dead register pair from the scavenger; recount to confirm zero. CDNA is affected in real code, not only RDNA: gfx90a, gfx908 and gfx942 all emitted the pattern, and on gfx90a it hung the kernel. The same defect can also show as an aperture violation instead of a hang, depending on which block the clobbered return lands in; under rocgdb with precise memory (next entry), compare `s[30:31]` against the long-branch targets. And a "100x slower" report for a kernel that never returns from one launch is a hang: check with `AMD_SERIALIZE_KERNEL=3 AMD_LOG_LEVEL=3` whether a single launch finishes before measuring anything. (QUICK)
+
+### Proving a real miscompile: catch the faulting instruction, then flip one backend pass
+
+An `HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION` is reported imprecisely. Run the process under `rocgdb -batch -ex 'set amdgpu precise-memory on' -ex run -ex 'x/12i $pc-40' -ex 'p/x $v20'` (rocgdb ships in TheRock's `bin/`) to stop on the exact instruction and read its registers per lane. In gpu4pyscf the faulting op was `global_atomic_add v1, v20, v1, s[20:21]` (the persistent-kernel `atomicAdd(head, 1)`). Its zero offset register v20 held garbage in lane 0 only, and `llvm-objdump -d` of the extracted code object showed v20 set to 0 once and then reused as the destination of a predicated `global_load_dwordx2 v[20:21]` inside the loop. Rebuilding with `-mllvm -disable-machine-licm` in `CMAKE_HIP_FLAGS` made results match the CPU reference to 1e-13. `-O1` did not help. The defect was TheRock ROCm 10.1 (AMD clang 24.0.0git) MachineLICM, and the same pattern appears in gfx90a code from that compiler, so it is a toolchain fault, not an architecture fault. It does not reproduce on every target, though: the same compiler and committed flags ran correctly on gfx1100, so before adding the flag, test whether each arch shows the fault with one run of the failing case (a d-shell calculation there). Under `-fgpu-rdc` device codegen runs at link time, and CMake's HIP link rule reuses `CMAKE_HIP_FLAGS`, so that one setting reaches both; a copy in `CMAKE_SHARED_LINKER_FLAGS` can be silently overwritten by the project (gpu4pyscf's own `set(CMAKE_SHARED_LINKER_FLAGS ...)` did) and protects nothing, so confirm with a verbose build that every compile and link line carries the flag. Whether a port carries a compiler workaround is for the people who own the port to decide; once decided, put it under the HIP build only with a comment naming the compiler version and the arches affected, and the condition for removing it. (gpu4pyscf)
 
 ### A fault inside a vendored JIT entry point: rebuild-with-a-forced-throw beats a debugger
 
@@ -100,6 +172,17 @@ the same call chain may already be fixed in the project's own patch to the vendo
 dependency, which rules it out rather than explaining the new crash. Before any of this, read
 the top frame: a null frame above the vendored DLL is a library that never loaded
 (windows.md, "A null top frame above a vendored DLL"). (diff-surfel-tracing)
+
+### scikit-learn's KMeans can crash a Python test on a machine with very many cores
+
+A Python test that scores an embedding or a clustering with `sklearn.cluster.KMeans` can
+exit with SIGSEGV or SIGABRT on a 224-thread machine after every assertion passed, about
+half the time. The fault is in scipy's bundled OpenBLAS (`sgemm_incopy_*`) called from a
+libgomp worker hundreds of threads deep, and it reproduces with KMeans alone, without the
+port loaded (4 of 6 runs; 0 of 6 with `OMP_NUM_THREADS=16`). It is not the GPU and not the
+port. Cap the threads around the call, `with threadpoolctl.threadpool_limits(8):`
+(threadpoolctl is a scikit-learn dependency), rather than exporting an environment variable
+the next person to run the test will not know to set. (tsne-cuda)
 
 ### Failures that appear only when the whole suite runs in one process
 

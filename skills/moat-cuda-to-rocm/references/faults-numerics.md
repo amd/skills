@@ -13,16 +13,23 @@ Contents:
 
 ## Contraction and rounding
 
-**clang for HIP defaults to `-ffp-contract=fast`** and forms FMAs ACROSS statements. nvcc
-contracts by default too (`--fmad=true`, and NVRTC likewise), so a single `a * b + c` is an
-FMA on both; what differs is where else contraction happens. The extra contraction drifts
-results ~1 ULP from the CUDA build and CPU gold. That nvcc contracts only within one
-expression is inferred from the result below (`-ffp-contract=on` reproduced nvcc's numbers),
-not taken from nvcc's documentation. `-ffp-contract=off` is the `--fmad=false` equivalent. MATCH UPSTREAM's setting rather than
-pinning one unconditionally: CV-CUDA needed `-ffp-contract=on` to match nvcc, while
+**clang for HIP defaults to `-ffp-contract=fast`** and forms FMAs ACROSS statements -- and
+so does nvcc. nvcc contracts by default too (`--fmad=true`, and NVRTC likewise), and not
+only within one expression: `float d = a*b; r = d + c;` compiles to one `fma.rn.f32` in PTX
+and one FFMA in SASS (nvcc 12.8, sm_90; GPUMD), the same as the one-expression `a * b + c`.
+`-ffp-contract=on` is therefore STRICTER than nvcc, not a match for it: it fuses only within
+one source expression (clang emits `llvm.fmuladd` in the front end), while `fast` lets the
+backend fuse whatever survives inlining. FMA formation still differs between the compilers,
+so results can drift ~1 ULP from the CUDA build and CPU gold under either setting.
+`-ffp-contract=off` is the `--fmad=false` equivalent. MATCH UPSTREAM's setting rather than
+pinning one unconditionally: CV-CUDA's tests passed with `-ffp-contract=on`, while
 LC-framework's nvcc recipe uses `-fmad=false -mno-fma -ffp-contract=off`, so pinning `on`
-there would diverge. Integer-only components are unaffected. (CV-CUDA OpWarpPerspective;
-LC-framework.)
+there would diverge. Choose `on` for what it guarantees: two template instantiations or call
+sites built from the same source expressions form the same FMAs. GPUMD's
+batched-vs-per-slot replica tests compare such instantiations bitwise and failed on gfx90a
+under `fast`. It did not make CV-CUDA's `float` and `float4` instantiations of one template
+agree (next entry). Integer-only components are unaffected.
+(CV-CUDA OpWarpPerspective; LC-framework; GPUMD.)
 
 **One contraction setting cannot satisfy both kinds of bit-exact test.** A project can have
 tests that compare a kernel against a CPU gold (which want the contraction nvcc and the host
@@ -37,6 +44,27 @@ evidence. Treat the setting as a reviewed decision with numbers attached, and re
 after every functional fix that lands in the same suite. (CV-CUDA: `-ffp-contract=off`
 removed most planar-versus-interleaved parity failures but regressed the cubic-versus-gold
 case, so `on` was kept and the parity residual documented.)
+
+**`-ffast-math` is NOT the HIP translation of nvcc's `--use_fast_math`, and reaching for it
+because the CUDA flags line has one is a real mistranslation.** nvcc's flag swaps single
+precision transcendentals and division for the fast device intrinsics and leaves double
+precision and IEEE exception behaviour alone. clang's `-ffast-math` additionally turns on
+`-ffinite-math-only`, `-fassociative-math`, `-freciprocal-math`, `-fno-signed-zeros` and
+`-ffp-contract=fast`, for DOUBLE precision as well. Geometric predicates -- continuous
+collision detection, intersection and orientation tests, anything whose sign is the answer
+-- are exactly what reassociation and no-NaN assumptions break, and the symptom is a solver
+that stops converging rather than a wrong pixel. Translate `--use_fast_math` as at most
+`-ffp-contract=<upstream's setting>` (first entry of this section), and leave everything
+else IEEE. (GPU_IPC)
+
+**`-ffast-math` implies `-ffinite-math-only` under clang; nvcc's `--use_fast_math` does
+not assume finite math.** Translating the flag one for one therefore changes behaviour: any
+algorithm that uses Infinity or NaN as a sentinel (depth sentinels, NaN clear values,
+NaN-compare early-outs) silently produces nothing. The clang warning "use of infinity is
+undefined behavior due to the currently enabled floating-point options" is the fingerprint;
+treat it as fatal, not as noise. Drop the finite-math assumption on the HIP side
+(`-fno-finite-math-only` after `-ffast-math`, or the individual fast-math flags the code
+actually tolerates). (CuRast, whose runtime-compiled renderer drew nothing.)
 
 **`__fsqrt_rn` is not always correctly rounded on gfx90a** (1 ULP high) where CUDA's
 `sqrt.rn.f32` is IEEE correctly-rounded, so bit-exact tests pass on NVIDIA and fail on
@@ -60,6 +88,18 @@ at its provable geometric maximum. This is the class where numeric drift becomes
 CONTROL-FLOW failure. (TIGRE Siddon_projection: `Np` derived from `__fdividef` comparisons,
 a 0.2s kernel ran >10 min at some angles; capped at `Nx+Ny+Nz+3`, a no-op for valid rays and
 identical on CUDA.)
+
+**A hand-written Jacobi/eigenvalue sweep replacing a library solver must normalize first.**
+A port sometimes has to replace a library decomposition that does not compile for the
+device (build-headers-macros.md, "Eigen DECOMPOSITIONS called from `__device__` code").
+A cyclic Jacobi convergence test compares SUMS OF SQUARES (`off <= eps*eps*(on+off)`), so a
+double input whose largest coefficient exceeds about 1.3e154 makes both sides `inf`, the
+test reads true at sweep zero, and the routine returns the identity rotation -- laundering a
+blown-up matrix into a plausible-looking result instead of letting the blow-up propagate to
+where the caller would notice. Divide by `max|a_ij|` up front and scale the eigenvalues back
+at the end; Eigen's own solver does this, which is why the original did not have the bug.
+Two lines, and it applies to any hand-rolled replacement for a library decomposition.
+(GPU_IPC `selfAdjointJacobi`.)
 
 ## Host math under the HIP compiler
 

@@ -33,6 +33,27 @@ the subdirectories are added: walk `BUILDSYSTEM_TARGETS` and `SUBDIRECTORIES`, a
 `set_source_files_properties(... TARGET_DIRECTORY <tgt> PROPERTIES LANGUAGE HIP)` with paths
 made absolute against the target's `SOURCE_DIR`. (LichtFeld-Studio)
 
+**An unset CMake build type runs every HIP kernel unoptimized.** Symptom: a HIP port passes its
+tests but its kernels are tens to hundreds of times slower than expected;
+`-Rpass-analysis=kernel-resource-usage` shows kilobytes of scratch per lane. Cause: nvcc optimizes
+device code whatever `CMAKE_BUILD_TYPE` says, but with no build type CMake passes no `-O` flag and
+clang compiles HIP device code at `-O0`. A README configure command without `-DCMAKE_BUILD_TYPE` is
+the usual trigger, and a Windows generator defaulting to Debug is the same thing. Fix: in the
+project's CMake, when the HIP backend is selected and `NOT CMAKE_BUILD_TYPE AND NOT
+CMAKE_CONFIGURATION_TYPES`, set the cache entry to `Release`; check `ninja -t commands` for `-O3`.
+For Windows that default has to run before `project()`, because `Windows-Clang.cmake` sets
+`CMAKE_BUILD_TYPE_INIT Debug` and `project()` caches it. Placed there it must also test the
+`CMAKE_BUILD_TYPE` environment variable, which CMake (3.22+) applies only inside `project()`, or it
+forces Release over a build type the user gave that way (on Linux too): `get_property(_mc GLOBAL
+PROPERTY GENERATOR_IS_MULTI_CONFIG)`, then `if(NOT CMAKE_BUILD_TYPE AND "$ENV{CMAKE_BUILD_TYPE}"
+STREQUAL "" AND NOT _mc)`, then `set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)`.
+Device `-O0` also changes which faults appear (faults-memory-streams.md, "Bitwise and min/max
+atomics on `hipMallocManaged` memory"), so build the README recipe as written before and after the
+fix. Seen on MI300X with the ROCm SDK 10.1: paged KV append 11 ms -> 26 us, and FA2 prefill at qo=1
+went from 957 ms for kv=1024 (unoptimized) to 13.8 ms for kv=4096 once combined with launch bounds
+(platform-limits.md, "A kernel launched with fewer than 1024 threads needs `__launch_bounds__`").
+(Quest)
+
 ### Never mark the host `.cpp` files `LANGUAGE HIP` to dodge the flag leak
 
 The tempting shortcut when a mixed CXX/HIP target fails to compile is to mark *every* source
@@ -93,6 +114,23 @@ library, no compile flags) for the runtime:
     endforeach()
     target_link_libraries(<tgt> PRIVATE hip::host)
 
+The same holds for linking `hip::device` directly, which most hand-written HIP CMake does:
+on a mixed target the plain `.cpp` files fail with `c++: error: unrecognized command-line
+option '--offload-arch=gfx942'`. PRIVATE does not help (it only stops the flags reaching
+consumers, not the target's own C++ sources), and `$<COMPILE_LANGUAGE:HIP>` cannot rescue it
+either, because that genex is rejected in `target_link_libraries`. The link half is a
+separate helper, `hip_add_interface_link_flags`, which puts `--hip-link` and `--offload-arch`
+into `INTERFACE_LINK_LIBRARIES`; whether it is language-gated depends on the version pair
+(ROCm 7.14 wraps them in `$<$<LINK_LANGUAGE:CXX>:...>` on CMake 3.20+ and leaves them ungated
+below it), so assume `hip::device` also reaches a consumer's link line. With
+`enable_language(HIP)` and `LANGUAGE HIP` on the sources you do not need `hip::device` at
+all: CMake emits the offload flags for the HIP sources from `CMAKE_HIP_ARCHITECTURES` and
+links the HIP runtime itself. A target that is 100% HIP sources never shows any of this,
+which is why it surfaces the first time a port compiles kernels into an existing mixed
+library. (rmcl: `rmcl_ros_cuda`, five C++ sensor sources next to two `.cu`; CuRast, which
+took `${hipcub_INCLUDE_DIRS}` from `find_package(hipcub REQUIRED)` instead of linking
+`hip::hipcub`.)
+
 Before splitting, check two things or you trade a silent-zeros bug for a silent-no-op bug:
 no header that a `.cpp` includes may contain a `<<<>>>` launch (a launch macro gated on
 `__CUDACC__ || __HIPCC__` expands to nothing in the host units, so the launch disappears),
@@ -106,6 +144,28 @@ object" for the host files (Velvet: 11 CXX against 2 HIP, where all 13 previousl
 the recorded compile line for a host object should carry neither `-x hip` nor
 `--offload-arch`, and a temporary `#if defined(__HIPCC__) #error` probe in one host file
 should compile clean.
+
+The link half of that interface is separate and outlives a compile-side fix.
+`hip_add_interface_link_flags` puts `--hip-link` and `--offload-arch=` into `hip::device`'s
+`INTERFACE_LINK_LIBRARIES` under `$<$<LINK_LANGUAGE:CXX>:...>` (CMake 3.20+; below that,
+unconditionally), so a consumer whose sources no longer see the compile flags but whose
+*link* language is still CXX gets the identical unrecognized-option error from the link
+line; the residual case is a target with no HIP sources of its own that merely links a HIP
+library. Never strip the flags off `hip::device` to cure either half: the imported target
+is regenerated from the ROCm package on every configure, and the flags are how a project
+that compiles device code through the CXX language with hipcc gets compiled at all.
+
+Look for the targets a port's own helper function does not cover. A project that routes its
+libraries through an `add_library` wrapper usually has a few built with a plain
+`add_library()` somewhere else -- Python bindings, tools, examples -- and those inherit the
+flags without the treatment. Two cheap checks: grep for `add_library(`/`add_executable(`
+outside the wrapper, and read the generated `build.ninja` for a `CXX_COMPILER_<target>` rule
+whose `FLAGS` contain `-x hip` (Makefiles generator: `CMakeFiles/<target>.dir/flags.make`).
+Source-file properties are DIRECTORY-scoped, so when the treatment is a source property set
+it in the directory that owns the target; for sources appended from a subdirectory with
+`target_sources()`, `set_source_files_properties(... TARGET_DIRECTORY <tgt> ...)` (CMake
+3.18+) follows the target where `DIRECTORY <owning-dir>` hardcodes a path. (GooFit: its
+`_Core`/`_Basic`/`_Combine` pybind11 modules were outside the wrapper.)
 
 Then expect the split to unmask missing standard-library includes in host headers, and build
 on every supported OS before calling the split done. The HIP and CUDA runtime headers drag
@@ -143,8 +203,11 @@ symbols one TU at a time, so without a flag it stops with
 1. **`-fgpu-rdc`**, HIP's own relocatable device code, the direct counterpart of the setting
    the CUDA side already has. It leaves the project's sources untouched -- often zero diff in
    the files a maintainer cares about -- and it still inlines the cross-TU calls (see below).
-   CMake has no `HIP_SEPARABLE_COMPILATION` property (checked on CMake 4.0.3), so wire it by
-   hand, and remember the LINK side and the consumers:
+   CMake has no `HIP_SEPARABLE_COMPILATION` property (checked on CMake 3.31.6 and 4.0.3:
+   `cmake --help-property-list | grep SEPARABLE` lists only `CUDA_SEPARABLE_COMPILATION`),
+   and setting one is silently accepted and leaves `build.ninja` byte-identical, so a port
+   can ship dead `set_target_properties` calls believing they did the compile half (GooFit
+   did). Wire it by hand, and remember the LINK side and the consumers:
 
    ```cmake
    target_compile_options(mylib PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-fgpu-rdc>)
@@ -286,6 +349,90 @@ reverting HEonGPU's `-fgpu-rdc` to the guard reproduced the pre-RDC build byte f
 device ISA and exported symbols on all 42 binaries, which is what a clean revert should look
 like. Keep a snapshot of the earlier `bin/` around for exactly that comparison. (HEonGPU)
 
+**`-fgpu-rdc` on the compile line alone trades the first link error for a more confusing
+one, and the fix is the link flag, not a restructured build.** The same need arises when a
+project declares `__device__`/`__constant__` globals or device function-pointer tables in
+headers and defines them in a separate `.cu` (first symptom, e.g.
+`lld: error: undefined hidden symbol: MetricTaker::operator()(thrust::tuple<...>) const`).
+With the flag only in `target_compile_options`, the in-tree link then fails with
+
+    ld.lld: error: undefined hidden symbol: __hip_gpubin_handle_b33c4363e66c5890
+    ld.lld: error: undefined symbol: __hip_fatbin_b33c4363e66c5890
+
+Dump the generated link line before theorising; it says so directly:
+`clang++ --offload-arch=gfx1100 --hip-link ... main.cu.o -o myexe libmylib.a` has
+`--hip-link` (CMake adds it for a target with HIP sources of its own) and no `-fgpu-rdc`,
+so the driver runs a non-relocatable link that never emits the fatbinary registration
+symbols the RDC-compiled objects reference. One line fixes it:
+`target_link_options(<tgt> PRIVATE $<$<LINK_LANGUAGE:HIP>:-fgpu-rdc>)`, or `INTERFACE` on
+the usage-requirement target every executable and shared library of the project consumes
+(`GooFit_Common`, `<proj>_options`); inside one project the `LINK_LANGUAGE:HIP` condition
+keeps the flag off targets that link with the plain host compiler, which would reject it
+(for consumers of an INSTALLED archive see "`-fgpu-rdc` changes the consumer contract"
+above, where that condition does not help).
+
+Archives are NOT invisible to the HIP device link, so do not restructure a project's
+`STATIC` libraries into `OBJECT` libraries gathered behind one shared library for this:
+that is a large, mergeability-hostile change to somebody else's build system for a missing
+flag. Verified twice on ROCm 7.2.3: raw hipcc, with a `__device__` global and a
+`__device__` function defined in `a.hip`, archived into `liba.a` and called from a kernel in
+`b.hip`, links and runs via `hipcc -fgpu-rdc --hip-link b.o liba.a`; and at GooFit's real
+shape (several `STATIC` libraries behind an `INTERFACE` aggregate, a cross-TU `__device__`
+global plus a device function-pointer table) adding only the link option builds and passes
+the full suite with every library left an ordinary `.a`. The archive caveat that IS real is
+the ordinary host-linker one: the linker extracts only an archive member that resolves an
+undefined HOST symbol, so a member whose device code is needed but whose host symbols are
+never referenced is never pulled in and its device code never reaches the device link.
+`-Wl,--whole-archive` around that archive is the fix; reach for it only when you can name
+the member being dropped. A companion from the same port: delete host globals that take the
+address of a `__device__` function (`device_function_ptr p = device_Step;` at namespace
+scope), which is invalid on HIP and dead code on CUDA. (GooFit; RXMesh needed only the
+compile-side flag, because its device code was already in one target.)
+
+**`-flto` on the COMPILE line does not survive a `-fgpu-rdc` device link.** Measured with
+RAW `hipcc` on ROCm 7.2.3 / gfx1100, using a two-TU `__device__`-global reproducer. Two of
+the three configurations are fine:
+
+| how `-flto` is applied alongside `-fgpu-rdc`, driving hipcc by hand | result |
+| --- | --- |
+| compile and link in ONE `hipcc` invocation | links |
+| `-flto` only on the LINK line, objects compiled without it | links |
+| `-flto` on the COMPILE line, then a separate link | fails |
+
+The failure is `ld.lld: error: undefined symbol: __hip_fatbin_<hash>`, `referenced by
+__hip_fatbin_wrapper`: the object is LLVM bitcode, and the fatbinary symbol its wrapper
+references is only produced by the separate device-link step. A reproducer that compiles
+and links in one command therefore reports LTO as fine when it is not.
+
+Those rows are about hipcc, not CMake, and the two do not currently meet: as of CMake
+3.31.6, `INTERPROCEDURAL_OPTIMIZATION` does nothing to HIP sources. Verified at the shape a
+real port has (a HIP `STATIC` library plus a HIP executable, `-fgpu-rdc` on compile and
+link, the property `ON` for both): the generated flags carry no `-flto` and the link
+succeeds, while a plain CXX target in the same project does receive `-flto=thin`. The reason
+is a language filter in the generator, not a missing flag: `Compiler/Clang-HIP.cmake` calls
+`__compiler_clang(HIP)`, so `CMAKE_HIP_COMPILE_OPTIONS_IPO` really is `-flto=thin`, but
+CMake applies IPO only to C, CXX, CUDA and Fortran. `check_ipo_supported()` cannot tell you
+any of this: it probes only those four languages, returns NO with
+`language(s) 'HIP' not supported` when asked for `LANGUAGES HIP`, and with no languages
+filters `ENABLED_LANGUAGES` down to the four, so a YES from it is a statement about the host
+C++ compiler and never about hipcc. Its answer can also change under you (GooFit's flipped
+NO -> YES across an upstream sync). So excluding HIP from a project's IPO switch is
+precautionary, not a fix: worth doing if the project already has a per-backend exclusion to
+sit next to (GooFit disables IPO for CUDA in the same place, because CUDA device LTO hangs
+the device linker), with a comment saying it is precautionary. A CMake that later drives HIP
+IPO would make the third row reachable, so pin any claim here to a CMake version. (GooFit)
+
+**Settle any "which flags does this build actually use" question by reading the generated
+`build.ninja`, never by grepping the build system's sources.** On GooFit that grep produced
+two confident and opposite wrong answers about the IPO question above in successive rounds.
+It fails in two ways at once: CMake assigns most per-language variables through
+`CMAKE_${lang}_...`, so the expanded name you search for is not in the source at all; and a
+`grep -r` over a directory that does not exist prints nothing and looks exactly like a clean
+no-match (the module path is wherever *your* `cmake` lives, which for a conda or pip cmake
+is not `/usr/share/cmake-<ver>`). `cmake --system-information | grep CMAKE_ROOT` gets you
+the right directory; `message(STATUS "[${CMAKE_HIP_COMPILE_OPTIONS_IPO}]")` in a throwaway
+`CMakeLists.txt` gets you the value; `build.ninja` gets you the truth. (GooFit)
+
 ## OpenMP and runtime library paths
 
 **One OpenMP runtime per binary; which one follows from who compiles the files that use
@@ -332,18 +479,26 @@ by thread id has every thread pick element 0 while still printing correct result
 any `LINKER_LANGUAGE CXX` left on the target: `$<LINK_LANGUAGE:HIP>` is false under a CXX
 link, so a HIP-conditioned OpenMP link flag silently never applies. (HEonGPU)
 
-**A HIP-linked shared library gets no RUNPATH to the ROCm lib dir.** The ROCm lib dir is
-one of the HIP compiler's implicit link directories, so CMake leaves it out of the build
-RUNPATH; clang adds it for executables (`h2o4gpu_test` had it) but not for a `SHARED` or
-`MODULE` target. Anything else that happened to inject it (h2o4gpu's was clang's
+**A HIP-linked shared library, or a host-linked executable, gets no RUNPATH to the ROCm lib
+dir.** The ROCm lib dir is one of the HIP compiler's implicit link directories
+(`CMAKE_HIP_IMPLICIT_LINK_DIRECTORIES`), so CMake leaves it out of the build RUNPATH; clang
+adds it for executables (`h2o4gpu_test` had it) but not for a `SHARED` or `MODULE` target.
+A plain C++ executable is not covered either when it links the HIP runtime or rocFFT only
+indirectly, through a static library built with HIP sources (ESPResSo's, through heFFTe
+with `Heffte_ENABLE_ROCM`); targets that link `hip::host` directly do get the directory.
+Such an executable gets `NEEDED librocfft.so.0`/`libamdhip64.so.7` and no RUNPATH entry,
+so it runs where the ROCm lib dir is on the loader path and fails with "cannot open shared
+object file" where it is not (the pip SDK). Anything else that happened to inject it (h2o4gpu's was clang's
 `-fopenmp` link) hides the gap until it is removed. Then, with the pip/TheRock SDK and no
 `LD_LIBRARY_PATH`, the module fails to load -- and a Python loader that swallows the
 `ImportError` (h2o4gpu's `GPUlib.get()`) silently runs every solver on the CPU while the
 tests pass. Set it explicitly on the target:
 `BUILD_RPATH $<TARGET_FILE_DIR:hip::amdhip64>` (and `INSTALL_RPATH`), then check
 `readelf -d <lib> | grep RUNPATH` and run the GPU path with `LD_LIBRARY_PATH` unset.
+CUDA projects usually already do the same for the CUDA library directories, so add the HIP
+line beside it.
 Whether a `/opt/rocm` package registers its lib dir with ld.so.conf was not verified; do
-not rely on it. (h2o4gpu)
+not rely on it. (h2o4gpu, ESPResSo)
 
 **With the ROCm clang as the host compiler, a found system libunwind links but does not load.**
 The ROCm clang searches the `include/` directory next to its LLVM install ahead of the system
@@ -374,6 +529,42 @@ by hipMM/RMM) trips although only one arch was requested. It is an artifact of t
 a port defect: the identical configure passes with `HIP_VISIBLE_DEVICES=0`. Work around it on
 the command line, with no source edit: pass `-DGPU_TARGETS=<arch> -DAMDGPU_TARGETS=<arch>`
 alongside `-DCMAKE_HIP_ARCHITECTURES=<arch>`. (HEonGPU, four gfx1100)
+
+**A source-built HIP library and a PyTorch wheel in one process must load the same ROCm
+runtime.** A process gets one `libamdhip64.so.7`. When a port builds a HIP library from
+source (Warp, a native extension, a JIT runtime) and the project also imports PyTorch, build
+the library against the ROCm that the PyTorch wheel brings, not against whatever ROCm the
+machine happens to have. IsaacLab on MI300X: AMD Warp built against a TheRock HIP 7.16 plus
+`torch==2.11.0+rocm7.2` from download.pytorch.org fails in an order-dependent way. With
+torch imported first, Warp prints `CUDA Toolkit 71626.38, Driver 70226.1 (insufficient CUDA
+driver version!)` and exposes no GPU; with Warp imported first, torch raises `RuntimeError:
+No CUDA GPUs are available`. Neither message names the runtime clash, and both look like a
+broken port or a driver problem. Building Warp against apt ROCm 7.2 to match the wheel
+stalled (hipCUB `DeviceReduce` compiling for over 25 minutes). What worked: TheRock's Python
+packages carry the SDK and a matching PyTorch together. Install `torch==X+rocmV`,
+`torchvision==Y+rocmV` and `"rocm[libraries,devel]==V"` from
+`https://repo.amd.com/rocm/whl/<gfx-family>/` (with uv, give that index as
+`--extra-index-url` next to PyPI as `--index-url`; uv favours the extra index, and the
+reverse resolves PyPI's CUDA torch). Then build the library with
+`ROCM_PATH=$(rocm-sdk path --root)`, and keep `ROCM_PATH` and
+`LD_LIBRARY_PATH=$ROCM_PATH/lib` (prepended) set at run time: a runtime compiler (hipRTC)
+finds its headers through `ROCM_PATH`, and torch preloads `libamdhip64`/`libhiprtc` but not
+every library a separately built `.so` links (`libhiprtc-builtins.so.7` for Warp). Triage
+first: print which `libamdhip64` each import resolved (`/proc/<pid>/maps`, or the version
+each library reports) before rebuilding anything. (IsaacLab)
+
+**A vcpkg-manifest project needs `autoconf-archive` on the build machine, and a full vcpkg
+clone.** A project that moved its dependencies to a vcpkg manifest configures with
+`VCPKG_ROOT` set and builds the whole dependency set during configure. If the manifest pulls
+`pybind11`, vcpkg builds its own `python3`, whose `libb2` dependency fails `autoreconf` with
+a bare `error: building libb2:x64-linux failed with: BUILD_FAILED` unless `autoconf-archive`
+is installed; it is routinely missing from the project's documented apt list. Install
+`autoconf autoconf-archive automake libtool pkg-config python3-dev zip unzip curl` before
+the first configure. And do not clone vcpkg shallow: a `--depth 1` clone fails the first
+manifest configure with `vcpkg install failed` and "vcpkg was cloned as a shallow
+repository... failed to git show versions/baseline.json" for every port, because
+versioned-baseline resolution walks vcpkg's own history. Both look like a project build
+failure and neither involves the port. (CubbyFlow)
 
 ### LibTorch on the include path shadows the system `fmt`, and spdlog stops compiling
 
@@ -476,6 +667,13 @@ header pulled in `cuda_runtime.h` and then rocThrust, and the benchmark targets 
 documents ON once and build it**, then run one binary from each group; that is minutes, and
 it is the only way the claim in your commit message is true.
 
+Configure once with the project's DEFAULTS as well, because a recipe that passes usually
+turns such targets OFF. GooFit's documented HIP build worked only because every recorded
+session passed `-DGOOFIT_PYTHON=OFF`; the option defaults ON whenever Python development
+files are found, so the build command in the project's own README failed for anyone who ran
+it verbatim on an ordinary machine ("Never mark the host `.cpp` files `LANGUAGE HIP`" above
+has the flag leak those binding targets hit). (HEonGPU, GooFit)
+
 ## Other build systems
 
 ### A cached build-script decision from a wrong env var survives fixing the env var
@@ -491,3 +689,21 @@ Fix: `cargo clean -p <crate>` before rebuilding. More generally, check
 `env | grep -i <toolkit>_path` against what the build script expects before trusting a value
 copied from another machine: `/opt/rocm`, a pip-installed `_rocm_sdk_devel` tree and a conda
 env are different layouts. (mahout)
+
+### An nvcc Makefile's link line does not carry over to hipcc verbatim
+
+Porting a hand-written Makefile from nvcc to hipcc, two link-line idioms change meaning, one loudly
+and one silently. (1) nvcc splits the argument of `-Xlinker` at commas, clang does not: `-Xlinker
+-soname,libfoo.so` reaches ld.lld as one argument and fails with "unknown argument
+'-soname,libfoo.so'"; use `-Wl,-soname,libfoo.so` for the HIP branch (plain `-Xlinker -z -Xlinker
+nodelete` and `-Xlinker -rpath=dir` are fine). (2) `-fopenmp` on a hipcc link line links LLVM's
+`libomp.so`; if the host application or library was built by GCC (`libgomp.so.1`), the process ends
+up with two OpenMP runtimes ("One OpenMP runtime per binary" above). When the HIP objects make no
+OpenMP call (`nm -u | grep -i omp` is empty), keep `-fopenmp` on the compile line and drop it from
+the link line only.
+
+Also: a project that compiles device code with nvcc `-ccbin mpicxx` gets the MPI include path from
+the wrapper for free; hipcc does not use a host compiler, so ask the wrapper where `mpi.h` is (`echo
+'#include <mpi.h>' | mpicxx -x c++ -E -H -o /dev/null -`, which relies only on the compiler's `-H`
+header trace, not on a wrapper option; tested with MPICH) instead of `--showme:compile` (Open MPI
+only). Seen on plumed2's cudaCoord plugin, ROCm 10.1 (clang 24), 2026-11. (plumed2)
