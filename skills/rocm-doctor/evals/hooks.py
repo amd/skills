@@ -8,7 +8,10 @@ with no directory runs exactly as it did before: no `rocm` on PATH.
 
 The stub replays recorded output and nothing else. It answers `--version`,
 `fix --json` and `diagnose`, and `examine --json` for a case whose recording has
-one, and refuses every other command with exit code 2.
+one, and refuses every other command with exit code 2. A case whose recording
+has an `apply` entry also gets `rocm fix <id>` for that id, with `--dry-run` (before or
+after the id) and with no flag; `--yes` is never answered, so an agent that applies before the user
+said OK meets a refusal and the transcript shows the command.
 It only ever prints text read from `replies.json`, so whatever an agent asks it,
 it cannot change a machine or send anything: that comes from the allowlist, not
 from the refusal of `diagnose` options below, which is there for fidelity (see
@@ -50,6 +53,7 @@ from pathlib import Path
 replies = json.loads(
     (Path(__file__).resolve().parent / "replies.json").read_text(encoding="utf-8")
 )
+apply = replies.get("apply")
 args = sys.argv[1:]
 # Fidelity only, not safety (the allowlist below already makes the stub inert).
 # The one recorded `diagnose` answer is for the symptom the case was recorded
@@ -75,9 +79,17 @@ elif args[:1] == ["diagnose"] and not refused & {a.split("=")[0] for a in args}:
     reply(replies["diagnose_json" if "--json" in args else "diagnose_text"])
 elif args == ["examine", "--json"] and "examine_json" in replies:
     reply(replies["examine_json"])
+elif apply and args in (
+    ["fix", apply["fix_id"], "--dry-run"],
+    ["fix", "--dry-run", apply["fix_id"]],
+):
+    reply(apply["dry_run"])
+elif apply and args == ["fix", apply["fix_id"]]:
+    reply(apply["bare"])
 sys.stderr.write(
     "error: this evaluation replays only `--version`, `fix --json`, `diagnose` "
-    "and, where recorded, `examine --json`; it runs nothing else\n"
+    "and, where recorded, `examine --json` and `fix <id>` with `--dry-run` or no "
+    "flag; it runs nothing else\n"
 )
 sys.exit(2)
 """

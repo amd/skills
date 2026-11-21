@@ -5,9 +5,11 @@ Run by `cargo test -p xtask` (see `the_eval_hook_tests_pass` in
 
 What they pin is the promise the docs make about the stub: it replays the
 recorded answer for `--version`, `fix --json` and `diagnose` (and `examine
---json` for a case whose recording has one), refuses every other command with
-exit code 2, and leaves PATH and the temporary directory as it found them. It never runs anything (it only prints canned text); the refusal
-of unrecorded `diagnose` options is about fidelity.
+--json` for a case whose recording has one, and `fix <id>` with `--dry-run` or
+no flag for a case whose recording has an `apply` entry), refuses every other command with exit
+code 2, and leaves PATH and the temporary directory as it found them. It never
+runs anything (it only prints canned text); the refusal of unrecorded `diagnose`
+options is about fidelity.
 """
 
 import importlib.util
@@ -85,6 +87,21 @@ class Replay(unittest.TestCase):
                 self.assertEqual(done.returncode, 0)
                 self.assertEqual(
                     done.stdout.replace("\r\n", "\n"), RECORDED[key]["stdout"]
+                )
+
+    def test_the_equals_form_of_symptom_is_answered_whatever_the_paste_holds(self):
+        # The skill passes the paste as `--symptom='<text>'`. What the paste says
+        # is not an option of the command: text naming `--model` or `--send`, or
+        # one that begins with `-`, must not be mistaken for one.
+        for paste in ["$(id) `id`", "-1073741819", "see --send and --model=x"]:
+            with self.subTest(paste=paste):
+                done = rocm(f"--symptom={paste}", "diagnose", "--json")
+                self.assertEqual(done.returncode, 2, "the verb comes first")
+                done = rocm("diagnose", f"--symptom={paste}", "--json")
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertEqual(
+                    done.stdout.replace("\r\n", "\n"),
+                    RECORDED["diagnose_json"]["stdout"],
                 )
 
     def test_git_bash_on_windows_finds_the_stub_not_a_real_rocm(self):
@@ -189,6 +206,81 @@ class ExamineReplay(unittest.TestCase):
                 done = rocm(*args)
                 self.assertEqual(done.returncode, 2, done.stderr)
                 self.assertIn("runs nothing else", done.stderr)
+
+
+APPLY_CASE = "rocm-apply-auto-fix-needs-consent"
+APPLY = json.loads(
+    (HERE / "fixtures" / APPLY_CASE / "replies.json").read_text(encoding="utf-8")
+)["apply"]
+
+
+class ApplyReplay(unittest.TestCase):
+    """A case whose recording has an `apply` entry gets `rocm fix <id>` for that id
+    with `--dry-run` and with no flag, and never for `--yes` or another id."""
+
+    def setUp(self):
+        self.saved = os.environ["PATH"]
+        self.case = types.SimpleNamespace(id=APPLY_CASE)
+        self.ctx = {}
+        hooks.setup(None, self.case, self.ctx)
+
+    def tearDown(self):
+        hooks.teardown(None, self.case, self.ctx)
+        os.environ["PATH"] = self.saved
+
+    def test_the_dry_run_prints_the_recorded_change_and_exits_0(self):
+        # The real command takes the flag before or after the id.
+        for args in (
+            ["fix", APPLY["fix_id"], "--dry-run"],
+            ["fix", "--dry-run", APPLY["fix_id"]],
+        ):
+            with self.subTest(args=args):
+                done = rocm(*args)
+                self.assertEqual(done.returncode, APPLY["dry_run"]["rc"])
+                self.assertEqual(done.returncode, 0)
+                self.assertEqual(
+                    done.stdout.replace("\r\n", "\n"), APPLY["dry_run"]["stdout"]
+                )
+                self.assertEqual(
+                    done.stderr.replace("\r\n", "\n"), APPLY["dry_run"]["stderr"]
+                )
+
+    def test_the_bare_command_is_refused_the_way_a_shell_without_a_terminal_is(self):
+        done = rocm("fix", APPLY["fix_id"])
+        self.assertEqual(done.returncode, APPLY["bare"]["rc"])
+        self.assertEqual(done.returncode, 5)
+        self.assertEqual(done.stdout.replace("\r\n", "\n"), APPLY["bare"]["stdout"])
+        # The plan is shown before the refusal, as the real command does.
+        self.assertIn("Commands:", done.stdout)
+        self.assertEqual(done.stderr.replace("\r\n", "\n"), APPLY["bare"]["stderr"])
+        self.assertIn("refusing to apply", done.stderr)
+
+    def test_applying_with_yes_is_never_answered(self):
+        for args in (
+            ["fix", APPLY["fix_id"], "--yes"],
+            ["fix", APPLY["fix_id"], "--dry-run", "--yes"],
+            ["fix", "--yes", APPLY["fix_id"]],
+            ["fix", "--dry-run", "--yes", APPLY["fix_id"]],
+            ["fix", "fix-9-igpu-dgpu", "--dry-run"],
+            ["fix", "--dry-run", "fix-9-igpu-dgpu"],
+            # A different id gets no plan without a flag either.
+            ["fix", "fix-9-igpu-dgpu"],
+        ):
+            with self.subTest(args=args):
+                done = rocm(*args)
+                self.assertEqual(done.returncode, 2, done.stderr)
+                self.assertEqual(done.stdout, "")
+                self.assertIn("runs nothing else", done.stderr)
+
+    def test_a_case_with_no_apply_entry_gets_no_fix_id(self):
+        # Only a case whose recording has an `apply` entry gets the commands.
+        hooks.teardown(None, self.case, self.ctx)
+        other = types.SimpleNamespace(id="rocm-current-cli-carries-on")
+        hooks.setup(None, other, self.ctx)
+        self.case = other
+        done = rocm("fix", APPLY["fix_id"], "--dry-run")
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertEqual(done.stdout, "")
 
 
 class Overlap(unittest.TestCase):
