@@ -1,0 +1,110 @@
+name: skill-card-evals
+
+# Appends a bump's eval results to the bumped skill's `skill-card.md`, so the
+# card a user reads names the commit it ships and how that commit scored.
+#
+# Runs when an `evals` run finishes on a `Bump <skill>` pull request opened by
+# `federate-skills`. `.github/scripts/skill_card_evals.py` reads that run's
+# routing report and behavioral job logs and renders the section; this
+# workflow commits it to the pull request's branch.
+#
+# A bump re-vendors the skill folder wholesale, which resets the card to the
+# upstream copy, so the section always describes the bump it ships with. A
+# re-run of `evals` rewrites the section in place.
+#
+# `workflow_run` runs this file as it is on `main`, with a write token, so
+# nothing from the pull request is executed: the script comes from `main`, and
+# the pull request's branch is only checked out to edit one markdown file.
+#
+# A push made with GITHUB_TOKEN starts no workflow, which keeps this from
+# re-triggering `evals`, but it also leaves the new head commit without the
+# required `validate` check. That check is dispatched explicitly after the
+# push, which GITHUB_TOKEN is allowed to do.
+
+on:
+  workflow_run:
+    workflows: [evals]
+    types: [completed]
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: skill-card-evals-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+env:
+  PR_BRANCH_PREFIX: bot/federate/
+
+jobs:
+  card:
+    name: Append eval results to the skill card
+    # Only federation bumps from this repo, and only runs that graded something.
+    # A run held for approval or cancelled has no results to report.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      startsWith(github.event.workflow_run.head_branch, 'bot/federate/') &&
+      contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+
+      - name: Check out the bump branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          path: bump
+
+      # If the branch moved since the run started, these results describe a
+      # commit that is no longer the pull request's head. The newer commit has
+      # its own `evals` run, which will call this workflow again.
+      - name: Confirm the branch is still at the evaluated commit
+        id: head
+        env:
+          EVALUATED: ${{ github.event.workflow_run.head_sha }}
+        working-directory: bump
+        run: |
+          current="$(git rev-parse HEAD)"
+          if [ "$current" != "$EVALUATED" ]; then
+            echo "Branch is at $current, results are for $EVALUATED; skipping."
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up uv
+        if: steps.head.outputs.current == 'true'
+        uses: astral-sh/setup-uv@v7
+
+      - name: Write the evaluation section
+        if: steps.head.outputs.current == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          skill="${BRANCH#"$PR_BRANCH_PREFIX"}"
+          uv run .github/scripts/skill_card_evals.py \
+            --repo "$GITHUB_REPOSITORY" --run-id "$RUN_ID" \
+            --skill "$skill" --skills-dir bump/skills
+
+      - name: Commit, push, and re-run validate
+        if: steps.head.outputs.current == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+        working-directory: bump
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "The card already carries these results."
+            exit 0
+          fi
+          skill="${BRANCH#"$PR_BRANCH_PREFIX"}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Add eval results to \`$skill\` skill card"
+          git push origin "HEAD:$BRANCH"
+          gh workflow run validate.yml --ref "$BRANCH"
