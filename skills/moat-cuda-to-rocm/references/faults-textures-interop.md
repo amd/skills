@@ -57,20 +57,22 @@ TU binds its own copy. The once-per-process init log also makes the port self-re
 arch's verdict during validation. (TIGRE `cuda_to_hip.h` + gpuUtils.cu.)
 
 **A layered `cudaArray` collapses across kernel launches -- use a non-layered 3D array.**
-CONFIRMED bug, gfx90a/CDNA2, ROCm 7.2.1, ROCm/clr#275. A
+CONFIRMED bug on gfx90a (CDNA2), gfx1100 (RDNA3) and gfx1201 (RDNA4), ROCm 7.2.1 and at
+least back to HIP SDK 6.2; tracked as ROCm/rocm-systems#11872 (originally ROCm/clr#275). A
 `cudaArrayLayered | cudaArraySurfaceLoadStore` float array written one layer at a time via
 `surf2DLayeredwrite` reads back the LAST-written layer for EVERY layer index on a later
 launch -- through `tex2DLayered`, `surf2DLayeredread` and host `hipMemcpy3D` alike.
-`hipDeviceSynchronize` between writes and recreating the texture do not help. Fix: drop
+`hipDeviceSynchronize` between writes and recreating the texture do not help. The root cause
+is in the HIP headers: `surf1D/2DLayered{read,write}` call the `__ockl_image_*_lod_*`
+builtins with the layer in the mip-LOD slot instead of the `_1Da`/`_2Da` array builtins. The
+collapse is write-side; `tex2DLayered` itself reads correctly once the writes land. Fix: drop
 `cudaArrayLayered` and allocate with `hipMalloc3DArray`, accessed via
 `surf3Dwrite`/`surf3Dread`/`tex3D` with the layer as a real z coordinate (a tall 2D array,
 W x H*L, also works). Map each `surf2DLayeredwrite(v,s,x,y,layer)` to
 `surf3Dwrite(v,s,x,y,layer)` once inside the compat header so call sites are untouched.
-CUDA keeps the real layered array byte-for-byte. AMD's candidate fix
-(ROCm/rocm-systems#6683) corrects only the `surf2DLayered` builtins -- `tex2DLayered` uses a
-different builtin and may collapse independently, so re-verify per ROCm version and keep
-the workaround until proven fixed on your stack. NOT confirmed on RDNA; re-run the repro on a
-wave32 part to establish arch scope. (popsift: the Gaussian pyramid and DoG were
+CUDA keeps the real layered array byte-for-byte. The header fix (ROCm/rocm-systems#6683)
+was verified to cure all three read paths but was closed unmerged (no unit test), so keep
+the workaround until a ROCm release ships the fix. (popsift: the Gaussian pyramid and DoG were
 layered arrays, and without this the DoG was all-zero.)
 
 ## GPUs without texture support (gfx94x and later)
@@ -86,7 +88,22 @@ on the device`), gated purely on `--offload-arch`, so the identical source compi
 gfx90a/gfx11xx/gfx12xx and fails ONLY on gfx942/gfx950 -- this surfaces as a validation
 failure on exactly one arch even though nothing about the build command differs (confirm the
 arch pin is correct before assuming a real regression; then check for `__gfx94plus_clr__` in
-the toolchain headers). A project doing a bare point-lookup through a texture object has a
+the toolchain headers). The compiler predefines the macro for those targets too, in two
+spellings, so one command decides it without any header:
+
+    clang++ -x hip --offload-arch=gfx942 -nogpulib -nogpuinc -dM -E - </dev/null \
+      | grep IMAGE_SUPPORT      # gfx942: __HIP_NO_IMAGE_SUPPORT 1 and __HIP_NO_IMAGE_SUPPORT__ 1
+                                # gfx90a, gfx1100: nothing
+
+It is not only a compile-time macro. On the hardware (MI300X, ROCm 7.14), `hipMallocArray`
+and `hipCreateTextureObject` both return `hipErrorNotSupported` ("operation not supported"),
+while `hipDeviceAttributeTexturePitchAlignment` still reports 256: a pitch-alignment query
+is NOT a capability probe, and a port that trusts it builds a pitch and then fails at
+creation (`hipDeviceAttributeImageSupport` is the query that answers). Check this BEFORE
+choosing where to test a port that uses texture objects: gfx90a covers wave64 and does
+support them, and supporting gfx94x means replacing texture objects with buffer reads, which
+is a feature-sized change to scope, not a port fix. (colmap: SiftGPU `ProgramCU.cu` and the
+`mvs/*.cu` kernels both fail to compile for gfx942.) A project doing a bare point-lookup through a texture object has a
 portable, unconditional fix, and the qualifying criterion is the ACCESS PATTERN, not the table
 size: point sampling only, no hardware filtering, no normalized coordinates, no address/border
 modes (arrayfire's FAST LUT is 64 KiB and still qualifies, so do not read "LUT" as "small").

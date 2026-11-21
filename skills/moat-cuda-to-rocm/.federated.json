@@ -2,9 +2,9 @@
   "source": "amd-ecosystem-moat",
   "repo": "AMD-Ecosystem/moat",
   "ref": "main",
-  "commit": "337a3c413ae79560b67e352dfdd4054b4b52e405",
+  "commit": "2069b27cf2c73e472192d85dd748189ac422f67e",
   "path": ".claude/skills/cuda-to-rocm",
   "license": "MIT",
-  "content_hash": "c7d12ef544ff858dcea608f1bd443b1f799ce2663000389866a08deaea8fa11b",
-  "imported_at": "2026-11-19T06:33:23Z"
+  "content_hash": "8316d7e3b1b0a6c3bc42a73fe9eee11075f3a27df033ad0b554ee2afc82787f9",
+  "imported_at": "2026-11-21T06:30:12Z"
 }

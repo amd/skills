@@ -181,7 +181,7 @@ which are the wrong lanes for any logical warp not at the wavefront base -- with
 `blockDim (32,32)`, odd `threadIdx.y` rows sit in the high lanes. Arch-unified form:
 `(uint32_t)(__ballot(PRED) >> (__lane_id() & ~31u))`, where the shift is 0 on wave32.
 (`__lane_id() & 32u`, and `(threadIdx.x % warpSize) / 32 * 32` in a one-dimensional block,
-are the same shift; use one spelling per project.) (cuSZ)
+are the same shift; use one spelling per project.) (cuSZ, GPU_IPC)
 
 **A full 64-bit `*_sync` mask in 32-lane group code traps in a HIP debug build on wave64.**
 HIP's `__shfl*_sync` / `__ballot_sync` run `__hip_check_mask`, which asserts that the mask
@@ -199,8 +199,16 @@ is validated against itself, whether the halves arrive together or apart. HIP ev
 shuffle in the caller's context, so the mask changes only that check and the ballot's
 `& mask`, never the data movement. Mask-free `__shfl(v, s, 32)` / `__ballot` also work but
 drop the check entirely. Folds over the native wavefront (`warp_id = threadIdx.x /
-warpSize`) keep the full mask. (LichtFeld-Studio: fastgs/gsplat 32-lane tile macros, nn
-softmax/norm block reductions, `block_reduce_min4`.)
+warpSize`) keep the full mask. A PARTIAL mask needs the same move. Kernels that tile a block
+into 32-lane warps (`warp = threadIdx.x >> 5`) and pass a sub-group mask
+(`atom_mask = 0xf << 4*k`) to a masked `__syncwarp`/`__shfl*_sync` do not compile with the
+32-bit mask, and a mask that is only widened still names lanes of the first tile, so it
+differs from `__ballot(true)` of the lanes passing it and can trap. Move it to the lanes the
+tile occupies, `(unsigned long long)mask << (__lane_id() & 32)` (shift 0 on wave32), behind
+a compat-header macro that is the identity for CUDA. Also pass the tile width explicitly:
+`__shfl_sync(m, v, 0)` defaults to `warpSize`, so on wave64 lane 0 of the first tile is
+broadcast to both. (LichtFeld-Studio: fastgs/gsplat 32-lane tile macros, nn
+softmax/norm block reductions, `block_reduce_min4`; GPUMD: NEP-spin.)
 
 ## Shuffles and logical warps
 
@@ -211,6 +219,61 @@ subgroup whatever the physical width. That includes the tile's `ballot()`: HIP's
 to bits `0..N-1` (`internal::helper::adjust_mask`), so storing it in a 32-bit integer and
 indexing it with `__ffs`/`__popc`/`__fns` is correct on wave64. Only a RAW `__ballot`
 truncated to 32 bits (the next entry) is the fault. (faster-gaussian-splatting)
+
+**A compat layer for CUDA's `*_sync` warp functions must pin every member to 32 lanes, and
+ROCm's native `*_sync` functions are not that layer.** A CUDA warp is always 32 lanes, so
+`__shfl_down_sync(0xffffffff, v, d)` is BY DEFINITION a 32-lane operation. Mapping it to the
+unqualified `__shfl_down(v, d)` silently retargets it to the WAVEFRONT width, which is right
+on RDNA and wrong on CDNA. Write the whole family with the width in it -- `__shfl(v, lane,
+32)`, `__shfl_down(v, d, 32)`, `__shfl_up`, `__shfl_xor` -- beside the shifted ballot of the
+compat `__ballot_sync` entry above, and the header is correct on both wavefront sizes with
+no arch branch. Check the shuffles even when the ballot looks handled: GPU_IPC's header had
+a plausible ballot and unqualified shuffles, and the shuffles were the half that would have
+broken CDNA, since its PCG and BVH reductions loop `delta = 1,2,4,8,16` over logical
+32-element groups. Do not later "simplify" such a layer into ROCm's own `*_sync` functions
+called the CUDA way: ROCm's `__ballot_sync` returns a 64-bit WAVEFRONT-wide mask, and its
+`__shfl_*_sync` default `width` to `warpSize`, which is 64 on CDNA. That substitution looks
+like a cleanup, compiles everywhere, passes on RDNA and silently changes behaviour on
+gfx90a/gfx94x. (The native functions are usable with an explicit width of 32 and the group
+mask of the debug-trap entry above; what breaks is relying on their defaults.) Write the
+layer as functions under project-owned names, not as macros named after the intrinsics
+(build-headers-macros.md, "Do not name compat macros after the warp functions ROCm
+declares"). (GPU_IPC)
+
+**A fixed-cluster warp reduction is wavefront-safe exactly when the cluster size equals the
+pinned shuffle width AND the clusters are aligned to it: check that, do not restructure the
+branch.** Code that partitions work into fixed 32-element clusters (GPU_IPC's `BANKSIZE 32`
+preconditioner banks) commonly guards a reduction on a cluster-uniform predicate:
+`if (__popc(connectMsk) == BANKSIZE) { for (d = 1; d < 32; d <<= 1) v += shfl_down(v, d,
+32); }`. At wave64 one cluster can take that branch while its sibling in the same wavefront
+does not, which invites the "fix" of hoisting the reduction above the branch so the whole
+wavefront participates. Resist it. Once the compat layer pins the width to 32 (previous
+entry), `ds_bpermute` clamps every source index with `self & ~(width-1)`, so a lane only
+ever reads its own 32-lane group; with `laneId = threadIdx.x % BANKSIZE` that group IS the
+cluster, and the reduction is correct at wave32, at wave64 and on CUDA whatever the sibling
+cluster did. The invariant to verify is: cluster size == pinned width, cluster base aligned
+to it, predicate uniform over the cluster -- the same invariant that makes the reduction
+meaningful on CUDA in the first place. Hoisting is not merely unnecessary, it can ADD a
+fault: look for an earlier early-return that leaves a PARTIAL group. GPU_IPC launches this
+kernel over `totalNodes = vertNum`, which is not padded to BANKSIZE (38386 vertices, so 18
+live lanes in the last bank and 14 that already returned). The guarded form never shuffles
+there, because a partial bank cannot reach `popc == BANKSIZE`; the hoisted form does, with a
+full `0xffffffff` member mask naming returned lanes -- an undefined source-lane read on both
+back ends, bought for nothing. (GPU_IPC `__buildMultiLevelR_optimized`, where the hoist was
+written, measured clean, and then reverted for exactly this reason.)
+
+**Pass that logical width on BOTH paths, and prefer the project's own pre-CUDA-9 branch over
+remapping `__shfl_*_sync` in the compat header.** An `#ifdef USE_HIP` pair that spells the
+same reduction twice, width 32 on HIP and bare on CUDA, reads as an AMD-specific hack and
+draws review churn. The 32 is algorithmic (block.x, one descriptor row, a bitonic network),
+so writing it unconditionally is both correct and clearer, and NVIDIA generates the same
+code. Better still, many projects already select between `__shfl_*_sync` and the mask-free
+`__shfl*` on a configure-time flag for CUDA before 9.0. HIP's spelling IS the mask-free one,
+with a width up to 64, so setting that existing flag to 0 on the HIP path removes the
+compat-header macros entirely, and with them the `<hip/hip_bf16.h>` include-ordering
+workaround, since newer ROCm declares real `__shfl_*_sync` templates that function-like
+macros of the same name would rewrite. (popsift, from the maintainer's review of its pull
+request.)
 
 **An over-wide `__shfl*` width does not error, it silently degenerates.**
 `__shfl_up(v, delta, 64)` lowers to `__builtin_amdgcn_ds_bpermute` with a clamp of
@@ -252,6 +315,16 @@ or `BlockRadixSort` lowers to a single-wavefront op with no syncing epilogue; re
 first's reads. CUDA's 32-wide warp split the block in two and masked it. (CV-CUDA:
 OpPairwiseMatcher crossCheck.)
 
+**A block collective called in a loop without a barrier races only under concurrent GPU load.** The
+same missing barrier on a multi-wave block is timing-dependent, so it can pass every serial run. A
+`BlockScan` called once per loop iteration on the same storage, with no `__syncthreads()` between
+iterations, gave some threads wrong offsets only when other processes shared the GPU (pytest-xdist
+workers), on wave32 gfx1100. The symptom was `hipErrorIllegalAddress` in a LATER kernel that read
+the unwritten `-1` slots as indices. Before blaming the kernel that faults, check the index arrays
+it was given for unfilled entries, and run the producer under concurrent load. Fix it
+unconditionally: the barrier is CUB's documented requirement on CUDA too. (gpu4pyscf:
+`put_pairs_on_blocks_kernel`.)
+
 ## Other per-wavefront assumptions
 
 **`__smid()` can EXCEED `multiProcessorCount` on AMD.** NVIDIA's `%smid` is dense in
@@ -269,8 +342,41 @@ every allocation paired with a `smid()*STRIDE` kernel; pools indexed by `blockId
 `multiProcessorCount`. Prove the fix with a sentinel region after the pool. (gpu4pyscf:
 int3c2e fill pool, ~4MB silent OOB.)
 
+**A leader-only write broadcast by shuffle must be initialised on every lane.** The
+warp-aggregated atomic idiom, `int base; if (lane == 0) base = atomicAdd(ctr, n);
+base = __shfl(base, 0);`, reads `base` uninitialised on every other lane. That is undefined
+behaviour, and "the shuffle only reads lane 0, so it is harmless" is wrong. clang marks
+by-value parameters `noundef`, so passing the indeterminate value into a by-value shuffle
+wrapper makes the `lane != 0` path undefined; the optimizer replaces the branch with
+`llvm.assume(threadIdx.x == 0)`, EVERY lane performs the atomic (the counter advances by
+`warpSize * n`), and any `(1u << lane) - 1` prefix offset folds to 0. The symptom is a count
+exactly `warpSize` times the real number of writes, with the surplus slots never written
+(zeroed or stale entries downstream). Declare `int base = 0;` or use a ternary; both give
+identical ISA, so it costs nothing. A volatile counter does not help. To check a suspect
+site, emit device IR (`--cuda-device-only -S -emit-llvm`) and grep for `llvm.assume`;
+`-Xclang -no-enable-noundef-analysis` making it vanish confirms the cause. Measured by an
+upstream user on gfx1201, ROCm 7.2.1, against popsift's pre-port `extrema_count()`. The same
+construct left in a CUDA `#else` branch is the same undefined behaviour waiting for a
+compiler, so grep the port for the idiom and initialise it on both paths. The padding-lane
+form of this compiler behaviour is in faults-memory-streams.md ("An uninitialised local
+passed by value"). (popsift, upstream issue 193)
+
+**An uninitialized value RETURNED from a device function lets clang assume the thread index.** The
+return-value form of the previous entry. Block-reduction helpers often assign the result only on
+thread 0 (`T sum; if (threadIdx.x == 0) sum = ...; return sum;`) and every thread returns it. nvcc
+tolerates this. clang marks return values `noundef` as well, so returning an uninitialized value on
+any path is immediate undefined behaviour, and the optimizer may conclude the other paths never run:
+on AMD GPUs it emitted `llvm.assume(threadIdx.x == 0)`, then folded `partials[threadIdx.x /
+warpSize]` to `partials[0]`, so a two-wavefront block sum returned one wavefront's partial.
+Symptoms: correct at -O0, wrong at -O1 and above, and the bug disappears when a printf is added.
+Find it by compiling to LLVM IR (hipRTC `-fgpu-rdc` plus `llvm-dis`, or `-emit-llvm`) and grepping
+for `llvm.assume` on `workitem.id`. Fix: value-initialize (`T sum {};`) every local that is returned
+or copied while unassigned on some threads. (warp-1.14)
+
 **Validate wave-size work on BOTH widths, and where there is no host reference use a
 CROSS-ARCH CONSISTENCY gate.** "Deterministic, non-zero and plausible" passes a wrong
 wave32 result -- popsift's gfx1100 reported deterministic non-zero features from a
 miscounted extrema path, a false pass. Where the algorithm is deterministic, diff the
 wave32 output against the wave64 output for the same input. (popsift)
+`-mwavefrontsize64` on an RDNA card is not a substitute for the wave64 run; what it can and
+cannot show is in validation.md ("`-mwavefrontsize64` on an RDNA card checks lane logic").
