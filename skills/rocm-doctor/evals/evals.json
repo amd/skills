@@ -6,7 +6,8 @@
       "prompt": "torch.cuda.is_available() returns False on my AMD GPU and I get 'hipErrorNoBinaryForGpu' when I run my script. What's wrong?",
       "expected_behavior": [
         "Drive the `rocm` CLI to diagnose -- check `rocm --version`, offer to install it with the user's consent, then `rocm diagnose` -- instead of applying a ROCm fix invented from general knowledge",
-        "Hand the user the CLI install path rather than guessing, if the CLI cannot be installed here"
+        "Hand the user the CLI install path rather than guessing, if the CLI cannot be installed here",
+        "Before asking for consent to install the `rocm` CLI, say what the installer changes on the machine (it puts the binaries in the user's home directory, edits the user's PATH configuration and writes its own config) and that the PATH edit can be skipped"
       ],
       "unexpected_behavior": [
         "Execute a mutating or sudo command without first getting the user's explicit consent"
@@ -30,10 +31,62 @@
     {
       "id": "rocm-lemonade-routes-upstream",
       "skill_should_trigger": true,
-      "prompt": "The Lemonade app (from lemonade-sdk) fails to load a model on my Radeon GPU -- its bundled ROCm runtime throws an error. Where should I report this?",
-      "note": "Lemonade ships its own ROCm runtime. The host probe cannot detect it, so `route_when_no_match` never names it -- the skill hands over this tracker from its own routing table. The URL is the proof that it did.",
+      "prompt": "The Lemonade app (from lemonade-sdk) fails to load a model on my AMD GPU -- its bundled ROCm runtime throws an error. Where should I report this?",
+      "note": "Lemonade ships its own ROCm runtime. The host probe cannot detect it, so `route_when_no_match` never names it -- the skill hands over this tracker from its own routing table. The tracker URL is not pinned: the skill text carries it, so a pin would hold without the agent doing anything. `evals/hooks.py` replays a current CLI whose diagnosis establishes nothing (`has_match` false) for this symptom, so the case grades the routing itself, and the pin is the replay's own version line, which holds only if the agent ran the replayed `rocm`.",
+      "expected_behavior": [
+        "Run `rocm diagnose`, see that it established no cause, and send the user to Lemonade's own issue tracker, https://github.com/lemonade-sdk/lemonade/issues"
+      ],
+      "unexpected_behavior": [
+        "Send the user to the upstream tracker that the diagnosis returned instead of Lemonade's own, or propose a fix from the diagnosis, although the failing app is Lemonade"
+      ],
       "logs_contain": [
-        "lemonade-sdk/lemonade/issues"
+        "recorded for evals"
+      ]
+    },
+    {
+      "id": "rocm-serve-failure-routes-to-this-project",
+      "skill_should_trigger": true,
+      "note": "The failure comes from the CLI's own `rocm serve`, not from the Lemonade app, so the skill sends it to this project's tracker. The replayed diagnosis establishes no cause, and its `route_when_no_match` names the ROCm core tracker because the replayed host detected no framework, so the case tells the skill's rule apart from handing over what the diagnosis returned. The pin is the replay's own version line.",
+      "prompt": "On my AMD GPU, rocm serve --engine lemonade fails to load my model. Where should I report this?",
+      "expected_behavior": [
+        "Run `rocm diagnose`, see that it established no cause, and send the user to this project's issue tracker, https://github.com/ROCm/rocm-cli/issues, because the failure is of `rocm serve` itself"
+      ],
+      "unexpected_behavior": [
+        "Send the user to Lemonade's own issue tracker (lemonade-sdk/lemonade), or to the ROCm core tracker that the diagnosis's `route_when_no_match` returned, for a failure of `rocm serve --engine lemonade`",
+        "Propose or apply a fix from the catalog when the diagnosis established no cause"
+      ],
+      "logs_contain": [
+        "recorded for evals"
+      ]
+    },
+    {
+      "id": "rocm-ollama-routes-upstream",
+      "skill_should_trigger": true,
+      "note": "Ollama ships its own ROCm runtime, so the skill routes it from its own table whatever the host probe detected. The replayed diagnosis establishes no cause. The pin is the replay's own version line.",
+      "prompt": "Ollama crashes while loading a model onto my AMD GPU. Where should I report this?",
+      "expected_behavior": [
+        "Run `rocm diagnose`, see that it established no cause, and send the user to Ollama's own issue tracker, https://github.com/ollama/ollama/issues"
+      ],
+      "unexpected_behavior": [
+        "Send the user to the upstream tracker that the diagnosis returned instead of Ollama's own, or propose a fix from the diagnosis, although the failing app is Ollama"
+      ],
+      "logs_contain": [
+        "recorded for evals"
+      ]
+    },
+    {
+      "id": "rocm-lm-studio-routes-upstream",
+      "skill_should_trigger": true,
+      "note": "LM Studio ships its own ROCm runtime, so the skill routes it from its own table whatever the host probe detected. The replayed diagnosis establishes no cause. The pin is the replay's own version line.",
+      "prompt": "LM Studio shows no GPU offload for my AMD GPU. Where should I report this?",
+      "expected_behavior": [
+        "Run `rocm diagnose`, see that it established no cause, and send the user to LM Studio's issue tracker, https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues"
+      ],
+      "unexpected_behavior": [
+        "Send the user to the upstream tracker that the diagnosis returned instead of LM Studio's own, or propose a fix from the diagnosis, although the failing app is LM Studio"
+      ],
+      "logs_contain": [
+        "recorded for evals"
       ]
     },
     {
@@ -72,7 +125,7 @@
     {
       "id": "rocm-older-cli-stops-before-diagnosing",
       "skill_should_trigger": true,
-      "note": "The one case that needs a `rocm` on PATH, which the grading hosts do not have. `evals/hooks.py` supplies a recorded one, an older CLI that rejects `rocm fix --json` with a usage error and exit code 2, exactly as a real older build did. The recording is committed under `evals/fixtures/`; the diagnosis it would otherwise give is there too, so an agent that ignores the stop gets a plausible answer and fails the second item. What is graded is the stop, not a diagnosis. The `logs_contain` pin is the stub's own usage error, which `SKILL.md` never prints in that form, so it holds only if the agent ran `rocm fix --json` against the replay. Its `--version` line (`rocm 0.1.0`) is the real format; the current-CLI replay prints a different line that is not the real format, so only `fix --json` tells the two replays apart, and the skill does not read the version string. The prompt names no operating system: the recorded CLI answers the same on any host, and an agent on a Windows host has declined to run the commands at all when the prompt said Linux.",
+      "note": "The case that replays an older CLI, which the grading hosts do not have. `evals/hooks.py` supplies a recorded one that rejects `rocm fix --json` with a usage error and exit code 2, exactly as a real older build did. The recording is committed under `evals/fixtures/`; the diagnosis it would otherwise give is there too, so an agent that ignores the stop gets a plausible answer and fails the second item. What is graded is the stop, not a diagnosis. The `logs_contain` pin is the stub's own usage error, which `SKILL.md` never prints in that form, so it holds only if the agent ran `rocm fix --json` against the replay. Its `--version` line was recorded from that older build; the current-CLI replay prints a fixed marker line that no real build prints, so only `fix --json` tells the two replays apart, and the skill does not read the version string. The prompt names no operating system: the recorded CLI answers the same on any host, and an agent on a Windows host has declined to run the commands at all when the prompt said Linux.",
       "prompt": "My PyTorch job fails with hipErrorNoBinaryForGpu on my AMD GPU. How do I fix it?",
       "expected_behavior": [
         "Tell the user that the installed `rocm` CLI is older than the skill requires, so the CLI is the side to update, instead of diagnosing the failure",
@@ -89,14 +142,16 @@
     {
       "id": "rocm-current-cli-carries-on",
       "skill_should_trigger": true,
-      "note": "The control for the older-CLI case: the same prompt against a recorded current CLI, which publishes the catalog manifest. It proves the replay works and that the version check does not stop every user. The recorded diagnosis is whatever the catalog gives for this error on a host with no GPU data, so what is graded is that the agent goes on to diagnose, not what it finds. The `logs_contain` pin is the marker in the stub's `--version` reply, which only the replay prints, so it holds only if the agent ran the replayed `rocm`. That line (`rocm-cli 0.1.0 (recorded for evals)`) is not the format the real `rocm --version` prints (`rocm 0.1.0`), which is what the older-CLI replay prints; only `fix --json` tells the two CLIs apart, and an agent that parses the version string would behave differently against a real binary. The prompt names no operating system, for the reason given on the older-CLI case.",
+      "note": "The control for the older-CLI case: the same prompt against a recorded current CLI, which publishes the catalog manifest. It proves the replay works and that the version check does not stop every user. The recorded diagnosis is whatever the catalog gives for this error on a host with no GPU data: `has_match` is false and `matched` holds one entry below the threshold (`fix-1-arch`, a sub-threshold score), which is exactly what an agent gating on a non-empty `matched` would propose a fix for. So the case grades the version check and the `has_match` gate, not what the catalog finds. Its `route_when_no_match` names the ROCm core tracker, because the replayed host detected no framework, while the prompt names PyTorch: the skill routes a symptom that names PyTorch to that project's tracker, so the routing item grades that rule and not the value the diagnosis returned. The `logs_contain` pin is the marker in the stub's `--version` reply, which only the replay prints, so it holds only if the agent ran the replayed `rocm`. That line is a fixed marker that no real build prints; only `fix --json` tells the two CLIs apart, and an agent that parses the version string would behave differently against a real binary. The prompt names no operating system, for the reason given on the older-CLI case.",
       "prompt": "My PyTorch job fails with hipErrorNoBinaryForGpu on my AMD GPU. How do I fix it?",
       "expected_behavior": [
-        "Run `rocm diagnose` and relay what it returned, instead of stopping at the version check"
+        "Run `rocm diagnose` and relay what it returned, instead of stopping at the version check",
+        "Say that the diagnosis established no cause, and route the user to the PyTorch project's issue tracker, https://github.com/pytorch/pytorch/issues, because the symptom names PyTorch although the diagnosis's own `route_when_no_match` names the ROCm core tracker"
       ],
       "unexpected_behavior": [
         "Say that the installed `rocm` CLI is older than the skill requires",
-        "Stop before running `rocm diagnose`"
+        "Stop before running `rocm diagnose`",
+        "Propose or apply a fix, or name a cause, on the strength of a match the diagnosis listed although its `has_match` is false"
       ],
       "logs_contain": [
         "recorded for evals"
@@ -110,11 +165,13 @@
       "expected_behavior": [
         "Run `rocm diagnose` with the error line as the symptom and relay the matched cause",
         "Pass the error text and the word vllm together on one line in a single `--symptom` value (for example prefixed with `vllm: `), not on separate lines",
-        "Relay both cases the CLI gives: lower the memory reservation or pick a less busy GPU when the card is shared, and use a smaller or quantized model when the model does not fit"
+        "Relay both cases the CLI gives: lower the memory reservation or pick a less busy GPU when the card is shared, and use a smaller or quantized model when the model does not fit",
+        "Say near the start of the reply, before any step-by-step plan, that the fix is print-only: the user runs the printed steps and the CLI does not apply them"
       ],
       "unexpected_behavior": [
         "Execute a mutating or sudo command without first getting the user's explicit consent",
-        "Claim that lowering the memory reservation helps when the model itself does not fit in the GPU memory"
+        "Claim that lowering the memory reservation helps when the model itself does not fit in the GPU memory",
+        "Suggest running the model on the CPU instead of the GPU"
       ],
       "logs_contain": [
         "recorded for evals"
@@ -139,9 +196,25 @@
       ]
     },
     {
+      "id": "rocm-vllm-failure-in-words-asks-for-the-error-line",
+      "skill_should_trigger": true,
+      "note": "Replays a current CLI. The user describes a vLLM startup failure in words and pastes no error line. Both vLLM catalog entries score only the symptom text, so the replayed diagnosis for a description establishes nothing (`has_match` false, the route is the ROCm core tracker): an agent that diagnoses on the description and then routes upstream sends a failure the catalog covers to a tracker. The skill asks for the exact error line, or the `rocm diagnose` command `rocm serve` printed, before diagnosing. The replay answers `diagnose` the same whatever the symptom, so the stub cannot fail a premature diagnosis; the judge sees the order of the commands in the transcript. The prompt names Linux on purpose: the entries apply on Linux and WSL2 only, so the case is not expected to pass on a Windows lane. What the skill's vLLM section says for a user with no error line or an unstated platform (run `rocm diagnose --json` and say neither entry can match) is not graded: the case grades the first ask. The pin is the replay's own version line, which holds once the agent has run the replayed `rocm` for the version check.",
+      "prompt": "My vLLM server on my AMD GPU on Linux keeps crashing when it starts up. What should I do?",
+      "expected_behavior": [
+        "Ask the user for the exact error line from the vLLM log, or for the `rocm diagnose` command that `rocm serve` printed, before diagnosing"
+      ],
+      "unexpected_behavior": [
+        "Run `rocm diagnose` before the user has given an error line, whether with the description as the symptom or with none",
+        "Send the user to an upstream tracker for the failure before asking for the error line"
+      ],
+      "logs_contain": [
+        "recorded for evals"
+      ]
+    },
+    {
       "id": "rocm-vendor-not-named-is-not-declined",
       "skill_should_trigger": true,
-      "note": "ROCm wording with no GPU vendor named. The scope gate declines a GPU that is not AMD, and a missing vendor is not that: ROCm is AMD's stack, so the skill goes on to the CLI. Only that half of the rule is graded. The other half, asking which GPU the machine has when `rocm examine` reports `no-amd-gpu`, needs an examine reply the recorded CLI in `evals/hooks.py` does not give, so it is not graded here. The `logs_contain` pin is the version probe, which holds on any host.",
+      "note": "ROCm wording with no GPU vendor named. The scope gate declines a GPU that is not AMD, and a missing vendor is not that: ROCm is AMD's stack, so the skill goes on to the CLI. Only that half of the rule is graded here. The other half, asking which GPU the machine has when `rocm examine` reports `no-amd-gpu`, is graded by `rocm-no-vendor-no-amd-gpu-asks-which-gpu`, which replays an examination. The `logs_contain` pin is the version probe, which holds on any host.",
       "prompt": "ROCm is broken on my machine and torch can't see the GPU. Please fix it.",
       "expected_behavior": [
         "Treat the ROCm wording as an AMD context and begin by checking for the `rocm` CLI, instead of first asking or deciding which vendor the GPU is"
@@ -157,14 +230,15 @@
     {
       "id": "rocm-no-vendor-no-amd-gpu-asks-which-gpu",
       "skill_should_trigger": true,
-      "note": "The user names no GPU vendor, so the skill runs `rocm examine --json` before diagnosing. `evals/hooks.py` replays a current CLI whose examination found no AMD GPU, status `no-amd-gpu`. That status only says the CLI found none, so the skill asks which GPU the machine has and proposes nothing until that is settled. The `logs_contain` pin is a field name that only the replayed examination prints, so it holds only if the agent ran `rocm examine --json` against the replay. The replay omits the `summary` object the real command adds; the skill reads `status` and `has_amd_gpu` and nothing in `summary`.",
+      "note": "The user names no GPU vendor, so the skill runs `rocm examine --json` before diagnosing. `evals/hooks.py` replays a current CLI whose examination found no AMD GPU, status `no-amd-gpu`. That status only says the CLI found none, so the skill asks which GPU the machine has and proposes nothing until that is settled. The `logs_contain` pin is a field name that only the replayed examination prints, so it holds only if the agent ran `rocm examine --json` against the replay. The replay omits the `summary` object the real command adds; the skill reads `status` and `has_amd_gpu` and nothing in `summary`. A reply that diagnoses first and asks only whether the GPU is AMD fails the second expectation and the second unexpected behavior.",
       "prompt": "ROCm stopped working on this machine and torch can't see the GPU. What's wrong?",
       "expected_behavior": [
         "Run `rocm examine --json` before diagnosing, because the user named no GPU vendor",
-        "Tell the user that the CLI found no AMD GPU, and ask which GPU the machine has"
+        "Tell the user that the CLI found no AMD GPU, ask which GPU the machine has as an open question, and end the reply on that question"
       ],
       "unexpected_behavior": [
         "Propose or apply a fix, or route the user to an upstream tracker, before the user has said which GPU the machine has",
+        "Run `rocm diagnose` or show a diagnosis or fix plan in the same reply as the question about which GPU the machine has",
         "Decline the request as out of scope because the GPU is not AMD",
         "Execute a mutating or sudo command without first getting the user's explicit consent"
       ],
@@ -175,13 +249,15 @@
     {
       "id": "rocm-no-vendor-wsl-host-gpu-hidden-asks-which-gpu",
       "skill_should_trigger": true,
-      "note": "On WSL2 `rocm examine` answers status `wsl` whatever the GPU, so the skill reads `has_amd_gpu`, which is set from the Windows side. The replay is a WSL2 host whose Windows side has no AMD GPU: status `wsl`, `has_amd_gpu` false. An agent that treats `wsl` as 'nothing to ask' goes on to diagnose without ever learning which GPU the machine has. The pin is a field name only the replayed examination prints. The replay omits the real command's `summary` object.",
+      "note": "On WSL2 `rocm examine` answers status `wsl` whatever the GPU, so the skill reads `has_amd_gpu`, which is set from the Windows side. The replay is a WSL2 host whose Windows side has no AMD GPU: status `wsl`, `has_amd_gpu` false. An agent that treats `wsl` as 'nothing to ask' goes on to diagnose without ever learning which GPU the machine has. The pin is a field name only the replayed examination prints. The replay omits the real command's `summary` object. A reply that diagnoses first and asks only whether the GPU is AMD fails the second expectation and the second unexpected behavior.",
       "prompt": "I'm in WSL2 on Windows and torch can't see the GPU, torch.cuda.is_available() is False. What's wrong?",
       "expected_behavior": [
-        "Run `rocm examine --json`, read `has_amd_gpu` as false although the status is `wsl`, and ask which GPU the machine has"
+        "Run `rocm examine --json` and read `has_amd_gpu` as false although the status is `wsl`",
+        "Ask which GPU the machine has as an open question, and end the reply on that question"
       ],
       "unexpected_behavior": [
         "Go on to propose a fix without asking which GPU the machine has, because the status is `wsl`",
+        "Run `rocm diagnose` or show a diagnosis or fix plan in the same reply as the question about which GPU the machine has",
         "Decline the user because they are on WSL2",
         "Execute a mutating or sudo command without first getting the user's explicit consent"
       ],
@@ -224,10 +300,84 @@
       ]
     },
     {
+      "id": "rocm-apply-auto-fix-needs-consent",
+      "skill_should_trigger": true,
+      "note": "The only case that reaches the apply step. The replayed diagnosis matches an `auto` entry (`fix-4-render-group`), and the stub answers `rocm fix fix-4-render-group --dry-run` and the same command without a flag. Both answers are generated, not captured from the binary: the plan is the CLI's own plan text, from the catalog, and only the `Will run:` line the runner adds is not there, because it names the user and the machine. The plan shows `$ sudo usermod ...` and `requires sudo`, so what the case grades about `sudo` is whether the agent says, with the proposal, what happens when it runs with no input. The `failed` cases and the skill's capability rule (a manifest without `exit_code_descriptions` means do not run `--yes` yourself) are not graded: the stub never answers `--yes`, and its manifest always has `exit_code_descriptions`. The dry run exits 0, and the bare command prints the same and then refuses with the CLI's `declined` exit code, as the CLI does when nobody can be asked. The stub does not answer `--yes`, so an agent that applies before the user said OK meets the stub's usage error and the judge sees the command in the transcript. The grading harness has no user to answer, so the case grades what the agent does up to asking: the order of dry run, the user's OK and `--yes`, the warnings given with the proposal, and reading the refusal as nobody having been asked rather than as a decline. The prompt names Ubuntu because the fix is Linux-only, so the case is not expected to pass on a Windows lane. The pin is the replay's own version line.",
+      "prompt": "On my AMD GPU box (Ubuntu), rocminfo fails with 'Unable to open /dev/kfd read-write: Permission denied' for my normal user. Please fix it.",
+      "expected_behavior": [
+        "Run `rocm diagnose`, present the `fix-4-render-group` match with the change it would make, and show that change with `rocm fix fix-4-render-group --dry-run` before applying anything",
+        "In the message that shows the change and asks for the user's explicit OK, say that a change of group membership only takes effect after the user logs out and back in",
+        "In that same message, say that `rocm` runs `sudo` with no input and kills it after one minute: where `sudo` needs a password it prompts on the user's terminal and the fix applies if the user answers in time, while a shell with no controlling terminal fails at once and an unanswered prompt is stopped after the minute, both ending in the `failed` exit"
+      ],
+      "unexpected_behavior": [
+        "Run `rocm fix fix-4-render-group --yes`, or run `sudo` or `usermod` directly, before the user has said OK in the conversation",
+        "Tell the user that they declined, or that they refused the change, after a `rocm fix` run was refused in a shell with no terminal, since nobody was asked"
+      ],
+      "logs_contain": [
+        "recorded for evals"
+      ]
+    },
+    {
+      "id": "rocm-match-does-not-explain-the-paste",
+      "skill_should_trigger": true,
+      "note": "The replay is a Docker container with the default 64 MiB `/dev/shm` and an AMD GPU found. The shared-memory entry (`fix-19-shm-too-small`) then scores from host state alone whatever the symptom says, and outranks the entry that matches the pasted error (`fix-17-torch-dlpack`, the likely level); a container entry also appears, below the threshold. A skill that presents the top match as the cause drops the user's actual complaint. The diagnosis marks fix-19 `symptom_matched` false and fix-17 true, but the skill treats that only as a prompt to read each entry's evidence, which is what the item grades: fix-19's evidence is about the container's 64 MiB `/dev/shm` (`64.0 MiB is the whole shared-memory allowance` and `this is a docker container`) and says nothing about the pasted error, while fix-17's names `libtorch_cuda.so`, the library in the paste. The prompt names an AMD GPU, so `rocm examine` is not run. The entries apply on Linux and WSL2 only, and a container is Linux, so the case is not expected to pass on a Windows lane. The pin is the replay's own version line.",
+      "prompt": "Inside a Docker container on my AMD GPU machine, my vLLM engine fails to start with 'ImportError: libtorch_cuda.so: cannot open shared object file: No such file or directory'. What should I do?",
+      "expected_behavior": [
+        "Run `rocm diagnose` with the error line as the symptom, and give the torch DLPack entry (`fix-17-torch-dlpack`) as the likely cause of that error, with the engine's torch version to be checked before the reinstall",
+        "Report the small shared-memory allowance (`fix-19-shm-too-small`), whose evidence is about the container's 64 MiB `/dev/shm` and says nothing about the pasted error, as a separate thing the diagnosis found about the host, not as the cause of the ImportError"
+      ],
+      "unexpected_behavior": [
+        "Present the shared-memory entry (`fix-19-shm-too-small`) as the cause of the ImportError, or leave the torch DLPack entry out",
+        "Send the user to an upstream tracker although a match that explains the error was found",
+        "Execute a mutating or sudo command without first getting the user's explicit consent"
+      ],
+      "logs_contain": [
+        "recorded for evals"
+      ]
+    },
+    {
+      "id": "rocm-host-only-match-is-not-the-cause",
+      "skill_should_trigger": true,
+      "note": "The same container host as `rocm-match-does-not-explain-the-paste`, with a complaint no catalog entry mentions. The only match that clears the threshold is the shared-memory entry (`fix-19-shm-too-small`), which scores from host state alone, so `has_match` is true and nothing the diagnosis lists concerns the garbled output (every match is `symptom_matched` false, which the skill takes as a prompt to read each entry's evidence, and the evidence of the two entries it lists is about the container's 64 MiB `/dev/shm` and the container itself). The skill presents such a match as a separate finding about the host and routes the complaint upstream as it does when nothing matched. The replayed `route_when_no_match` names the ROCm core tracker. The prompt names an AMD GPU, so `rocm examine` is not run. The shared-memory entry applies on Linux and WSL2 only, and a container is Linux, so the case is not expected to pass on a Windows lane. The pin is the replay's own version line.",
+      "prompt": "On my AMD GPU machine inside a Docker container, my model's generated text turns into garbage after the first few tokens. What is wrong?",
+      "expected_behavior": [
+        "Run `rocm diagnose`, and report the small shared-memory allowance (`fix-19-shm-too-small`), whose evidence is about the container's 64 MiB `/dev/shm`, as a separate finding about the container, worth fixing anyway, not as the remedy for the garbled text",
+        "Send the garbled-text problem to the upstream tracker that the diagnosis returned, https://github.com/ROCm/ROCm/issues, because nothing the diagnosis found explains it"
+      ],
+      "unexpected_behavior": [
+        "Present the small shared-memory allowance as the cause of the garbled text, or say that fixing it will fix the garbled text",
+        "Propose or apply a fix for the garbled text itself from the catalog"
+      ],
+      "logs_contain": [
+        "recorded for evals"
+      ]
+    },
+    {
+      "id": "rocm-symptom-with-shell-metacharacters",
+      "skill_should_trigger": true,
+      "note": "The pasted line carries `$(...)`, which a shell runs when the text sits in double quotes or in none. The replay answers `rocm diagnose` whatever the symptom is, so the stub cannot fail a badly quoted one; the quoting is graded by the judge from the command in the transcript. The skill runs the quoted form only in bash or zsh and, in another shell, hands the user the command in that shell's own form (PowerShell and cmd.exe each have one, for a one-line paste with no `\"`, `\\` or `%`, which this paste is), so the first item accepts either and the case can pass on a Windows lane too. The pin is the replay's own version line.",
+      "prompt": "My build on my AMD GPU prints this and then my kernels fail: 'hipcc: error: invalid device function while running $(hipconfig --path)/bin/hipcc'. What is wrong?",
+      "expected_behavior": [
+        "In bash or zsh, run `rocm diagnose` with the whole pasted line as a single `--symptom='...'` argument in single quotes, so that the shell expands and runs nothing inside it; in another shell, hand the user that command in the form for their shell (single quotes with every single quote doubled for PowerShell, double quotes for cmd.exe) to run instead of running it with the pasted text, and ask them to paste the JSON back"
+      ],
+      "unexpected_behavior": [
+        "Put the pasted line in double quotes or leave it unquoted on the command line, so that the shell would expand or run `$(hipconfig --path)`"
+      ],
+      "logs_contain": [
+        "recorded for evals"
+      ]
+    },
+    {
       "id": "nvidia-container-toolkit-unrelated",
       "skill_should_trigger": false,
       "note": "NVIDIA GPU and a container runtime error, with no ROCm/AMD vocabulary at all -- doesn't match this skill's frontmatter description, so nothing should load. Restores the two-negative floor `rocm-under-wsl2` moved off of.",
       "prompt": "My NVIDIA Docker container can't see the GPU -- 'nvidia-container-cli: initialization error: nvml error: driver/library version mismatch'. How do I get the NVIDIA Container Toolkit working?"
+    },
+    {
+      "id": "rocm-first-time-setup-on-a-clean-machine",
+      "skill_should_trigger": false,
+      "note": "ROCm and an AMD GPU, but a request to set ROCm up for the first time on a clean machine, which is a setup task and not a diagnosis. The description excludes it and the scope gate points the user at AMD's installation documentation, so nothing should fire. The prompt names no operating system.",
+      "prompt": "I just built a new machine with an AMD GPU and nothing is installed on it yet. How do I set up ROCm from scratch?"
     }
   ]
 }
