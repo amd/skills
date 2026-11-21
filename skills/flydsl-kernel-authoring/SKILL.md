@@ -252,7 +252,7 @@ When writing or reviewing `@flyc.kernel` / `@flyc.jit` code, proactively avoid t
        acc = helper(acc)
    ```
 
-3. **Avoid early `return`, and do not place `return` / `yield` inside `if/else` branches.** Prefer a single explicit exit so the frontend can determine result types.
+3. **Avoid early `return`, and do not place `return` / `yield` inside `if/else` branches.** Prefer a single explicit exit so the frontend can determine result types. A branch `return` behaves as in Python only when the condition is a Python value at trace time; under a dynamic condition, or inside a `range(...)` / dynamic `while` loop body, tracing raises `NotImplementedError`.
    ```python
    if cond:
        out = v0
