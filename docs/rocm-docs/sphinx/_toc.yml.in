@@ -3,25 +3,30 @@ subtrees:
   - caption: Install
     entries:
       - file: install/installation
-  - caption: Conceptual
+  - caption: Find a skill
     entries:
-      - file: concepts/index
+      - file: catalog
   - caption: Walkthroughs
     entries:
       - file: walkthroughs/index
-        subtrees:
-          - entries:
-              - file: walkthroughs/lemonade-router-builder
-              - file: walkthroughs/hyperloom-workload-optimizer
-              - file: walkthroughs/local-ai-app-integration
+        entries:
+          - file: walkthroughs/client-native
+            entries:
               - file: walkthroughs/local-ai-use
-              - file: walkthroughs/magpie-kernel-evaluator
+              - file: walkthroughs/local-ai-app-integration
+          - file: walkthroughs/cross-stack
+            entries:
+              - file: walkthroughs/lemonade-router-builder
+          - file: walkthroughs/server-native
+            entries:
               - file: walkthroughs/serving-llms-on-instinct
               - file: walkthroughs/serving-llms-on-epyc
+              - file: walkthroughs/hyperloom-workload-optimizer
+              - file: walkthroughs/magpie-kernel-evaluator
               - file: walkthroughs/tracelens-analysis-orchestrator
-  - caption: Reference
+  - caption: Conceptual
     entries:
-      - file: catalog
+      - file: concepts/index
   - caption: About
     entries:
       - file: license
