@@ -16,6 +16,7 @@ html_theme_options = {
     "flavor": "rocm-ai",
     "use_repository_button": True,
     "use_download_button": True,
+    "show_navbar_depth": 2,
 }
 html_title = "AMD Skills documentation"
 suppress_warnings = ["etoc.toctree"]
