@@ -10,7 +10,8 @@ AMD Skills give your coding agent the knowledge to work with AMD hardware and so
 
 Skills use the standardized `Agent Skills <https://github.com/anthropics/skills>`_
 format and work with coding agents such as Cursor, Claude Code, OpenAI Codex,
-and Gemini CLI.
+and Gemini CLI. To learn how skills work, see
+:doc:`What is a skill? <concepts/index>`.
 
 Install a skill
 ===============
