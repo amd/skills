@@ -6,38 +6,54 @@
 AMD Skills documentation
 ========================
 
-AMD Skills provide agents with knowledge, scripts, and conventions for
-working with AMD hardware and software.
+AMD Skills give your coding agent the knowledge to work with AMD hardware and software.
 
-Skills in this repository follow the standardized
-`Agent Skills <https://github.com/anthropics/skills>`_ format and are
-designed to interoperate with the major coding agents like Cursor,
-Claude Code, OpenAI Codex, and Gemini CLI.
+Skills use the standardized `Agent Skills <https://github.com/anthropics/skills>`_
+format and work with coding agents such as Cursor, Claude Code, OpenAI Codex,
+and Gemini CLI.
 
-.. important::
+Install a skill
+===============
 
-   This catalog is being built in the open and will evolve frequently as skills, 
-   categories, and descriptions take shape. Some skills may be in Tech Preview; 
-   see the underlying product for status.
+.. code-block:: bash
 
-The AMD Skills public repository is located at
-`amd/skills <https://github.com/amd/skills>`_.
+   npx skills add amd/skills --skill local-ai-use --agent claude-code
 
-.. grid:: 2
+This installs the ``local-ai-use`` skill for Claude Code. It requires
+`Node.js <https://nodejs.org>`_. For other agents and install options, see
+:doc:`Installing AMD Skills <install/installation>`.
+
+Find a skill
+============
+
+.. grid:: 1 2 2 2
    :gutter: 3
 
-   .. grid-item-card:: Install
+   .. grid-item-card:: Client-native
+      :link: catalog.html#client-native
+      :link-type: url
 
-      * :doc:`Installing AMD Skills <install/installation>`
+      Run and optimize on Ryzen AI.
 
-   .. grid-item-card:: Conceptual
+   .. grid-item-card:: Cross-stack
+      :link: catalog.html#cross-stack
+      :link-type: url
 
-      * :doc:`What is a skill? <concepts/index>`
+      Cross-stack skills, from client to cloud.
 
-   .. grid-item-card:: Walkthroughs
+   .. grid-item-card:: Server-native
+      :link: catalog.html#server-native
+      :link-type: url
 
-      * :doc:`All walkthroughs <walkthroughs/index>`
+      Run and optimize on AMD Instinct.
 
-   .. grid-item-card:: Catalog
+   .. grid-item-card:: Diagnose a failure
+      :link: https://github.com/amd/skills/blob/main/skills/rocm-doctor/SKILL.md
+      :link-type: url
 
-      * :doc:`Skills catalog <catalog>`
+      Diagnose and fix common ROCm, HIP, PyTorch, and llama.cpp failures with
+      ``rocm-doctor``.
+
+The catalog is built in the open and evolves frequently. Some skills are in
+Tech Preview, so see the underlying product for status. The source is in the
+`amd/skills <https://github.com/amd/skills>`_ public repository.
