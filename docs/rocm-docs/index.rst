@@ -54,6 +54,10 @@ Find a skill
       Diagnose and fix common ROCm, HIP, PyTorch, and llama.cpp failures with
       ``rocm-doctor``.
 
-The catalog is built in the open and evolves frequently. Some skills are in
-Tech Preview, so see the underlying product for status. The source is in the
-`amd/skills <https://github.com/amd/skills>`_ public repository.
+.. note::
+
+   The catalog is built in the open and evolves frequently. Some skills are in
+   Tech Preview, so see the underlying product for status.
+
+The source is in the `amd/skills <https://github.com/amd/skills>`_ public
+repository.
