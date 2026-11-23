@@ -66,8 +66,11 @@ cannot diagnose a cluster it cannot reach.
 
 ## Step 1 — Run the check
 
+Run it from this skill's own directory, the folder holding this `SKILL.md`, so the path below
+resolves wherever the skill is installed:
+
 ```bash
-bash .agents/skills/cluster-environment-check/scripts/environment-check.sh
+bash scripts/environment-check.sh
 ```
 
 It runs every check, prints one `OK` / `WARN` / `INCONCLUSIVE` line per finding, and ends with a
@@ -140,10 +143,10 @@ To run one focused check without the full cluster suite:
 
 ```bash
 # One image reference:
-bash .agents/skills/cluster-environment-check/scripts/environment-check.sh image-exists <ref> [--json]
+bash scripts/environment-check.sh image-exists <ref> [--json]
 
 # Deployed products against one spec revision:
-bash .agents/skills/cluster-environment-check/scripts/environment-check.sh \
+bash scripts/environment-check.sh \
   release-spec-skew <spec-revision> --core-repo <path> [--json]
 ```
 
@@ -162,9 +165,17 @@ Pick the honest outcome — the anti-silence rule is the whole point of this ski
   fix the line names. Report **every** problem, not just the first — several can be present at once.
 - **CANNOT REACH CLUSTER (2):** say the cluster is unreachable and help fix access. Never soften
   this into a healthy or empty result.
-- **INCONCLUSIVE (3):** say plainly that the cluster is **not proven healthy** and name each check
-  that could not confirm its state and why (usually a CRD is absent because the component isn't
-  installed, or RBAC/an API error blocked a read). Do not present an inconclusive run as a pass.
+- **INCONCLUSIVE (3):** say plainly that the cluster is **not proven healthy**, then list every
+  check that could not confirm its state. One line each, naming the check, why it could not read
+  (usually a CRD is absent because the component isn't installed, or RBAC/an API error blocked a
+  read) and what would let it run, such as the missing permission. Do not present an inconclusive
+  run as a pass.
+
+  **A count is not a report.** "6 of 28 checks were inconclusive" tells the operator nothing they
+  can act on, and listing the checks that passed is not a substitute for listing the ones that did
+  not. The checks that could not run are the finding here: an operator who cannot see which ones
+  they were, and why, has no way to tell an expected gap from a missing permission that is hiding a
+  real fault. Name them even when there are many, and even when each looks individually harmless.
 
 To understand what each check reads, what a finding means, and which findings are expected before
 vs. after install, read `references/checks.md`.
@@ -195,70 +206,6 @@ this repo yet):
 Keep the `--json` shape, `image-exists` interface, and `release-spec-skew` check name stable — they
 are the contract those consumers will depend on.
 
-## Repairing a shared test cluster before a run
-
-The checker changes nothing but its own gateway probe pod. Its counterpart, `scripts/preflight_fix.py`, is the one place that
-does: the end-to-end workflow runs it right before the health check, so a fault with one known repair
-does not stop the run. Each fixer detects its fault, repairs it, and verifies the result; on a clean
-cluster it changes nothing.
-
-- `seaweedfs-raft` — SeaweedFS masters with no agreed leader: delete every master pod at once so the
-  StatefulSet recreates them together (a rolling restart goes one master at a time and can stall on one
-  that never turns Ready), wait for a leader, then restart the filer and S3 gateway and wait for Ready
-  replacements of both. It acts only on positive evidence (masters that answer and disagree or report no
-  leader, or too few Ready masters); a Ready master it cannot query leaves the raft unknown, not restarted.
-  This repair is not tied to a run: it acts on the cluster's own state.
-- `finished-run-leftovers` — the test projects, namespaces and Kaiwo queue entries of a finished run,
-  removed in that order (projects through the AIRM API first, or the platform re-adds the rest). Only
-  projects of this cluster are deleted: AIRM lists every cluster's, so a project counts as this
-  cluster's only when its cluster is the one the namespaces here are labelled for. A finished run's
-  project is found even when its namespace and queue entry are already gone; when the cluster cannot be
-  identified, no project is deleted. An expired sign-in is renewed once per request. AIRM and Keycloak
-  are addressed by their Service names (Keycloak's from `e2e-test-runner/keycloak-config`) and reached
-  through a `kubectl port-forward`, because a CI runner may not reach the cluster's public ingress; an
-  `AIRM_API_URL` or `KEYCLOAK_SERVER_URL` without a `.svc` or `.svc.cluster.local` suffix is used as given. A request that
-  does not arrive, or is answered 502/503/504, is tried three times before the repair reports it. A forwarded
-  request bypasses any configured proxy, and its TLS is checked against the Service's name.
-- `restore-snapshot` — an unverified ClusterForge restore snapshot of a finished run, deleted only once
-  the service sources and sync policy match it and the services have stayed Synced and Healthy with no
-  operation across repeated samples, with Argo's status computed for the current source. Unlike `cluster-forge-override.sh`, deployment images may differ:
-  a run changes the services only through their Application source, so once that source is the recorded
-  one and Argo reports it synced, the running images are what Git holds for the cluster (for example,
-  another slot's deploy). The differences are logged.
-- `longhorn` — shared storage that cannot serve a new volume. Longhorn manager, instance-manager and
-  CSI-plugin pods that are not Ready are restarted (their owner recreates them), and the repair waits until
-  every restarted pod has a Ready replacement; a share-manager that keeps crashing is restarted, and a
-  volume that no PV references (by name or CSI volume handle) and whose namespace is gone is deleted, only
-  when it belongs to a finished run. Then a fresh RWX volume of the default class is created in
-  `e2e-preflight-storage` and mounted by a pod, and the namespace is removed again, along with any PV a
-  retaining class kept for it; the repair succeeds
-  only if that volume mounts within three minutes. A crash-looping share-manager of any other workload is
-  reported and left alone.
-
-The checker's own `finished-run-leftovers` check (any mode) also reports an `e2e-ci<run>-*` namespace whose
-run GitHub reports as completed, so a leftover still fails the gate when the repairs were refused or never
-got the lock. It needs `GITHUB_REPOSITORY` and `GITHUB_TOKEN`; without them it lists the namespaces without
-judging them and does not gate. With them, a lookup GitHub does not answer is inconclusive and gates, since
-the namespace may still hold the quota the next run needs; a run GitHub does not know (404: another
-repository's run, or one past retention) is listed but not judged, as the repair leaves it alone too.
-
-The nightly health gate holds the run back when the leftover cleanup or the Longhorn repair fails or
-cannot read the state it needs: a run would otherwise start on a cluster still holding a finished run's
-queue entries or unable to mount the model cache. A refused repair (another lane holds the cluster, or a
-run is not confirmed finished) or no report at all (the step did not get the lock) does not hold it back;
-the checks decide. A report that exists but cannot be read, or has no result for either of the two (the
-step was stopped before it finished), does.
-
-It changes nothing unless the caller holds the cluster lock (`default/e2e-cluster-lock`) as the owner
-passed with `--lock-owner`, and checks that lease again before every change, so a lock lost or taken
-over mid-run stops the repairs. The workflow acquires and releases the lock around the step. The two
-cleanups touch only what belongs to a run GitHub reports as completed (a run it cannot confirm is kept and
-reported), and only this cluster's AIRM projects; the Longhorn repair's only cluster-wide changes are pod
-restarts of Longhorn's own components and its probe namespace. Nothing here writes the cluster lock or edits Argo CD
-or Git configuration. A fixer that fails or cannot read its state does not stop the others, and
-`--json <file>` is rewritten after each fixer, so every change already made is recorded. Use `--dry-run`
-to see what it would do.
-
 ## Tests
 
 The stable test command runs two hermetic layers with no cluster or registry access:
@@ -275,11 +222,5 @@ bash .agents/tests/cluster-environment-check/run-tests.sh
   without importing the implementation. The `release-spec-skew` scenarios additionally build a
   throwaway Git repository so the deployed-vs-spec ancestry is exercised end to end.
 
-`tests/test_preflight_fix.py` covers each fixer branch against `specs/libraries/fake_cluster.py`, a
-stateful fake that models the platform re-adding a live project's namespace and queue entry, master
-readiness tied to a leader, and pods recreated after deletion. `specs/preflight_fix.robot` drives the
-shipped CLI against the same fake and asserts the outcomes an operator sees, including that a fault left
-in place is named in the report.
-
-Run both layers after any change to the checker or the fixers. The generic `agent-skill-tests` CI job discovers
+Run both layers after any change to the checker. The generic `agent-skill-tests` CI job discovers
 this command automatically.

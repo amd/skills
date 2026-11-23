@@ -8,22 +8,24 @@ Prompts and expectations live in ``evals.json``. This file holds only what the
 dataset format cannot say: that each case needs a cluster, and which one.
 
 Every graded case here asks the agent to check a cluster, and ``SKILL.md`` tells
-it to confirm the kubeconfig context and then run
-``scripts/environment-check.sh``. The runner stages the skill into a temporary
+it to confirm the kubeconfig context and then run ``scripts/environment-check.sh``
+from the skill's own directory. The runner stages the skill into a temporary
 workspace and nothing else, so without this hook there is no cluster to check:
 on a clean runner ``kubectl`` finds no kubeconfig and the checker can only answer
 CANNOT REACH CLUSTER, which grades none of the expectations. Worse, on a
 self-hosted runner inside a cluster there *is* a kubeconfig, and the run would
 grade whatever that cluster happens to look like today.
 
-So the hook supplies the cluster:
+So the hook supplies the cluster, and only the cluster: **a fixture-backed
+``kubectl``** on PATH, reading a transcript assembled from ``fixtures/healthy.json``
+and the case's own overlay. The checker shells out to ``kubectl`` for everything,
+so a transcript is the whole cluster.
 
-* **The probe scripts**, copied to the path ``SKILL.md`` names, because the agent
-  is told to run them there and the workspace holds the skill under
-  ``.claude/skills/`` instead.
-* **A fixture-backed ``kubectl``** on PATH, reading a transcript assembled from
-  ``fixtures/healthy.json`` and the case's own overlay. The checker shells out to
-  ``kubectl`` for everything, so a transcript is the whole cluster.
+The scripts are deliberately left where the runner staged them, under
+``.claude/skills/``. Staging a second copy at a path of this hook's choosing would
+grade the agent against a layout no installed copy of the skill has, and a green
+run would say nothing about whether someone who installed it can follow the
+instructions.
 
 The stubs live outside the workspace, and ``KUBECONFIG`` points at a file naming
 no cluster. Both are deliberate, and both come from
@@ -71,9 +73,6 @@ from pathlib import Path
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = SKILL_ROOT / "evals" / "fixtures"
 
-# Where SKILL.md tells the agent the probe scripts live.
-SCRIPTS_AT = Path(".agents/skills/cluster-environment-check/scripts")
-
 # Which cluster each case gets. A case not named here gets the healthy baseline,
 # so a new prompt grades against a clean cluster rather than against whichever
 # fault the previous case happened to need.
@@ -102,7 +101,7 @@ def _transcript(name: str) -> str:
 
 
 def setup(workspace, case, ctx):  # noqa: ARG001 -- runner passes ctx for placeholders
-    """Stage the probe scripts and a stubbed cluster, then put it on PATH."""
+    """Stage a stubbed cluster for this case and put it on PATH."""
     global _staged
     if _staged is not None:
         raise RuntimeError(
@@ -111,13 +110,6 @@ def setup(workspace, case, ctx):  # noqa: ARG001 -- runner passes ctx for placeh
             f"leak one case's cluster into '{case.id}'."
         )
     _staged = case.id
-    workspace = Path(workspace)
-
-    scripts_dst = workspace / SCRIPTS_AT
-    scripts_dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(SKILL_ROOT / "scripts", scripts_dst, dirs_exist_ok=True)
-    for script in scripts_dst.glob("*.sh"):
-        script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     bin_dir = Path(tempfile.mkdtemp(prefix="cluster-"))
     kubectl = bin_dir / "kubectl"

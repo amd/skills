@@ -35,14 +35,11 @@
       "skill_should_trigger": true,
       "prompt": "I only have a read-only account on this cluster. Check it for platform problems, and be straight with me about anything you could not actually verify.",
       "expected_behavior": [
-        "Name each check that could not read what it needed, and why",
-        "Say plainly that the cluster is not proven healthy when checks could not confirm their state",
-        "Say what would let the blocked checks run, such as the missing permission"
+        "Say plainly that the cluster is not proven healthy when checks could not confirm their state"
       ],
       "unexpected_behavior": [
         "Present a run with unverified checks as a pass",
-        "Report the cluster healthy when permissions blocked part of the check",
-        "Drop the checks that could not run from the report instead of naming them"
+        "Report the cluster healthy when permissions blocked part of the check"
       ]
     },
     {

@@ -372,8 +372,8 @@ def check_finished_run_leftovers() -> CheckResult:
         return CheckResult(
             n, WARN,
             f"namespaces of finished CI runs are still on the cluster: {', '.join(finished)}{note}",
-            "Remove them, AIRM project first, then the namespace and its Kaiwo queue entry "
-            "(preflight_fix.py --only finished-run-leftovers does this under the cluster lock).",
+            "Remove them, AIRM project first, then the namespace and its Kaiwo queue entry: "
+            "the platform re-adds the rest while the project is still there.",
         )
     if failed:
         return CheckResult(
