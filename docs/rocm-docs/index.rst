@@ -30,20 +30,20 @@ Find a skill
    :gutter: 3
 
    .. grid-item-card:: Client-native
-      :link: catalog.html#client-native
-      :link-type: url
+      :link: catalog:client-native
+      :link-type: ref
 
       Run and optimize on Ryzen AI.
 
    .. grid-item-card:: Cross-stack
-      :link: catalog.html#cross-stack
-      :link-type: url
+      :link: catalog:cross-stack
+      :link-type: ref
 
       Cross-stack skills, from client to cloud.
 
    .. grid-item-card:: Server-native
-      :link: catalog.html#server-native
-      :link-type: url
+      :link: catalog:server-native
+      :link-type: ref
 
       Run and optimize on AMD Instinct.
 

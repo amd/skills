@@ -25,10 +25,13 @@ extensions = [
     "rocm_docs",
     "sphinx_design",
     "sphinxcontrib.mermaid",
+    "sphinx.ext.autosectionlabel",
 ]
 # Render ```mermaid fences (as written for GitHub) as diagrams.
 myst_fence_as_directive = ["mermaid"]
 exclude_patterns = []
+# Allow :ref:`page:Heading` links, checked at build time.
+autosectionlabel_prefix_document = True
 
 # -- Sphinx setup ----------------------------------------------------------
 
