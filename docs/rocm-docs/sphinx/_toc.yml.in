@@ -9,7 +9,6 @@ subtrees:
   - caption: Walkthroughs
     entries:
       - file: walkthroughs/index
-        title: All walkthroughs
         entries:
           - file: walkthroughs/client-native
             entries:
