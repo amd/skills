@@ -1,5 +1,5 @@
 .. meta::
-   :description: AMD Skills documentation.
+   :description: AMD Skills give your coding agent the knowledge to work with AMD hardware and software.
    :keywords: AMD Skills, AMD, ROCm, GPU
 
 ========================
@@ -15,12 +15,14 @@ and Gemini CLI.
 Install a skill
 ===============
 
+You need `Node.js <https://nodejs.org>`_ to run the installer. To install the
+``local-ai-use`` skill for Claude Code, run:
+
 .. code-block:: bash
 
    npx skills add amd/skills --skill local-ai-use --agent claude-code
 
-This installs the ``local-ai-use`` skill for Claude Code. It requires
-`Node.js <https://nodejs.org>`_. For other agents and install options, see
+For other agents and install options, see
 :doc:`Installing AMD Skills <install/installation>`.
 
 Find a skill
@@ -39,13 +41,13 @@ Find a skill
       :link: catalog:cross-stack
       :link-type: ref
 
-      Cross-stack skills, from client to cloud.
+      Work across AMD hardware, from client to cloud.
 
    .. grid-item-card:: Server-native
       :link: catalog:server-native
       :link-type: ref
 
-      Run and optimize on AMD Instinct.
+      Run and optimize on AMD Instinct GPUs and EPYC CPUs.
 
    .. grid-item-card:: Diagnose a failure
       :link: https://github.com/amd/skills/blob/main/skills/rocm-doctor/SKILL.md
@@ -57,7 +59,7 @@ Find a skill
 .. note::
 
    The catalog is built in the open and evolves frequently. Some skills are in
-   Tech Preview, so see the underlying product for status.
+   Tech Preview. For status, see the underlying product.
 
 The source is in the `amd/skills <https://github.com/amd/skills>`_ public
 repository.

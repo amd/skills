@@ -75,7 +75,7 @@ Run and optimize on Ryzen AI.
 
 ### Cross-stack
 
-Cross-stack skills, from client to cloud.
+Work across AMD hardware, from client to cloud.
 
 | Skill | What it does | Source |
 | --- | --- | --- |
@@ -87,7 +87,7 @@ Cross-stack skills, from client to cloud.
 
 ### Server-native
 
-Run and optimize on AMD Instinct.
+Run and optimize on AMD Instinct GPUs and EPYC CPUs.
 
 | Skill | What it does | Source |
 | --- | --- | --- |

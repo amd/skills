@@ -17,13 +17,13 @@ Run and optimize on Ryzen AI.
 
 ## Cross-stack
 
-Cross-stack skills, from client to cloud.
+Work across AMD hardware, from client to cloud.
 
 * [lemonade-router-builder](./lemonade-router-builder.md): Generate a valid Lemonade router policy JSON from a plain-English description of routing intent.
 
 ## Server-native
 
-Run and optimize on AMD Instinct.
+Run and optimize on AMD Instinct GPUs and EPYC CPUs.
 
 * [serving-llms-on-instinct](./serving-llms-on-instinct.md): Bring up a vLLM OpenAI-compatible LLM endpoint on an AMD Instinct GPU.
 * [serving-llms-on-epyc](./serving-llms-on-epyc.md): Bring up a vLLM + zentorch LLM endpoint on an AMD EPYC CPU.
