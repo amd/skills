@@ -1,6 +1,6 @@
 # Client-native
 
-Run and optimize on Ryzen AI.
-
-* {doc}`local-ai-use`
-* {doc}`local-ai-app-integration`
+```{include} ../../../walkthroughs/README.md
+:start-after: "## Client-native"
+:end-before: "## Cross-stack"
+```

@@ -1,5 +1,6 @@
 # Cross-stack
 
-Cross-stack skills, from client to cloud.
-
-* {doc}`lemonade-router-builder`
+```{include} ../../../walkthroughs/README.md
+:start-after: "## Cross-stack"
+:end-before: "## Server-native"
+```
