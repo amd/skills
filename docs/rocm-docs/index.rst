@@ -56,7 +56,8 @@ Find a skill
       Diagnose and fix common ROCm, HIP, PyTorch, and llama.cpp failures with
       ``rocm-doctor``.
 
-Walk through a skill end to end: :doc:`All walkthroughs <walkthroughs/index>`.
+To try a skill from start to finish, follow one of the
+:doc:`walkthroughs <walkthroughs/index>`.
 
 .. note::
 
