@@ -158,7 +158,7 @@ Build the cluster prefix using this lookup:
 | Container | Venv | Template |
 |-----------|------|----------|
 | No | No | `ssh <node> "cd <tracelens_dir> && {CMD}"` |
-| Yes | No | `ssh <node> "docker exec <container> bash -c 'cd <tracelens_dir> && {CMD}'"` |
+| Yes | No | `ssh <node> "docker exec -i <container> bash -c 'cd <tracelens_dir> && {CMD}'"` |
 | No | Yes | `ssh <node> "bash -c 'source <venv_path>/bin/activate && cd <tracelens_dir> && {CMD}'"` |
 
 Write the resolved template to `<output_dir>/cache/cmd_prefix.txt`. Then validate that TraceLens is importable in the target environment through the prefix:
