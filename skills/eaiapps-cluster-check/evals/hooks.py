@@ -8,8 +8,8 @@ Prompts and expectations live in ``evals.json``. This file holds only what the
 dataset format cannot say: that each case needs a cluster, and which one.
 
 Every graded case here asks the agent to check a cluster, and ``SKILL.md`` tells
-it to confirm the kubeconfig context and then run ``scripts/environment-check.sh``
-from the skill's own directory. The runner stages the skill into a temporary
+it to confirm the kubeconfig context and then run
+``scripts/environment-check.sh`` by its path inside the skill's own folder. The runner stages the skill into a temporary
 workspace and nothing else, so without this hook there is no cluster to check:
 on a clean runner ``kubectl`` finds no kubeconfig and the checker can only answer
 CANNOT REACH CLUSTER, which grades none of the expectations. Worse, on a

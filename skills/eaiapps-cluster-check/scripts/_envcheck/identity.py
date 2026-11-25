@@ -328,8 +328,8 @@ def _github_run_status(run_id: str) -> str | None:
         with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310 - fixed https API
             status = json.loads(response.read().decode()).get("status")
     except urllib.error.HTTPError as error:
-        # 404: a run of another repository sharing the cluster, or one past retention. The repair leaves
-        # such a namespace alone too, so gating on it would hold every nightly with nothing to clear it.
+        # 404: a run of another repository sharing the cluster, or one past retention. Nothing here can
+        # tell whether it is finished, so gating on it would hold every run with nothing to clear it.
         if error.code == 404:
             return None
         raise RunLookupError(f"run {run_id}: {error}") from error
@@ -343,8 +343,8 @@ def _github_run_status(run_id: str) -> str | None:
 def check_finished_run_leftovers() -> CheckResult:
     """Namespaces an earlier CI run left behind.
 
-    The repairs remove them before the check, but a repair that was refused or never got the cluster
-    lock leaves them, and a run that starts beside them inherits their quota, queue entries and volumes."""
+    A run that starts beside them inherits their quota, queue entries and volumes, so they are
+    reported whether or not whatever cleans up after a finished run has already removed them."""
     n = "finished-run-leftovers"
     ok, obj, err = kubectl_json(["get", "namespaces"])
     if not ok:

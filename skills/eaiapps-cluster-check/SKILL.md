@@ -66,12 +66,18 @@ cannot diagnose a cluster it cannot reach.
 
 ## Step 1 — Run the check
 
-Run it from this skill's own directory, the folder holding this `SKILL.md`, so the path below
-resolves wherever the skill is installed:
+Run it by its path inside this skill's own folder, the one holding this `SKILL.md`, so the
+command resolves wherever the skill is installed:
 
 ```bash
-bash scripts/environment-check.sh
+bash <this skill's folder>/scripts/environment-check.sh
 ```
+
+Run it from your own working directory, and do not change into the skill's folder first.
+`--core-repo` defaults to the working directory and is what the checks that read a core
+checkout resolve against, so with `--e2e-prerequisites` or `--spec-revision` run from the core
+checkout itself. From anywhere else those checks cannot find what they need and report
+inconclusive, which is not a healthy result.
 
 It runs every check, prints one `OK` / `WARN` / `INCONCLUSIVE` line per finding, and ends with a
 `RESULT:` line. The exit code is the contract:
@@ -135,7 +141,9 @@ verdict, recommendation}]}` (an informational e2e-mode check also carries `"gati
   `eai-e2e-rbac` requires the role binding to name exactly this user; omit it to accept any OIDC user.
 - **`--spec-revision REV --core-repo PATH`** — opt in to `release-spec-skew`: compare the deployed
   AIRM/AIWB service-image commits with the core revision whose specs will run. `PATH` must be a core
-  Git checkout containing `REV` and the deployed release tags/commits (default: current directory).
+  Git checkout containing `REV` and the deployed release tags/commits. It defaults to the working
+  directory, which only resolves to a core checkout when the command is run from one, and a
+  relative `PATH` is read from there too.
   A deployed ancestor/diverged commit is a `WARN`; a tag or revision that cannot resolve is
   `INCONCLUSIVE`, never a false pass. Callers should pass the exact checked-out SHA, not a moving ref.
 
@@ -143,10 +151,10 @@ To run one focused check without the full cluster suite:
 
 ```bash
 # One image reference:
-bash scripts/environment-check.sh image-exists <ref> [--json]
+bash <this skill's folder>/scripts/environment-check.sh image-exists <ref> [--json]
 
 # Deployed products against one spec revision:
-bash scripts/environment-check.sh \
+bash <this skill's folder>/scripts/environment-check.sh \
   release-spec-skew <spec-revision> --core-repo <path> [--json]
 ```
 
