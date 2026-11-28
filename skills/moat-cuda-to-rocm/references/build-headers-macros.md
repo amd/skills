@@ -21,6 +21,28 @@ headers into g++ and fails there. Put the shim in the lowest common layer, keep 
 includes (`hip_runtime.h`, `hipfft.h`) unconditional, and gate device-only ones behind
 `__CUDACC__` or `__HIPCC__ || __HIP_DEVICE_COMPILE__`. (SCAMP, stdgpu)
 
+The same rule catches HELPER FUNCTIONS added to a shim, not just includes. A `__device__`
+helper written at file scope in the compat header is parsed by g++ for every plain `.cpp`
+in the project, where `__device__` expands to nothing and `__ballot`/`__lane_id` are
+undeclared, so the header stops being host-includable the moment a macro is replaced with a
+function. Wrap such a helper in `#if defined(__HIPCC__)` and leave the project macro that
+calls it unconditional: the macro only expands inside device code, so the host TUs never
+name the helper. (GPU_IPC)
+
+**Do not name compat macros after the warp functions ROCm declares.** ROCm declares real
+overloaded functions named `__shfl_sync`, `__ballot_sync`, `__shfl_down_sync` and the rest
+(`hip/amd_detail/amd_warp_sync_functions.h`), and `hip/amd_detail/amd_hip_bf16.h` declares
+its own bf16 overloads of them. A `#define __shfl_sync(mask, var, srcLane) ...` of the same
+name mis-parses those declarations in every translation unit that includes them, and Thrust
+pulls in `hip_bf16.h`, so the breakage lands far from the header you wrote and reads as a
+mysterious parse error inside a ROCm header. Put the translation in real (template)
+functions under project-owned names (`WARP_SHFL_DOWN`-style wrappers) that the call sites go
+through; the same-name macros then have no reason to exist. The collision arrived only as
+ROCm's headers grew those overloads, so a project whose macro layer built on an older ROCm
+can start failing on a newer one with no change of its own. What the functions must compute
+is in faults-wavefront.md ("A compat layer for CUDA's `*_sync` warp functions must pin every
+member to 32 lanes"). (GPU_IPC)
+
 **Missing-include errors are usually pre-existing upstream omissions**, not port breakage:
 CUDA's headers supplied them transitively and the narrower HIP include graph unmasks them.
 Fix additively -- it helps the CUDA build too. (LC-framework)
@@ -47,6 +69,35 @@ ahead of it there rather than moving the include back into the shim. Nothing on 
 side can catch any of this, since the HIP branch of the shim includes hipRAND instead and hipRAND is
 host-safe. (HEonGPU)
 
+**Before gating or moving a device-library include that a compat header already has, check
+which HOST headers name its types.** Where a project's compat header does carry the RNG
+include, it is tempting to shrink what host files see (a cuRAND/rocRAND kernel header is
+about 25k preprocessed lines) by wrapping the include in
+`#if defined(__HIPCC__) || defined(__CUDACC__)`. Check HEADERS, not just `.cc`/`.cpp`: a
+host TU often CALLS no device-RNG function yet NAMES the state type in a declaration it
+picks up through a header chain, and that is enough to break. In colmap,
+`grep curandState src/**/*.cc` is empty, but `mvs/gpu_mat.h` declares
+`FillWithRandomNumbers(..., const GpuMat<curandState>&)` and `mvs/gpu_mat_prng.h` declares
+`class GpuMatPRNG : public GpuMat<curandState>`; the host-compiled `mvs/patch_match.cc`
+reaches both through `patch_match_cuda.h -> cuda_texture.h -> gpu_mat.h`, and the gated
+header fails that TU with `'curandState' was not declared in this scope` (measured: gated
+include 4 errors, unmodified header 0). A forward declaration of the state type does compile
+that TU (gated include plus `struct hiprandState;` gives 0 errors, because a class
+template's members are instantiated lazily and neither a base-class use nor a reference
+parameter needs the type complete), but it is not portable as one line: `hiprandState` is a
+CLASS (`hiprand_kernel_rocm.h` expands
+`DEFINE_HIPRAND_STATE(hiprandState, rocrand_state_xorwow)` to
+`struct hiprandState : public rocrand_state_xorwow`), while `curandState` is a TYPEDEF on
+the CUDA side (`typedef struct curandStateXORWOW curandState;`). Prefer the CMake fix,
+because it repairs something the forward declaration does not: make every target that
+includes the compat header declare the library whose header it therefore pulls in
+(`hip::hiprand` and `roc::rocrand` alongside `hip::host`, mirroring whatever the CUDA arm
+already lists, such as `CUDA::curand`). A monolithic `/opt/rocm` hides an omission there
+because every ROCm header sits under one prefix; a split pip/TheRock SDK install does not,
+and that is where the missing declaration surfaces as a not-found include. Leave a one-line
+comment at the include saying why it is not narrowed, or the next reader tries the gate
+again. (colmap)
+
 **For plain C++ TUs the HIP headers `#define __noinline__ __attribute__((noinline))`**
 (nvcc defines it only when compiling CUDA). glib's `__has_attribute(__noinline__)` then fails
 ("too few arguments provided to function-like macro"), so any TU that includes GTK after the
@@ -59,6 +110,24 @@ that have no `hipError_t`. Aliasing them to the nearest HIP code duplicates a ca
 when that code is also listed. Define each as `static_cast<hipError_t>(<CUDA value>)` after
 checking no `hipError_t` enumerator uses the value: the labels stay distinct, and since HIP
 never returns them they are unreachable. (LichtFeld-Studio)
+
+The library status enums have the same gap. A `switch` that names every `cublasStatus_t` or
+`cufftResult` value loses a label: hipBLAS has no `CUBLAS_STATUS_LICENSE_ERROR`, and hipFFT
+1.0.26 (ROCm 10.1) has dropped `HIPFFT_LICENSE_ERROR` (its enum now skips 15). In a shim,
+map each to a distinct value: `HIPBLAS_STATUS_UNKNOWN`, and `static_cast<hipfftResult>(15)`
+(inside the enum's range, and the value cuFFT used). Do not define `CUDART_VERSION` to switch
+the cases off: rocThrust and hipCUB key on it. (tsne-cuda)
+
+**`hipError_t` is `[[nodiscard]]`, so a `-Werror` host build breaks on ignored results CUDA
+allows.** HIP declares `hipError_t` as `[[nodiscard]]` whenever the code is compiled as C++17 or
+later (`__HIP_NODISCARD` in `hip_runtime_api.h`, with no opt-out macro), while CUDA's `cudaError_t`
+and `CUresult` carry no such attribute. Code that deliberately drops an error code (clearing a
+sticky error with `cudaGetLastError();`, or calling an error-string getter for its out-parameter)
+compiles silently with nvcc or g++ against CUDA headers and warns under HIP; in a host build that
+uses `-Werror` (Warp's g++ flags) the warning becomes an error. Fix the few host-side sites (cast to
+`(void)` or route through a void-returning wrapper) instead of adding `-Wno-unused-result`, which
+would also hide real ignored errors; in device-side translation units without `-Werror` the warnings
+are harmless noise. (warp-1.14)
 
 **Never name the pointee struct of an opaque CUDA handle.** `CUstream_st`/`CUevent_st` do
 not exist under HIP. Spell it `std::remove_pointer_t<cudaStream_t>` so it survives the
@@ -167,6 +236,20 @@ the launch fails "Cannot find Symbol" at run time. A first audit that looked onl
 missed seven such sites; list every comparison (both operand orders, continuation lines) with its
 HIP resolution rather than sampling. (oneflow)
 
+**A code generator's device-pass guards live in strings, and fail only when a model uses
+them.** A project that generates CUDA at run time (a simulator that turns model equations
+into `.cu` files) can keep its `#if defined(__CUDA_ARCH__)` device/host selections in Python
+string templates, one per generated function. A grep of the headers does not see them as
+code, and each one reaches the compiler only when a user's model calls that function, so a
+HIP port can pass a test set of ordinary models while every model with a lookup table, a
+per-element random draw or a binomial sample fails to compile ("reference to __host__
+variable ... in __global__ function"). Grep the generator's own source for the macro names as
+well as the headers, and make the GPU tests call every function implementation the generator
+can emit, not just representative models. If all the snippets pass through one assembly
+function, widening the condition there only when the HIP backend is selected leaves the CUDA
+output byte-identical, which is easy to prove by generating projects with both trees and
+diffing them. (brian2cuda)
+
 **Audit every macro class that gates a dtype or arch path, not just `__CUDA_ARCH__`.** CUDA
 headers define feature macros that their HIP counterparts do not: `cuda_bf16.h` defines
 `__CUDA_BF16_TYPES_EXIST__`, `hip_bf16.h` does not, so a shim that maps `<cuda_bf16.h>` to
@@ -216,6 +299,39 @@ HIP sources, so plain C++ TUs keep the host branch. Do not define `__CUDACC__` g
 instead: rocThrust takes its CUDA-system path under it. Re-grep after every upstream sync,
 since new splits arrive with new code. (LichtFeld-Studio)
 
+That rule is for a split whose host branch fails under HIP or hides a device path. A guard
+that only keeps a language feature away from nvcc is different, and widening it by reflex is
+a mistake. The shape:
+
+    #if !defined(__CUDACC__) && defined(__cpp_concepts) && __cpp_concepts >= 201907L
+    #define PROJECT_REQUIRES(...) requires(__VA_ARGS__)
+    #else
+    #define PROJECT_REQUIRES(...)
+    #endif
+
+Under HIP the guard is TRUE, so the `requires` clauses DO reach device compilation, the
+opposite of the CUDA build. The guard exists because of an nvcc front-end limitation; hipcc
+is clang, and clang compiles constrained templates in device code without complaint
+(verified on ROCm 7.2, clang 22, `-std=c++23 -Werror`). Adding `&& !defined(__HIPCC__)`
+would drop overload constraints on the AMD path only, a behavioural divergence introduced to
+fix a problem that does not exist. So grep for every `!defined(__CUDACC__)` guard, TEST what
+the AMD build does with the branch it takes, and extend the guard only if that compile
+actually fails, saying so in the commit message. A force-included compat header that
+deliberately leaves `__CUDACC__` undefined (because rocThrust keys its backend on it) is what
+keeps such a guard live. (CubbyFlow)
+
+**Upstream CCCL 3.0 compat shims are CUDA-only by construction: keep them out of the HIP
+path.** CCCL 3.0 (CUDA 13) removed the CUB fancy iterators (`cub::TransformInputIterator`,
+`cub::CountingInputIterator`), so upstreams are adding alias shims keyed to
+`CUB_VERSION >= 300000` right after `#include <cub/cub.cuh>` -- which is exactly where a HIP
+guard around the CUB include ends, so a later merge of upstream conflicts there and git can
+even match the shim's closing `#endif` with the guard's. Resolve by placing the shim inside
+the CUDA branch of the guard: only CUDA's CUB defines `CUB_VERSION`, and hipCUB (through
+ROCm 7.14 at least) still ships `hipcub/iterator/transform_input_iterator.hpp` and
+`counting_input_iterator.hpp`, so call sites reaching iterators through a
+namespace-qualifier macro need no HIP-side counterpart. Expect this shim to appear in any
+CUB-using upstream as it adopts CUDA 13. (aihwkit)
+
 ## Syntax and spellings clang rejects
 
 **nvcc accepts a split launch chevron, `kernel << <grid, block >> >(args)`; clang does not.**
@@ -247,6 +363,18 @@ right only when the code uses just `this_grid()`, `this_thread_block()` and `thr
 grep for `cg::reduce`, `reduce_update_async` and `plus<>` first. (diff-surfel-rasterizations,
 faster-gaussian-splatting)
 
+**Tile shuffles of pointers and enums need `__shfl` overloads, declared before the
+cooperative-groups header.** CUDA's `thread_block_tile::shfl` takes any trivially copyable type.
+HIP's tile `shfl` calls `__shfl(var, src, width)`, which exists only for arithmetic types, so
+`g.shfl(ptr, lane)` or `g.shfl(enum_value, lane)` fails with "no matching function for call to
+'__shfl'" deep inside `amd_hip_cooperative_groups.h`. Add template overloads (a pointer through
+`unsigned long long`, an enum through `std::underlying_type`), declared after
+`hip/hip_runtime.h` and before `hip/hip_cooperative_groups.h`: for a pointer to a fundamental
+type there is no associated namespace for argument-dependent lookup, so only declarations
+visible at the template's definition are found. A HIP tile `ballot()` returns `unsigned long
+long` (the tile's own bits, compacted), so `const auto v = g.ballot(...); __ffs(v)` becomes
+ambiguous; store it in `unsigned int` as the CUDA type was. (HierarchicalKV, ROCm 10.2)
+
 **Count cooperative-groups call sites per feature before calling them a blocker.** A grep
 for `cooperative_groups` or `cg::` counts include lines and namespace aliases, and generated
 code repeats those in every file: one project's "2392 references" were 2347 includes and
@@ -266,12 +394,89 @@ wave64, lanes 32-63 read lanes 0-31 and the sums are silently wrong. Use
 `__shfl(v, lane, 32)` with a per-half mask, and avoid `__shfl_sync` when the two halves
 take different paths, because HIP's mask check traps. (colmap)
 
+`cg::grid_group` is thinner than CUDA's as well: it offers `thread_rank()`, `size()`,
+`num_threads()` and `sync()` and nothing else (`amd_hip_cooperative_groups.h`), so
+`grid.block_rank()` and `grid.thread_index()` are CUDA-only. Substitute the raw builtins,
+`blockIdx.x` for a one-dimensional launch grid and `blockIdx.x*blockDim.x + threadIdx.x` for
+`thread_index()`, and note in a comment the grid dimensionality the substitution assumes.
+(CuRast: `kernel_stage4_blend`.)
+
+**HIP's bf16 header has no `make_bfloat162` and no `__floats2bfloat162_rn`.**
+`amd_hip_bf16.h` offers only `__float22bfloat162_rn` (from a `float2`); the two-scalar
+builders that FasterTransformer-derived kernels (masked MHA, `cuda_bf16_fallbacks.cuh`) call
+everywhere are absent from every ROCm release checked, through clr trunk. Define them under
+`__HIP_PLATFORM_AMD__` in the project's own bf16 fallback header (set `.x`/`.y`, and
+`__float22bfloat162_rn(make_float2(a, b))`), not in a force-included compat header, where a
+later ROCm definition would collide in every TU. (llm-awq)
+
+**HIP has no `half2` overload of `__hmax2`.** `amd_hip_fp16.h` provides `__hmax`/`__hmin` for
+`__half` and `__hmax2` only for `__hip_bfloat162`, so `__hmax2(half2, half2)` fails with "no
+matching function" and a conversion error from `__hip_bfloat162`. Defining it from `__hmax` on
+`__low2half`/`__high2half` keeps CUDA's NaN rule (a NaN yields the other input) and is correct, but
+in a max-heavy inner loop the packed builtin in performance.md ("Scalar emulation of a packed
+intrinsic") is many times faster, so prefer that form there. Putting the definition in the project's
+namespace does not protect against a future HIP overload: `__half2` is a global type, so
+argument-dependent lookup adds a global `__hmax2(__half2, __half2)` and the call becomes ambiguous
+(checked with a simulated overload and `-fsyntax-only`). That failure is a loud compile error at the
+call; the fix then is to delete the local definition. (Quest, ROCm SDK 10.1)
+
+**A `__shared__` array of a struct that has default member initializers is a hard error on
+HIP and silently accepted by nvcc.** Shared variables cannot be initialized; nvcc drops the
+initializers with no diagnostic at all (measured on CUDA 12.8.93, and equally silent under
+`-Xcudafe --display_error_number`), while clang reports `initialization is not supported for
+__shared__ variables` and stops. The fingerprint is a struct that looks innocent,
+`struct S { float sum = 0.0; float max = -1.0; };`, declared as
+`__shared__ S sdata[blockSize]`. Check whether the kernel writes both members before reading
+them (it usually does, because the initializers were never reachable in device code anyway):
+if so, deleting the initializers is correct on every architecture and changes nothing on
+CUDA. Only if a host caller genuinely relies on the defaults do you need an aligned byte
+buffer plus `reinterpret_cast`. (rmcl: `SimpleLikelihoodStats` in the reduction of
+`resampling.cu`.)
+
 **MSVC-only upstreams accept code that clang and gcc reject**, so the HIP build (and the
 CUDA build under nvcc) is a stricter compiler than the project has ever seen. Velvet carried
 a member template whose parameter pack shadowed the class pack -- accepted by MSVC, rejected
 by Clang and GCC. Expect missing `typename`/`template` disambiguators, two-phase lookup
 failures and narrowing conversions. Fixes are additive and arch-independent, so they help
 the CUDA build too and are not HIP-specific hacks. (Velvet)
+
+**Eigen DECOMPOSITIONS called from `__device__` code do not survive the move to hipcc, even
+though Eigen's core arithmetic does.** Eigen defines `EIGEN_DEVICE_FUNC` as
+`__host__ __device__` for hipcc just as it does for nvcc, so `Matrix`, `Map`, coefficient
+access, `.cross()` and small products all compile. The boundary is not a matrix SIZE, it is
+which entry point you call: `SelfAdjointEigenSolver::computeDirect()` (defined only for 2x2
+and 3x3) is device-safe, while the general `compute()` path -- which the CONSTRUCTOR runs,
+at every size including 3x3 -- reduces through a Householder tridiagonalization that calls
+Eigen's general matrix-matrix product kernels (`scaleAndAddTo`, `applyThisOnTheLeft`,
+`BlasUtil`'s `extractScalarFactor`), and those are host-only. Do not read "the small sizes
+are fine": a 3x3 constructor fails at `Tridiagonalization.h:434`. The diagnostic is a
+handful of `reference to __host__ function ... in __host__ __device__ function` errors deep
+in Eigen headers, all tracing to ONE kernel: read the `note: called by` line and fix the
+call site, do not conclude Eigen is unusable on the device. Physics and graphics codebases
+hit this because per-element positive-semi-definite projection of a small Hessian is a
+standard move. Replace the solver with a cyclic Jacobi sweep over plain `Scalar[N][N]`
+arrays: no workspace, no matrix product, backward stable on symmetric input, and one
+implementation for both back ends rather than an `#ifdef` fork (normalize the input first:
+faults-numerics.md, "A hand-written Jacobi/eigenvalue sweep replacing a library solver must
+normalize first"). Do the reconstruction with explicit loops as well, since a fixed-size
+12x12 `V * D * V.transpose()` re-enters the same host-only product path. Verify it on the
+HOST against the Eigen original over a few thousand random symmetric matrices before
+touching the GPU: that separates "my replacement is wrong" from every other hypothesis in
+about five minutes. (GPU_IPC: `PDSNK<double,12>`, agreed to 1.5e-14 relative over 20000
+trials.)
+
+**`__ldg` is usually a non-problem on HIP; check before working around it.** ROCm ships
+`__ldg` overloads for the scalar AND vector types (`hip/amd_detail/hip_ldg.h`: `char2`,
+`int4`, `longlong2`, ...; `amd_hip_fp16.h` adds `__half`/`__half2`), and every one of them
+is literally `return ptr[0]`, because AMD has no separate read-only-cache instruction to
+select. So a `RO_CACHE(x)` macro over scalars needs no HIP arm at all, and `(x)` and
+`__ldg(&x)` are the same code. Only an arbitrary USER type is unsupported. A CUDA generics
+wrapper that provides `__ldg` for arbitrary types by aliasing (`generics/ldg.h`, guarded on
+`__CUDA_ARCH__ >= 350`) also compiles under hipcc: the guard is false, so it falls back to
+`*ptr`, and its non-template HIP competitors win overload resolution for the scalar calls.
+GooFit's port first added a HIP-only `RO_CACHE(x) (x)` on the belief that neither worked;
+compiling a two-line hipcc test against the wrapper disproved it and the whole arm was
+deleted. Test the actual header before adding a guard. (GooFit)
 
 **An uninitialised header-only submodule fails as a HIP error, not as a missing file.**
 When a project bundles GLM (or Eigen, or any header-only library) as a submodule and the
@@ -324,6 +529,64 @@ under HIP a host call with float arguments lands on `(int, int)` whatever this h
 (faults-numerics.md, "Host `min`/`max` on floating-point values truncate to int under
 hipcc"). Run that entry's detection pass on any project that uses helper_math.
 
+**HIP's `blockIdx`/`threadIdx` do not convert to `uint3`, and a `uint3` does not convert to
+`dim3`.** In CUDA the built-in index variables are `uint3`, and a `uint3` (from
+`make_uint3()`) converts to `dim3`. In HIP the built-ins are distinct types, so three things
+CUDA accepts fail to compile: passing them to a function that takes `uint3` (waLBerla's
+`gpu::FieldAccessor::set(uint3, uint3)`), `uint3(blockIdx)`, and returning a `uint3` from a
+function declared to return `dim3`. Construct from the members,
+`make_uint3(blockIdx.x, blockIdx.y, blockIdx.z)` or `uint3{threadIdx.x, ...}`, and return
+`dim3(...)`. The built-ins do convert to `dim3`: `dim3(blockIdx)` compiles. Do not write a
+helper that takes a built-in by value, because their copy constructor is deleted. (ESPResSo
+with waLBerla, HIP 7.16)
+
+**HIP's host-side `__half` needs the HIP compiler, and `HIP_vector_type`'s operators hijack
+mixed half arithmetic.** Host code that uses `__half` (integer constructors,
+`__ushort_as_half`, half arithmetic) cannot be built with a plain C++ compiler on ROCm:
+`hip/hip_fp16.h` falls back to `amd_detail/hip_fp16_gcc.h` there, whose `__half` has only
+float and double constructors (`__half(int)` is ambiguous), no arithmetic and no bit-cast
+functions. CUDA's `cuda_fp16.h` gives g++ the full host API, so this shows up only on ROCm.
+Compile those sources as HIP (`LANGUAGE HIP`), then expect two follow-ups: file-scope names
+`min`/`max` collide with the global `min`/`max` HIP declares, and `__half_raw{bits}`
+brace-initializes HIP's `_Float16` union member numerically (use `__ushort_as_half`).
+Separately, `HIP_vector_type`'s `operator OP(U, const vec&)` and `(const vec&, U)` accept any
+`U`, so `half3 - float3` with a project's own `half3` struct resolves to HIP's operator and
+fails inside `make_vector_type`; a concrete overload for the project's half type is more
+specialized and wins. Its member unary `-` and `~` also keep `char`/`short` element types
+where CUDA's promote to `int`; only non-template overloads beat the member templates.
+`__double2half` does not exist in HIP; `__half(static_cast<_Float16>(d))` rounds once, as
+CUDA does. (CV-CUDA)
+
+**A helper whose name the standard library also declares must NOT be guarded on
+`__CUDA_ARCH__`/`__HIP_DEVICE_COMPILE__`.** Those macros answer "am I in the device pass",
+not "is this name already taken", and two standard libraries answer the second question
+differently: libstdc++'s `<math.h>` does `using std::lerp;` at global scope (arriving
+transitively via `<torch/extension.h>`), while the MSVC STL declares `lerp` in namespace
+`std` only. So a pass-keyed guard fixes one OS and breaks the other: the Windows host pass
+found NO viable `lerp(float,float,float)` and failed to parse the device function body, then
+supplying one unconditionally made the Linux host pass find TWO ("declaration conflicts with
+target of using declaration already in scope"). Any C++20 name the standard library also
+declares is exposed to this: `lerp`, `midpoint`, `clamp`, `hypot`, `gcd`. The fix is not a
+better `#if`, and never `_WIN32`/`_MSC_VER` as a proxy for the standard library: give the
+helper a name the standard library does not use and define it once, unconditionally, as
+`__device__ __host__`, so it resolves in both passes on every toolchain. Keep only the
+same-name overloads whose PARAMETER TYPES differ from the standard one (`lerp(float2,...)`
+never conflicted). (faster-gaussian-splatting: the `helper_math.h` scalar `lerp`)
+
+When the maintainer keeps the name and every caller is device code, a second fix exists: on
+HIP only, declare the helper `__device__` (not `__host__ __device__`), unconditionally, not
+keyed on the compile pass. clang's HIP mode treats a `__device__` function and a host function
+of the same signature as distinct overloads, so it coexists with libstdc++'s global `using
+std::lerp;`, and because it is declared in both passes, the host pass with the MSVC STL still
+finds it when parsing device function bodies. With hipcc (HIP 7.16) on a file that includes
+`<math.h>` and calls `lerp(float, float, float)` from device code, `__host__ __device__` fails
+at `-std=c++20` with "declaration conflicts with target of using declaration already in
+scope", while `__device__` compiles at C++17 and C++20, and the device ISA was identical to
+the renamed version. It is not valid when host code also calls the helper. What exposes the
+collision in the first place: PyTorch's headers require C++20 from 2.14 on (`#error C++20 or
+later compatible compiler is required to use PyTorch`; 2.13 and earlier accept C++17), on
+CUDA and ROCm alike. (faster-gaussian-splatting)
+
 **Extend a CUDA guard for HIP; never re-key it.** Upstream's `#ifndef __CUDACC__` around
 host fallbacks for `fminf`/`min`/`max`/`rsqrtf` (CUDA-Samples `helper_math.h` and its
 copies) also admits the HIP device pass, because HIP never defines `__CUDACC__`. Re-keying
@@ -356,6 +619,28 @@ disable macro; a recent toolkit hides the bug unless the project opts out. Prefe
 literal (`0.f`) in half comparisons anywhere, and compile-check the CUDA path against 12.1
 headers or older, not only the newest toolkit installed -- bisected against the real
 headers, 12.1 fails and 12.2.53 onward compiles. (marian-dev)
+
+**"Portable" is a claim to verify against nvcc, not a property of how the edit reads.** A
+device primitive that only one back end has, replaced by something that looks neutral, can
+still be HIP-only. 3DUNDERWORLD-SLS-GPU_CPU swapped a never-taken overflow guard's
+`asm("trap;")` (illegal on amdgcn) for `__builtin_trap()`, unconditionally, with a commit
+message calling it portable. True for clang, where it is device-callable; false for nvcc,
+which rejects `__builtin_trap()` as a host-only function called from `__device__` and fails
+the CUDA build outright. Ask of every edit inside a `.cu`/`.cuh` touched for HIP: does this
+identical text also compile under nvcc, or does it only build because the port never tried?
+The repair that keeps it from recurring is a compat-header macro
+(`#define gpuTrap() __builtin_trap()` on the HIP side, `#define gpuTrap() asm("trap;")` on
+the CUDA side) called at the use site, not an open-coded `#if defined(USE_HIP)` in the
+`.cuh`: the back-end condition then lives in the one file that owns the `cuda*`-to-`hip*`
+aliases, and the CUDA branch reproduces upstream's text verbatim. A device intrinsic with no
+cross-toolchain spelling is a compat-header entry like any alias. validation.md ("Diff the
+PTX") has the proof that the CUDA path was restored exactly. (3DUNDERWORLD-SLS-GPU_CPU)
+
+**C++17 `std::clamp` and friends work in HIP device code but not under nvcc.** clang treats
+a `constexpr` function as implicitly `__host__ __device__`, so `std::clamp` compiles in a
+HIP kernel; nvcc rejects it without `--expt-relaxed-constexpr`. Fine inside an AMD-only
+branch, a build break in SHARED device code that nvcc also compiles. Check which side of
+the guard it lands on. (popsift)
 
 **An arch-specific fix keyed on the OS or the ROCm version can BREAK an already-validated
 arch**, because those are only PROXIES for the real dependency. A Windows setup on TheRock
@@ -435,6 +720,13 @@ To check any toolchain in one line, read the order in its own header:
 of the INSTALLED wrapper with the two includes reordered and puts it on the include path
 ahead of the resource dir -- the upstream fix, applied locally, with the language standard
 untouched.
+
+The asset's `execute_process` probe can also be written as two `try_compile(...
+SOURCE_FROM_CONTENT ... NO_CACHE HIP_STANDARD 23)` calls, which reuse the project's own HIP
+compiler settings. Keep `<hip/hip_runtime.h>` in the probe: a bare `__global__` fails the host
+pass ("Can't find declaration for hipLaunchKernel") and makes the shim look ineffective. In a
+target that mixes HIP and C++ sources, append the shim's `-I` to `CMAKE_HIP_FLAGS` so it
+reaches HIP translation units only. (CubbyFlow)
 
 Measured alternatives, all tried against ROCm 7.14 on gfx1151:
 

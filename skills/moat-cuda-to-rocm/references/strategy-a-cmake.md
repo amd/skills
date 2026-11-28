@@ -83,6 +83,8 @@ A heavily-templated library (cudf: rocThrust/rocPRIM `DeviceReduce`/`DeviceScan`
 
 Fix: add `--offload-compress` to the HIP compile options (`target_compile_options(<tgt> PRIVATE $<$<COMPILE_LANGUAGE:HIP>:--offload-compress>)`). A documented ROCm clang HIP flag (7.2.1+: "Compress offload device binaries (HIP only)") that stores the embedded device bundle in the compressed CCOB format; the HIP runtime decompresses it on load. Measured on a cudf rocPRIM reduce TU @ gfx90a: object 207.8 MB -> 52.1 MB (3.99x), `.hip_fatbin` 158.6 MB -> 2.89 MB (54.9x) -- the device ISA matrix is hugely redundant so it compresses ~55x. This let cudf's full reductions + aggregation + groupby + join surface link into ONE ~540 MB libcudf.so with no multi-.so split and no `-mcmodel=large`. For a non-RDC build (no `-fgpu-rdc` device-link step) the per-TU compile is the only place the bundle is formed, so there is no separate device-link to also flag. Prefer this BEFORE splitting a library or capping the template matrix. Also build a single target arch (no multi-arch fatbin) and add `-ffunction-sections -fdata-sections` + `--gc-sections` to prune unreachable host instantiations. (cudf.)
 
+The same flag shrinks a library built for every target a release supports: 25 targets made 324 MB of device code, and `--offload-compress` (with `--offload-compression-level=<n>`) took a 330 MB library to 10.6 MB at no measurable build cost; the ROCm 10.2 runtime loads it. The cost is decompression the first time a process uses kernels from a bundle, about 35-50 ms per bundle, and only while comgr's code-object cache (`~/.cache/comgr`, `AMD_COMGR_CACHE_DIR`) is cold, so measure first-launch time with a fresh `AMD_COMGR_CACHE_DIR` per run. `--offload-jobs=<n>` compiles the targets of one translation unit in parallel (320 s to 39 s); its output differs only in the `__hip_cuid_*` symbol. (warp-1.14)
+
 ## The shim-header method: a port with zero source edits
 
 The plain Strategy A shape adds `#include "cuda_to_hip.h"` to every `.cu`/`.cuh` that needs
@@ -172,6 +174,38 @@ there was narrower: `checkCudaErrors` is defined inside `#ifdef __DRIVER_TYPES_H
 only the CUDA toolkit's `driver_types.h` sets, so on ROCm the header supplies nothing. A
 one-line probe TU that calls the macro settles it, and the commit message should give the
 accurate reason. (plvs)
+
+**Sample code PASTED into the project's own files needs the same replacement, and a shadow
+header does nothing for it.** A shadow header handles a vendor sample header the project
+*includes*. Sample code the project copied into its own file (an error-check macro such as
+`CUDA_RT_CALL`, `CUFFT_CALL` or `checkCudaErrors`, or a small helper, usually still carrying
+the sample's notice comment) compiles on the HIP path too and ships in the port's tree; the
+marker grep above names those files as well. Replace the helper with a project-owned
+implementation, and remove the notice comment together with the code it covered (that is
+code replacement; never delete a standalone LICENSE/NOTICE file). What a reader checks for
+independence, in order:
+
+- **Own control-flow shape.** Do not keep the sample's statement structure. Prefer an idiom
+  the project already uses (`do { ... } while (0)` where a neighbouring macro has it) over
+  the sample's bare `{ ... }` block.
+- **Own naming of internals.** Rename the temporaries; do not keep `status`, `err`, or the
+  sample's `static_cast<cudaError_t>( call )` initialiser shape.
+- **Own message format.** This is the tell reviewers actually spot. Write a new sentence, do
+  not reorder the sample's words: `"ERROR: CUDA RT call \"%s\" in line %d of file %s failed
+  with %s (%d)"` reordered into `"ERROR: cuBLAS call \"%s\" failed in line %d of file %s
+  with error code (%d)"` is still the sample's sentence.
+- **Keep the NAME, change the body.** Keeping `CUDA_RT_CALL`/`checkCudaErrors` means zero
+  call sites move (TurboFNO: 284 + 32 invocations untouched), so the diff is one file.
+- **Keep the observable behaviour** unless you have a reason to change it. If the original
+  reported and continued, do not make the replacement abort: that can turn a pre-existing
+  benign upstream error into a crash.
+
+Check for DUPLICATE copies before declaring it done: TurboFNO's header held the block twice,
+an edited copy that actually expanded and a verbatim one made dead by the `#ifndef` guards,
+and removing only the notice-covered one would have left the compiled copy in place. A
+host-side helper must leave the device code unchanged when kernel TUs include the file;
+validation.md ("Proving two builds carry the same device code") has the comparison and its
+build-path trap. (plvs, TurboFNO)
 
 ### A per-backend directory is not a reason to add a HIP directory
 
@@ -264,6 +298,21 @@ ohm's first port added such a directory (~3,800 lines). The masquerade was +157/
   depending on whether the grep honors `.gitignore`, which usually excludes them. Note that
   hipify prepends `#include "hip/hip_runtime.h"`, which breaks a g++ CPU reference build, so
   build that from a separate non-hipified copy. (LC-framework)
+- **When the project's hipify step rewrites TRACKED files in place, its output leaks into
+  your commits.** A configure-time hipify (faiss runs `faiss/gpu/hipify.sh` from
+  `execute_process`) edits the checked-in sources themselves, in faiss 154 tracked files per
+  configure, so any file you then edit for a real fix gets committed with the translator's
+  changes riding along. The one that escaped was `#include "hip/hip_runtime.h"` prepended as
+  line 1 of a GPU *test* `.cpp`, above the copyright header. That file also builds under
+  CUDA, where no HIP header exists, so it would have broken upstream's NVIDIA CI. Before
+  committing, diff against the pristine tree and restore everything the translator touched
+  (`git checkout -- <dirs>`), keeping only your own hunks; `git status` after a configure
+  shows the blast radius. Do not "fix" a leaked include by guarding it: delete it. The
+  hipify step re-inserts it on every ROCm configure, the file did not need it, and
+  hipify-perl is NOT idempotent for that insertion: run on a file that already has the
+  include, it adds a SECOND copy. Beware the plausible rationalization ("made explicit in
+  source for the MSVC build"); running hipify-perl on the pristine file and diffing takes a
+  minute and settles it. (faiss)
 - **`-inplace` re-hipifies from the `.prehip` backup, not from the file on disk.** The first
   run saves `foo.cu` as `foo.cu.prehip`; every later run reads the backup and overwrites
   `foo.cu` from it. So regenerating a file and hipifying it again silently resurrects the

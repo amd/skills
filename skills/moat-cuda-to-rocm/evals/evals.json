@@ -19,6 +19,90 @@
       ]
     },
     {
+      "id": "host-min-max-in-shared-code",
+      "skill_should_trigger": true,
+      "prompt": "We compile our CUDA sources as HIP for an MI300X build (CMake, .cu files marked LANGUAGE HIP, ROCm 7.2). Some helpers are shared between host and device. A colleague says the AMD build gives slightly different camera parameters on the host and suggests adding -D__HIP_DEFINE_EXTENDED_HOST_MIN_MAX__=1 to the HIP flags and moving on. Some of our users build with ROCm 6.4. Review this and write what you'd do to review.md. Don't build anything.\n\n```cpp\n__host__ __device__ inline float clamp_fov(float deg) {\n  return min(max(deg, 0.5f), 179.5f);\n}\n\n// host only, in camera.cu\nunsigned pick_tile_count(unsigned pixels, unsigned max_tiles) {\n  return max(pixels / 4096u, max_tiles);\n}\n```",
+      "expected_behavior": [
+        "Explain that HIP's host-side min/max are only defined for (int, int) by default, so the float calls in clamp_fov truncate to int when it runs on the host, while the device path is correct",
+        "Point out that pick_tile_count's unsigned arguments also go through the (int, int) host overload, so values above INT_MAX come out wrong",
+        "Recommend fixing the call sites (fminf/fmaxf for the floats, an explicitly unsigned min/max for the unsigned call) as the fix that works on every ROCm version and on CUDA",
+        "State that __HIP_DEFINE_EXTENDED_HOST_MIN_MAX__ only exists from ROCm 7.2, so on the users' ROCm 6.4 the define does nothing and the truncation stays, unless the build is made to fail on such a toolchain"
+      ],
+      "unexpected_behavior": [
+        "Endorse adding -D__HIP_DEFINE_EXTENDED_HOST_MIN_MAX__=1 as a complete fix without mentioning that it has no effect before ROCm 7.2",
+        "Say the unsigned call is safe because both arguments are integers"
+      ],
+      "files_exist": [
+        "review.md"
+      ]
+    },
+    {
+      "id": "review-reduction-kernels-for-mi300x",
+      "skill_should_trigger": true,
+      "prompt": "These kernels come from a CUDA training codebase we are bringing up on MI300X with HIP. On our H100s everything passes. Review them for what will go wrong on MI300X and write findings to review.md. Assume warp-size and mask issues are already handled elsewhere; focus on what is left. Don't build or run anything.\n\n```cpp\n// (1) per-block partial sums, last block finishes the reduction\n__global__ void bias_grad(const float* dout, float* partial, unsigned* flag, float* dbias, int N, int C) {\n  extern __shared__ float acc[];            // C floats\n  for (int c = threadIdx.x; c < C; c += blockDim.x) acc[c] = 0.f;\n  __syncthreads();\n  for (int r = blockIdx.x; r < N; r += gridDim.x)\n    for (int c = threadIdx.x; c < C; c += blockDim.x) acc[c] += dout[r * C + c];\n  __syncthreads();\n  for (int c = threadIdx.x; c < C; c += blockDim.x) partial[blockIdx.x * C + c] = acc[c];\n  __syncthreads();\n  __shared__ unsigned last;\n  if (threadIdx.x == 0) last = atomicInc(flag, gridDim.x);\n  __syncthreads();\n  if (last == gridDim.x - 1)\n    for (int c = threadIdx.x; c < C; c += blockDim.x) {\n      float s = 0.f;\n      for (int b = 0; b < gridDim.x; b++) s += partial[b * C + c];\n      dbias[c] = s;\n    }\n}\n\n// host\nint blocks = prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount / 512;\nassert(blocks <= 1024);   // a later 1024-thread kernel reduces one value per block\n\nsize_t smem = 10 * C * sizeof(float);   // C is 768 in tests, up to 4096 in production\ncudaError_t st = cudaFuncSetAttribute(ln_fwd_big, cudaFuncAttributeMaxDynamicSharedMemorySize, smem);\ncudaCheck(cudaGetLastError());\nif (st == cudaSuccess) ln_fwd_big<<<grid, 256, smem>>>(...);\nelse ln_fwd_small<<<grid2, 256>>>(...);\n```",
+      "expected_behavior": [
+        "Flag that bias_grad has no __threadfence() between writing its partial sums and the atomicInc, nor before the last block reads them, so on MI300X (multiple XCDs with separate L2 caches) the last block can read stale partials and give wrong or nondeterministic results, and recommend adding the fences",
+        "Flag that the block count derived from maxThreadsPerMultiProcessor * multiProcessorCount comes out far larger on MI300X (304 CUs) than on an H100 and exceeds the 1024 bound (about 1216), and recommend capping it at the bound",
+        "Flag that MI300X allows at most 64 KiB of shared memory (LDS) per block, so the cudaFuncSetAttribute opt-in fails for large C (10 * C * 4 bytes exceeds 64 KiB once C is above about 1638), well short of what an H100 allows",
+        "Flag that the failed opt-in also sets the last error, so cudaCheck(cudaGetLastError()) aborts before the ln_fwd_small fallback can run, and recommend clearing the error or testing the status first"
+      ],
+      "unexpected_behavior": [
+        "Say the code is fine for MI300X because it already passes on H100",
+        "Recommend requesting a larger shared-memory opt-in on AMD as the fix for the 64 KiB limit"
+      ],
+      "files_exist": [
+        "review.md"
+      ]
+    },
+    {
+      "id": "review-warp-reduce-small-blocks",
+      "skill_should_trigger": true,
+      "prompt": "We're bringing this CUDA reduction up on an MI300X with HIP; it passes on our A100 CI for every block size we launch (32, 64, 128, 256). Review it for anything that will break on the MI300X and write your findings to review.md. Don't build or run anything.\n\n```cpp\ntemplate <class T> __device__ T warpReduceSum(unsigned long long mask, T v) {\n  for (int off = warpSize / 2; off > 0; off /= 2) v += __shfl_down_sync(mask, v, off);\n  return v;\n}\n\ntemplate <class T, unsigned blockSize>\n__global__ void reduce(const T* in, T* out, unsigned n) {\n  T s = 0;\n  for (unsigned i = blockIdx.x * blockSize + threadIdx.x; i < n; i += blockSize * gridDim.x) s += in[i];\n  const unsigned long long mask = blockSize >= 64 ? ~0ull : ((1ull << blockSize) - 1);\n  s = warpReduceSum(mask, s);\n  __shared__ T partial[32];\n  if (threadIdx.x % warpSize == 0) partial[threadIdx.x / warpSize] = s;\n  __syncthreads();\n  if (threadIdx.x < warpSize) {\n    s = threadIdx.x < (blockSize + warpSize - 1) / warpSize ? partial[threadIdx.x] : 0;\n    s = warpReduceSum(mask, s);\n    if (threadIdx.x == 0) out[blockIdx.x] = s;\n  }\n}\n```",
+      "expected_behavior": [
+        "Flag that with blockSize 32 the block is only half of a 64-lane MI300X wavefront, so the warpReduceSum loop (starting at warpSize/2 = 32) reads lanes 32-63 that hold no thread and adds undefined values, giving wrong sums for 32-thread blocks",
+        "Recommend a concrete fix: only add values from lanes that hold a thread (e.g. check the lane against the mask or block size), or start the shuffle loop at the block width when the block is smaller than a wavefront, and test block size 32"
+      ],
+      "unexpected_behavior": [
+        "Say the 64-bit mask alone makes the 32-thread case correct on MI300X",
+        "Say the kernel is fine because it passes on A100",
+        "Suggest the 32-thread sum probably still comes out right on current hardware (e.g. because disabled lanes read as 0), rather than stating it is wrong in practice"
+      ],
+      "files_exist": [
+        "review.md"
+      ]
+    },
+    {
+      "id": "review-small-key-atomic-insert-libhipcxx",
+      "skill_should_trigger": true,
+      "prompt": "Our open-addressing set works on CUDA. For AMD we build it against libhipcxx (the copy that ships with ROCm 10.1) and target MI300X. Tests with 32-bit keys pass, but int8_t and int16_t key tests sometimes report fewer unique keys than were inserted. Review the insert path and write review.md. Don't build or run anything.\n\n```cpp\n#include <cuda/atomic>\ntemplate <class Key>\n__device__ bool insert(Key* slots, size_t capacity, Key key, Key empty) {\n  size_t i = hash(key) % capacity;\n  for (size_t probe = 0; probe < capacity; ++probe) {\n    cuda::atomic_ref<Key, cuda::thread_scope_device> slot(slots[i]);\n    Key expected = empty;\n    if (slot.compare_exchange_strong(expected, key, cuda::memory_order_relaxed)) return true;  // claimed\n    if (expected == key) return false;                                                         // duplicate\n    i = (i + 1) % capacity;                                                                    // taken: probe on\n  }\n  return false;\n}\n```",
+      "expected_behavior": [
+        "Identify that libhipcxx's compare_exchange_strong at device/block scope is implemented with the weak HIP builtin, so for 1- and 2-byte keys (emulated with a 32-bit CAS on the containing word) it can fail spuriously when a neighboring slot in the same word changes, even though the slot still holds `empty`",
+        "Explain that the insert treats that spurious failure as 'slot taken' and probes on, so the same key can be inserted twice or the slot left empty, matching the reported symptom, and recommend patching libhipcxx to use the strong builtin or retrying while `expected == empty`"
+      ],
+      "unexpected_behavior": [
+        "Say compare_exchange_strong cannot fail spuriously and look only for bugs in the hashing or probing logic",
+        "Present the weak-CAS behavior only as an unconfirmed possibility to check (e.g. 'if libhipcxx's emulation behaves like a weak CAS'), or rank another cause first, instead of identifying the libhipcxx defect as the cause"
+      ],
+      "files_exist": [
+        "review.md"
+      ]
+    },
+    {
+      "id": "review-host-finalizer-device-tables",
+      "skill_should_trigger": true,
+      "prompt": "We hipified this estimator and it builds for MI300X, but the final cardinality comes out a little off compared with our A100 runs (no crash, no errors). Review the code for the cause and write review.md. Don't build or run anything.\n\n```cpp\n// tuning.cuh\n__device__ static constexpr cuda::std::array<double, 6> bias_p4{10.0, 9.717, 9.207, 8.789, 8.288, 7.820};\n__device__ static constexpr cuda::std::array<double, 6> raw_p4{11.0, 11.717, 12.207, 12.79, 13.288, 13.82};\n\n__host__ __device__ constexpr double const* bias_data(int p) noexcept { return p == 4 ? bias_p4.data() : nullptr; }\n__host__ __device__ constexpr double const* raw_data(int p) noexcept { return p == 4 ? raw_p4.data() : nullptr; }\n\n// finalizer.cuh -- runs on the HOST after the sketch is copied back\nstruct finalizer {\n  int precision_;\n  __host__ __device__ double correct(double e) const {\n    auto raw = raw_data(precision_);\n    auto bias = bias_data(precision_);\n    int i = 0;\n    while (i < 5 && raw[i] < e) ++i;\n    return e - bias[i];\n  }\n};\n// host: double est = finalizer{4}.correct(raw_estimate);\n```",
+      "expected_behavior": [
+        "Identify that the host-side finalizer reads __device__ variables (the bias/raw tables) through pointers, which under HIP resolves to the host shadow of the __device__ variable and reads zeros or garbage, whereas nvcc gives the host the real constant values, so bias correction is silently wrong on the AMD build",
+        "Recommend a fix that gives host code real values, e.g. drop __device__ from the constexpr tables under HIP (plain static constexpr, usable from device code with clang) or keep a separate host copy"
+      ],
+      "unexpected_behavior": [
+        "Attribute the difference only to floating-point rounding or FMA contraction differences between the GPUs"
+      ],
+      "files_exist": [
+        "review.md"
+      ]
+    },
+    {
       "id": "plan-torch-extension-port",
       "skill_should_trigger": true,
       "prompt": "Our repo is a PyTorch C++/CUDA extension. setup.py is essentially this:\n\n```python\nfrom setuptools import setup\nfrom torch.utils.cpp_extension import BuildExtension, CUDAExtension\n\nsetup(\n    name=\"fused_ops\",\n    ext_modules=[CUDAExtension(\"fused_ops\", [\"csrc/ops.cpp\", \"csrc/fused_kernel.cu\"])],\n    cmdclass={\"build_ext\": BuildExtension},\n)\n```\n\nWe want it to also build and run on AMD Instinct GPUs without breaking the NVIDIA build. Write a short porting plan to plan.md. Don't install or build anything; this machine has no GPU and the sources aren't here.",
