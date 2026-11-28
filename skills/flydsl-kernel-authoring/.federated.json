@@ -2,9 +2,9 @@
   "source": "rocm-flydsl",
   "repo": "ROCm/FlyDSL",
   "ref": "main",
-  "commit": "47d04a1282dd2db774f04cbd43a5036f52b2d0d7",
+  "commit": "478e1abe6bdc7a7d0ddbe23c6d2e99cc9429c59c",
   "path": ".claude/skills/flydsl-kernel-authoring",
   "license": "Apache-2.0",
-  "content_hash": "edf20bd774664c799de165a0c550434888f5435e418680162f279ddca9c793d0",
-  "imported_at": "2026-11-25T06:34:42Z"
+  "content_hash": "11b781efc5b89a05f3ee2601861a6d2af5c4d1716bdc6df5e50c161d2c81943d",
+  "imported_at": "2026-11-28T06:31:32Z"
 }
