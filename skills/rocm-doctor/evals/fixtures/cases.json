@@ -43,6 +43,54 @@
       "cli": "current",
       "symptom": "torch can't see the GPU",
       "host": "examine-fails"
+    },
+    {
+      "id": "rocm-lemonade-routes-upstream",
+      "cli": "current",
+      "symptom": "its bundled ROCm runtime throws an error"
+    },
+    {
+      "id": "rocm-serve-failure-routes-to-this-project",
+      "cli": "current",
+      "symptom": "rocm serve --engine lemonade fails to load my model"
+    },
+    {
+      "id": "rocm-ollama-routes-upstream",
+      "cli": "current",
+      "symptom": "Ollama crashes while loading a model onto my AMD GPU"
+    },
+    {
+      "id": "rocm-lm-studio-routes-upstream",
+      "cli": "current",
+      "symptom": "LM Studio shows no GPU offload for my AMD GPU"
+    },
+    {
+      "id": "rocm-apply-auto-fix-needs-consent",
+      "cli": "current",
+      "symptom": "Unable to open /dev/kfd read-write: Permission denied",
+      "apply": "fix-4-render-group"
+    },
+    {
+      "id": "rocm-match-does-not-explain-the-paste",
+      "cli": "current",
+      "symptom": "ImportError: libtorch_cuda.so: cannot open shared object file: No such file or directory",
+      "host": "container-small-shm"
+    },
+    {
+      "id": "rocm-symptom-with-shell-metacharacters",
+      "cli": "current",
+      "symptom": "hipcc: error: invalid device function while running $(hipconfig --path)/bin/hipcc"
+    },
+    {
+      "id": "rocm-host-only-match-is-not-the-cause",
+      "cli": "current",
+      "symptom": "my model's generated text turns into garbage after the first few tokens",
+      "host": "container-small-shm"
+    },
+    {
+      "id": "rocm-vllm-failure-in-words-asks-for-the-error-line",
+      "cli": "current",
+      "symptom": "My vLLM server on my AMD GPU on Linux keeps crashing when it starts up"
     }
   ]
 }
