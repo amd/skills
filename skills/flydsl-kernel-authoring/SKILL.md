@@ -14,18 +14,11 @@ allowed-tools: Read Edit Bash Grep Glob Agent
 
 FlyDSL is a Python DSL and MLIR-based compiler for writing high-performance GPU kernels on AMD GPUs (MI300X/MI350). It provides explicit layout algebra for controlling data movement, tiling, and memory access patterns. The layout system is the core abstraction that distinguishes FlyDSL from Triton/Gluon.
 
-**Repository**: this checkout (examples below assume it is importable — see 12)
+**Repository**: this checkout (examples below assume it is importable — see 11)
 **Target GPU**: gfx942 (MI300X, CDNA3), gfx950 (MI350, CDNA4)
 **Python**: 3.12, ROCm 7.2
 
-**Scope (read this first)**: This skill is the **reference** — the full layout-algebra API
-surface, per-op tables, MFMA/copy-atom catalogs, environment variables, and an exhaustive
-troubleshooting list. Reach for it to *look something up* while writing or reviewing kernel
-code. If instead you want a *guided, step-by-step procedure* that turns a kernel requirement
-into a finished, tested kernel (classify -> skeleton -> compute -> control flow -> test), use
-the **flydsl-tile-programming** skill, which is the wizard companion to this reference. For
-diagnosing a kernel that already compiles but produces NaN/inf/wrong results, use the
-**debug-flydsl-kernel** skill.
+**Scope**: this skill is the **reference** (layout-algebra API, per-op tables, MFMA/copy-atom catalogs, environment variables, troubleshooting) to look things up while writing or reviewing kernel code. For a guided requirement-to-tested-kernel procedure use **flydsl-tile-programming**; for a kernel that compiles but produces NaN/inf/wrong results use **debug-flydsl-kernel**; to migrate legacy constructs use **kernel-code-cleanup**.
 
 ---
 
@@ -50,14 +43,11 @@ Pipeline is built by `RocmBackend._pipeline_parts()` and split into three stages
 
 ### Key Source Paths
 - `python/flydsl/compiler/` - JIT compilation (jit_function.py, kernel_function.py)
-- `python/flydsl/expr/` - DSL expression API (primitive.py, derived.py, typing.py)
-- `python/flydsl/expr/primitive.py` - All layout algebra functions
-- `python/flydsl/expr/derived.py` - CopyAtom, MmaAtom, TiledCopy, TiledMma wrappers
-- `python/flydsl/expr/gpu.py` - GPU operations (thread_idx, block_idx, barrier)
+- `python/flydsl/expr/` - DSL expression API: `primitive.py` (all layout algebra functions), `derived.py` (CopyAtom, MmaAtom, TiledCopy, TiledMma wrappers), `typing.py`
+- `python/flydsl/expr/gpu.py` - `thread_id`/`block_id`, `barrier`, `SharedAllocator` for LDS (shared memory)
 - `python/flydsl/expr/rocdl/` - MFMA/WMMA and other ROCm intrinsics
   (package: cdna3, cdna4, cdna5, rdna3, rdna4, cluster, inline_asm, tdm_ops, universal;
   plus `utils.py` / `enum.py` helpers)
-- `python/flydsl/expr/gpu.py` - `SharedAllocator` for LDS (shared memory), `thread_id`/`block_id`, `barrier`
 - `kernels/common/buffer_ops.py` - legacy raw AMD buffer load/store intrinsics
   (moved out of `flydsl.expr` in #880; prefer `fx.rocdl.make_buffer_tensor`)
 - `kernels/` - Pre-built kernels, organized into subpackages: `gemm/` (preshuffle_gemm.py, mxfp4_preshuffle.py, ...), `norm/` (layernorm/softmax/rmsnorm), `attention/`, `moe/`, `mega_moe/`, `common/` (incl. `common/mma/`), `comm/`, `conv/`
@@ -111,25 +101,14 @@ launch(A, B, 1024)
 Use the current public FlyDSL surface from `kernels/gemm/preshuffle_gemm.py` when writing new kernels:
 
 ```python
-Vec = fx.Vector
-
 tx = gpu.thread_id("x")
 bx = gpu.block_id("x")
-by = gpu.block_id("y")
-
-i32_m: fx.Int32
-c_m = fx.Int64(i32_m)
-c4 = fx.Int64(4)
-zero_f = fx.Float32(0.0)
+gpu.barrier()                                      # workgroup synchronization
 
 layout = fx.make_layout((4, 64), (64, 1))
 coord = fx.idx2crd(tx, layout)
 wave_id = fx.get(coord, 0)
 lane_id = fx.get(coord, 1)
-
-acc = Vec.filled(4, 0.0, fx.Float32)
-v_i64 = Vec(raw_vec).bitcast(fx.Int64)
-elem0 = v_i64[0]
 
 buf = fx.rocdl.make_buffer_tensor(tensor)          # preferred buffer-resource view
 tA  = fx.make_view(fx.get_iter(buf), fx.make_layout((M, N), (N, 1)))
@@ -146,131 +125,40 @@ Older code may use `gpu.thread_idx.x`, `gpu.block_idx.x`, `arith.constant(...)`,
 | `fx.Int32` | Runtime i32 | Auto-converted from Python int |
 | `fx.Stream` | CUDA/HIP stream | `fx.Stream(None)` for default stream |
 
-### Thread/Block Hierarchy
-```python
-from flydsl.expr import gpu
-
-tid_x = gpu.thread_id("x")   # Preferred current spelling
-bid_x = gpu.block_id("x")
-bid_y = gpu.block_id("y")
-
-# Legacy spelling still appears in older kernels:
-tid_x = gpu.thread_idx.x
-bid_x = gpu.block_idx.x
-
-gpu.barrier()                # Workgroup synchronization
-```
-
 ### Control Flow
 ```python
-from flydsl.expr import range_constexpr
-
-# Compile-time unrolled loop (emitted inline in IR)
-for i in range_constexpr(N):
+for i in range_constexpr(N):              # compile-time unrolled; i is a Python int
     ...
-
-# Runtime loop (lowered by AST rewriting)
-for i in range(runtime_value):
+for i in range(runtime_value):            # runtime scf.for (Python-int bounds too)
     ...
-
-# Runtime loop with an optional LLVM unroll hint.
-for k in fx.range(N, unroll_full=True):  # or unroll=4; unroll=1 disables
+for k in fx.range(N, unroll_full=True):   # runtime loop with an LLVM unroll hint; or unroll=4; unroll=1 disables
     ...
 ```
 
-### Runtime vs Compile-Time Conditions (Current Style)
-
-Use Python/DSL operators for runtime SSA comparisons. The AST rewriter lowers dynamic `if` conditions to `scf.IfOp`, and comparison operators like `==`, `<`, `>=` generate the needed MLIR predicates.
+A Python `if` on a DSL value is lowered by the AST rewriter to `scf.if`, and comparison operators (`==`, `<`, `>=`, ...) on `fx` values build the predicate. Compile-time conditions (Python booleans, `Constexpr` arguments, loop-unroll choices, type/layout branches) must use `const_expr(...)`: a plain `if` on a Python `bool` still picks one branch at trace time, but it is rewritten like a runtime `if`, so names first assigned inside it are undefined after it.
 
 ```python
-tid = gpu.thread_id("x")
-lane = tid % fx.Int64(64)
-c_zero = fx.Int64(0)
-c_limit = fx.Int64(8)
-
-# Preferred: readable DSL comparisons
-if lane == c_zero:
+lane = gpu.thread_id("x") % fx.Int64(64)
+if lane == fx.Int64(0):                       # runtime -> scf.if
     ...
-
-in_range = lane < c_limit
-val = fx.arith.select(in_range, good_val, zero_val)
-
-# Avoid for simple integer comparisons
-in_range = arith.cmpi(arith.CmpIPredicate.slt, lane, c_limit)
-```
-
-Use `const_expr(...)` only for values known at trace/compile time, such as Python booleans, constexpr arguments, loop-unroll choices, or type/layout branches:
-
-```python
-if const_expr(trans_v):
-    ...
-
-if const_expr(max_context_partition_num <= WARP_SIZE):
+val = (lane < fx.Int64(8)).select(good_val, zero_val)
+if const_expr(max_context_partition_num <= WARP_SIZE):   # compile-time
     ...
 ```
 
-Do **not** wrap GPU runtime values in `const_expr`. Even with `@flyc.kernel(known_block_size=(256, 1, 1))`, `gpu.thread_id("x")`, `lane`, and `warp_id` are runtime SSA values; the compiler knows their range, not the current lane instance.
-
-```python
-# Wrong: lane depends on gpu.thread_id("x")
-if const_expr(lane == c_zero):
-    ...
-
-# Correct
-if lane == c_zero:
-    ...
-```
-
-Keep explicit `arith.cmpi(...)` / `arith.unwrap(...)` for low-level manual MLIR construction, such as passing a raw condition to `scf.IfOp` directly:
-
-```python
-cond = arith.unwrap(partition_idx >= visible_tile_count)
-if_op = scf.IfOp(cond, has_else=False)
-```
+Do **not** wrap GPU runtime values in `const_expr`: `if const_expr(lane == c_zero)` is wrong. Even with `@flyc.kernel(known_block_size=(256, 1, 1))`, `gpu.thread_id("x")`, `lane`, and `warp_id` are runtime SSA values; the compiler knows their range, not the current lane instance. Unwrap a condition only for hand-built MLIR, e.g. `scf.IfOp((partition_idx >= visible_tile_count).ir_value(), has_else=False)`.
 
 ### Frontend Semantic Restrictions
 When writing or reviewing `@flyc.kernel` / `@flyc.jit` code, proactively avoid these patterns because they can conflict with MLIR construction even if they look valid in plain Python.
 
-1. **Do not define values inside `if/else` and use them later outside the branch.** Keep a single explicit definition path.
+1. **Before a runtime `if`, bind every name that any of its branches assigns, to an IR value of the assigned type.** Only names bound before the `if` become `scf.if` results; a name first defined inside the branches raises `NameError` when used after the `if`. The rewriter picks the results by syntax, before `const_expr` is evaluated, so `const_expr` branches count too: a name assigned in an `elif const_expr(...)` branch becomes a result once it is bound anywhere earlier, even inside an `if const_expr(...)` block. Where that earlier binding is `None` or was skipped, tracing fails with `Variable(s) [...] initialized as None before a dynamic if/else (scf.if)`. Bind a placeholder first (e.g. `nxt = fx.Int32(0)`, not `None` and not only under `if const_expr(PREFETCH):`), or move the `const_expr`-gated assignment out of the chain.
+
+2. **Do not mutate captured outer variables inside nested helper functions.** Read-only closure capture is acceptable; writes go through parameters and return values (`acc = helper(acc)`).
+
+3. **Avoid early `return`, and do not place `return` / `yield` inside `if/else` branches.** Bind the result before the `if`, assign it in each branch, and return once after, so the frontend can determine result types. A branch `return` behaves as in Python only when the condition is a Python value at trace time; under a dynamic condition, or inside a `range(...)` / dynamic `while` loop body, tracing raises `NotImplementedError`.
+
+4. **Runtime branches inside helper functions should be dispatched via local `@flyc.jit`.** When a branch body has side effects, loop-carried values, or branch-local definitions, split the branch bodies into local helpers and wrap the `if` in a local JIT helper:
    ```python
-   if cond:
-       dst = a
-   else:
-       dst = b
-   use(dst)  # avoid this pattern
-   ```
-
-2. **Do not mutate captured outer variables inside nested helper functions.** Read-only closure capture is acceptable, but writes should go through explicit parameters and return values.
-   ```python
-   def kernel():
-       acc = fx.Float32(0.0)
-
-       def helper(acc):
-           acc = acc + fx.Float32(1.0)
-           return acc
-
-       acc = helper(acc)
-   ```
-
-3. **Avoid early `return`, and do not place `return` / `yield` inside `if/else` branches.** Prefer a single explicit exit so the frontend can determine result types. A branch `return` behaves as in Python only when the condition is a Python value at trace time; under a dynamic condition, or inside a `range(...)` / dynamic `while` loop body, tracing raises `NotImplementedError`.
-   ```python
-   if cond:
-       out = v0
-   else:
-       out = v1
-   return out
-   ```
-
-4. **Compile-time conditions must use `const_expr(...)`.** Use `if const_expr(flag): ...` for constexpr flags and other static decisions. A plain Python `if` is only safe when the condition is already a Python `bool`.
-
-5. **Runtime branches inside helper functions should be dispatched via local `@flyc.jit`.** When a branch body has side effects, loop-carried values, or branch-local definitions, split the branch bodies into local helpers and wrap the `if` in a local JIT helper:
-   ```python
-   def then_path():
-       ...
-
-   def else_path():
-       ...
-
    @flyc.jit
    def dispatch():
        if runtime_cond:
@@ -283,121 +171,58 @@ When writing or reviewing `@flyc.kernel` / `@flyc.jit` code, proactively avoid t
 
 ### Runtime Loops with Loop-Carried Values (Software Pipelining)
 
-Use `init=` on `range()` to create a runtime loop with explicit SSA phi nodes for loop-carried state. This is required for software pipelining (prefetch patterns) where data must flow across iterations.
+`init=` on `range()` gives a runtime `scf.for` with explicit loop-carried state (block arguments, i.e. phi nodes), which software pipelining uses to carry prefetched data across iterations.
 
 **Pattern** (from `preshuffle_gemm.py`):
 ```python
-# Prologue: load first tile
-tile_0 = prefetch(0)
-init_state = [acc_init, tile_0_flat_val1, tile_0_flat_val2, ...]
-
-# Runtime loop with loop-carried state
-# Use typed DSL integer bounds (fx.Int64) so the AST rewriter does not treat this as a Python unrolled range.
-_start = fx.Int64(0)
-_stop = fx.Int64(N - 1)
-_step = fx.Int64(1)
-for iv, state in range(_start, _stop, _step, init=init_state):
-    acc_in = state[0]
-    tile_in = state[1:]
-
-    next_tile = prefetch(iv + 1)      # load NEXT data
-    acc_in = compute(acc_in, tile_in)  # compute CURRENT
-
-    results = yield [acc_in] + next_tile  # carry to next iter
-
-# Epilogue: process last tile from results
-acc_final = results[0]
-tile_final = results[1:]
-compute(acc_final, tile_final)
+tile_0 = prefetch(0)                                        # prologue: load first tile
+for iv, state in range(0, N - 1, 1, init=[acc_init] + tile_0):
+    acc_in, tile_in = state[0], state[1:]
+    next_tile = prefetch(iv + 1)                            # load NEXT data
+    acc_in = compute(acc_in, tile_in)                       # compute CURRENT
+    results = yield [acc_in] + next_tile                    # carry to next iteration
+compute(results[0], results[1:])                            # epilogue: last tile
 ```
 
-**How it works in MLIR:**
 | Element | Meaning |
 |---|---|
-| `init=init_state` | List of SSA values that seed the runtime loop block arguments for iteration 0 |
+| `init=[...]` | Values that seed the loop block arguments for iteration 0 |
 | `state` | The loop-carried block arguments (phi nodes) for THIS iteration |
 | `yield [...]` | Feeds values back as next iteration's `state` |
 | `results` | After loop exits, holds the last yielded values |
 
-**Three critical pitfalls (all verified by debugging):**
+**Pitfalls:**
 
-1. **Loop bounds must be a typed DSL integer such as `fx.Int64(...)`, NOT a plain Python int.** A plain int makes the AST rewriter unroll the loop and silently ignore `init=`. If you write `range(0, 15, 1, init=...)`, the AST rewriter treats the constant bounds as a Python `range` and unrolls; only plain Python-int bounds are unrolled, so a typed bound still produces a runtime `scf.for`. Use `fx.Int64(0)`, `fx.Int64(15)`, `fx.Int64(1)` instead.
+1. **Every `range(...)` in a kernel is a runtime `scf.for`, Python-int bounds included; only `range_constexpr` unrolls.** With `init=`, the bounds become `index` values and `init` is always kept. Without `init=`, the rewriter infers the carried state itself and uses `i32` bounds (`i64` if any bound is `i64`). Use `range_constexpr` when the body needs a Python int, e.g. to index a Python list.
 
-2. **Prefer internal types, but unwrap at hard boundaries.** Most `range(..., init=...)` uses accept DSL numeric/vector values. If a lower-level helper explicitly expects raw `ir.Value`, unwrap with `v.ir_value()` / `_raw(v)` at that boundary only.
+2. **`init` and `yield` take DSL values** (`fx.Int32`, `fx.Float32`, `fx.Vector`) and convert them to `ir.Value` for you. Unwrap with `v.ir_value()` only where a lower-level helper requires a raw `ir.Value`.
 
 3. **Build LDS views at the top of the kernel, not inside the runtime loop.** Allocate shared memory with `fx.SharedAllocator().allocate(...).peek()` and build each `.view()` once up front. A view created inside the `scf.for` body is defined in the loop scope; using it in the epilogue (outside the loop) causes an SSA dominance error. Building it once at the top makes it dominate both the loop and the epilogue.
 
-### Arithmetic Operations
-```python
-c42 = fx.Int64(42)                              # typed integer constant (preferred)
-c3_14 = fx.Float32(3.14)                        # f32 constant (preferred)
-mask = fx.Int32(0xFF)                            # i32 constant (preferred)
+### Arithmetic and `fx.Vector`
 
-# Prefer operators / Numeric methods
-result = a + b
-result = a * scale
-result = cond.select(true_val, false_val)
-largest = fx.max(a, b)
-smallest = fx.min(a, b)
-tiles = fx.ceildiv(count, tile_size)  # signed/unsigned dispatch from typed operands
-
-# Keep direct arith.*FOp only when explicit fastmath flags are required.
-```
-
-### Internal Types: Vector and Numeric (PREFERRED)
-
-Use FlyDSL's internal typed system instead of raw MLIR ops. The `Vector` class wraps `vector<NxTy>` with operator overloading and type-safe methods.
+Use typed values and Python operators instead of raw MLIR ops. Keep a direct `arith.*FOp` only when explicit fastmath flags are required.
 
 ```python
 Vec = fx.Vector
-
-# Wrap raw vector values
-acc = Vec(frag_C.load())      # vector<Nxf32> → Vector with * / + operators
-
-# Indexing (replaces vector.extract)
-val = acc[idx]                 # returns Float32 scalar
-
-# Bitcast (replaces vector.bitcast)
-v_f32 = Vec(raw_vec).bitcast(fx.Float32)  # vector<Nxi32> → vector<Nxf32>
-
-# Type conversion (replaces arith.trunc_f / arith.ext_f)
-bf16_val = f32_val.to(fx.BFloat16)     # f32 → bf16
-
-# Arithmetic — use Python operators, not arith.mulf/addf
-result = (val * scale_a) * scale_b
-
-# Splat constant vector
-zeros = Vec.filled(N, 0.0, fx.Float32)
-
-# Index cast — use fx.Int32 instead of arith.index_cast
-idx = fx.Int32(gpu.block_id("x") * tile_m)
+c42 = fx.Int64(42); c3_14 = fx.Float32(3.14)    # typed constants
+idx = fx.Int32(gpu.block_id("x") * tile_m)      # cast; replaces arith.index_cast
+acc = Vec(frag_C.load())                        # wrap a vector<Nxf32>
+val = acc[i]                                    # replaces vector.extract
+v_f32 = Vec(raw_vec).bitcast(fx.Float32)        # replaces vector.bitcast
+bf16_val = f32_val.to(fx.BFloat16)              # replaces arith.trunc_f / ext_f
+zeros = Vec.filled(N, 0.0, fx.Float32)          # splat; Vec.from_elements(...) builds from scalars
+result = (val * scale_a) * scale_b              # replaces arith.mulf / addf
 ```
 
-**Prefer internal types over raw ops:**
-| Raw MLIR op | Internal type equivalent |
-|-------------|------------------------|
-| `vector.extract(v, static_position=[i], ...)` | `Vec(v)[i]` |
-| `vector.bitcast(target_ty, v)` | `Vec(v).bitcast(Float32)` |
-| `arith.trunc_f(ty, v)` | `v.to(BFloat16)` |
-| `arith.mulf(a, b)` | `a * b` |
-| `arith.addf(a, b)` | `a + b` |
-| `arith.index_cast(T.i32, v)` | `fx.Int32(v)` |
-
-Use `Vec.filled(...)` for splats and `Vec.from_elements(...)` for vectors from scalars.
-
-### Arith Ops Availability Table
-| Operation | Function | Works on Vectors | Notes |
-|-----------|----------|-----------------|-------|
-| Add | `a + b` | Yes | Use direct FOp only for explicit fastmath |
-| Multiply | `a * b` | Yes | Use direct FOp only for explicit fastmath |
-| Negate | `-a` | Yes | |
-| Max / Min | `fx.max(a, b)` / `fx.min(a, b)` | Yes | Float forms propagate NaN; `fx.maxnumf` / `fx.minnumf` do not |
-| Integer ceil-div | `fx.ceildiv(a, b)` | Yes | Direct signed/unsigned op; distinct from layout `fx.ceil_div` |
-| Compare | `arith.cmpf(pred, a, b)` | Yes | predicate FIRST; returns i1/vec<i1> |
-| Select | `cond.select(t, f)` | Yes | |
-| Abs | no direct helper | Use `-v`, comparison, and `cond.select(...)` |
-| FMA | `a * b + c` | Yes | Use direct FOp only when explicit fastmath is needed |
-| Splat const | `Vec.filled(width, val, dtype)` | Creates vector | For scalar broadcast |
+| Operation | Spelling | Notes |
+|-----------|----------|-------|
+| Add / Mul / Negate / FMA | `a + b`, `a * b`, `-a`, `a * b + c` | Work on vectors too |
+| Max / Min | `fx.max(a, b)` / `fx.min(a, b)` | Float forms propagate NaN; `fx.maxnumf` / `fx.minnumf` do not |
+| Integer ceil-div | `fx.ceildiv(a, b)` | Signed/unsigned from the operand types; distinct from layout `fx.ceil_div` |
+| Compare | `a < b`, `a == b`, ... | Integer and float operands |
+| Select | `cond.select(t, f)` | |
+| Abs | `abs(v)` or `fx.absf(v)` | The arith dialect has no `absf`; FlyDSL provides one |
 
 ### Printf Debugging
 ```python
@@ -436,49 +261,24 @@ See [references/environment-and-debugging.md](references/environment-and-debuggi
 
 ### Common Issues
 
-1. **Constants/casts**: Prefer `fx.Int32(...)`, `fx.Int64(...)`, and `fx.Float32(...)` (`fx.Index(...)` is being deprecated in favor of `fx.Int64(...)`). Use `arith.constant(...)` only at low-level boundaries.
-
-2. **Raw `buffer_load` offset**: the `offset` parameter is in ELEMENTS, not bytes.
+1. **Raw `buffer_load` offset**: the `offset` parameter is in ELEMENTS, not bytes.
    The raw intrinsics live in `kernels/common/buffer_ops.py`, not `flydsl.expr`.
 
-3. **Cache stale after code changes**: The disk cache is keyed by the traced MLIR and the toolchain fingerprint, so Python edits and rebuilt C++ passes invalidate it. Set `FLYDSL_RUNTIME_ENABLE_CACHE=0` or clear `~/.flydsl/cache/` only when debugging a suspected stale artifact.
+2. **LDS overflow**: Check capacity (64KB on gfx942, 160KB on gfx950). `SharedAllocator` sizes the LDS global for you, but by default nothing rejects a total over the arch limit at compile time: on FlyDSL 0.5.0, a gfx942 kernel whose static `@fx.struct` storage came to 69248 bytes compiled and cached, and its launch failed with `hipErrorIllegalState` from `hipModuleLaunchKernel`. Since 0.5.1, launching under `with CompilationContext.compile_hints({"check_resource_limits": True}):` turns that into a compile error. When the size depends on host parameters, also call `check_smem_capacity(nbytes, arch)` from `flydsl.runtime.device` before compiling; it raises with both byte counts.
 
-4. **LDS overflow**: Check capacity (64KB on gfx942, 160KB on gfx950). `SharedAllocator` sizes the LDS global for you; the compiler errors if a static allocation exceeds the arch limit.
+3. **Tensor layout marking**: For dynamic shapes or alignment, use `flyc.from_dlpack(tensor).mark_layout_dynamic(leading_dim=0, divisibility=4)`.
 
-5. **Dynamic vs Constexpr**: `Constexpr[int]` values are baked into IR -- different values produce different compiled kernels. Use `Int32` for truly dynamic values.
+4. **AMD wavefront size**: Always 64 on gfx9xx. Use shifts [32, 16, 8, 4, 2, 1] for full-wave reduction.
 
-6. **Tensor layout marking**: For dynamic shapes or alignment, use `flyc.from_dlpack(tensor).mark_layout_dynamic(leading_dim=0, divisibility=4)`.
+5. **tile_k alignment for GEMM**: `tile_k * elem_bytes` must be divisible by 64 (K64-byte micro-step).
 
-7. **AMD wavefront size**: Always 64 on gfx9xx. Use shifts [32, 16, 8, 4, 2, 1] for full-wave reduction.
+6. **INT4 (W4A8)**: A matrix is int8, B matrix is packed int4 (2 values/byte), unpacked to int8 in-kernel.
 
-8. **tile_k alignment for GEMM**: `tile_k * elem_bytes` must be divisible by 64 (K64-byte micro-step).
-
-9. **INT4 (W4A8)**: A matrix is int8, B matrix is packed int4 (2 values/byte), unpacked to int8 in-kernel.
-
-10. **Absolute value**: the *arith dialect* has no `absf`, but FlyDSL exports one — use `abs(v)` or `fx.absf(v)` rather than a negate/compare/select sequence.
-
-11. **Scalar broadcast to vector**: Use `Vec.filled(width, value, fx.Float32)` to create a splat constant vector. Do NOT use raw vector ops for ordinary arithmetic.
+A suspected stale compile: see "Disk Cache Invalidation" in [references/environment-and-debugging.md](references/environment-and-debugging.md).
 
 ---
 
-## 11. Comparison with Triton/Gluon
-
-| Aspect | FlyDSL | Triton | Gluon |
-|--------|--------|--------|-------|
-| Layout control | Explicit layout algebra (Shape, Stride, Layout) | Implicit via block pointers | Implicit |
-| Tiling | Manual via divide/product operations | Auto-tiling with `tl.program_id` | Auto-tiling |
-| Memory access | Copy atoms, buffer load/store, TiledCopy | `tl.load`/`tl.store` | `gluon.load`/`gluon.store` |
-| MFMA | Direct `rocdl.mfma_*` intrinsics | `tl.dot` | `gluon.dot` |
-| Shared memory | SharedAllocator + `@fx.struct` explicit management | Implicit scratchpad | Implicit |
-| Abstraction level | Low (near hardware) | Medium | Medium-High |
-| Compilation | MLIR (Fly dialect -> LLVM -> HSACO) | MLIR (Triton dialect -> LLVM) | MLIR |
-| Control | Maximum control over data layout and movement | Less control, more automation | Least control |
-
-FlyDSL gives maximum control at the cost of verbosity. The layout algebra is the key differentiator -- it enables precise control over how data is arranged in registers, shared memory, and global memory, and how threads map to data.
-
----
-
-## 12. Running Kernels
+## 11. Running Kernels
 
 ### Locally
 
