@@ -1,24 +1,37 @@
 #!/usr/bin/env python3
 """
-Link wrapper for CMake's HIP language on Windows.
+Link wrapper for CMake's HIP language on Windows, for ONE arrangement: the host
+code is compiled with clang-cl and the target uses relocatable device code
+(-fgpu-rdc).
 
-On Windows, CMake's HIP link rule runs clang in --hip-link mode with the GNU-style
-driver but passes it MSVC-style arguments: -fuse-ld=lld-link, bare linker flags
-such as /subsystem:console, and import libraries spelled -lfoo.lib or foo.lib. The
-GNU-style driver takes the bare flags for input files and does not hand the
-libraries to lld-link in a form it resolves, so the link fails. This wrapper
-rewrites the argument list and then runs the real link:
-  - drops -fuse-ld=* (it conflicts with --hip-link)
-  - turns "-Xlinker <flag>" pairs and bare MSVC /flags into -Wl,<flag>
-  - turns -lfoo.lib and bare foo.lib into "-Xlinker foo.lib", which lld-link
-    resolves through the LIB environment variable
-Response files are not read or rewritten.
+In that arrangement CMake composes the link line for an MSVC linker (bare flags
+such as /machine:x64 and /subsystem:console, import libraries spelled foo.lib),
+while -fgpu-rdc needs the GNU-style driver to do the device link. The GNU-style
+driver reads the bare flags and libraries as input files and the link fails. This
+wrapper rewrites the argument list and then runs the real link:
+  - turns bare MSVC /flags into -Wl,<flag>
+  - turns bare foo.lib into "-Xlinker foo.lib", which lld-link resolves through
+    the LIB environment variable
+  - drops -fuse-ld=* (CMake's -fuse-ld=lld-link is rejected by the -fgpu-rdc
+    device link; it is harmless without -fgpu-rdc)
+  - turns "-Xlinker <flag>" pairs into -Wl,<flag> and -lfoo.lib into
+    "-Xlinker foo.lib" (neither made a difference in any configuration tested)
+
+A project that compiles everything with the GNU-style clang++ does not need this
+script: without -fgpu-rdc CMake's own link rule works, and with it one line,
+set(CMAKE_HIP_USING_LINKER_DEFAULT "-fuse-ld=lld"), is the whole fix.
+
+Limits:
+  - Response files are not read or rewritten. Once the link line is long enough
+    for the build tool to move it into @file.rsp, the libraries in that file are
+    not rewritten and the link fails.
+  - CMAKE_HIP_LINK_EXECUTABLE covers executables only; a shared library needs the
+    same treatment through CMAKE_HIP_CREATE_SHARED_LIBRARY.
 
 Usage (as CMAKE_HIP_LINK_EXECUTABLE, on Windows only):
   python <this_script> <clang_exe> [args...]
 
-This is unrelated to relocatable device code (-fgpu-rdc): any project that links
-HIP objects through CMake on Windows needs it. Standard library only.
+Standard library only.
 """
 import subprocess
 import sys

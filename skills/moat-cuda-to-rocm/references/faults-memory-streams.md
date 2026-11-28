@@ -47,6 +47,19 @@ kernel is launched with; when the two disagree, decide which one is the intent (
 it was the launch geometry). This is a memory-safety bug on both platforms, so fix it for
 both rather than guarding it. (HEonGPU: `HEEncryptor<Scheme::TFHE>` cuda_rng.)
 
+**`atomicInc(p, val)` is a WRAPPING increment, so the bounded-slot idiom
+`buf[atomicInc(&count[row], CAPACITY) + row*CAPACITY]` writes one slot past the row.** It
+stores `old >= val ? 0 : old+1` and returns `old` (identically on CUDA and HIP), so the
+counter does reach `CAPACITY`; the next insert returns `CAPACITY` before resetting, and that
+return is used as the slot index. The correct capacity argument is `CAPACITY-1`. Audit this
+wherever a bucket, ring or per-row insert list uses `atomicInc`: the overflow is a cross-row
+write in general and a past-the-end write for the last row. Two traps when you assess it. It
+is usually PRE-EXISTING upstream code, so it is outside a minimal port: report it rather than
+folding the fix into the port's diff. And a clean AMD run is NOT evidence of safety, because
+a one-element overrun of a large allocation lands inside the same page and corrupts silently
+instead of faulting; say that in the audit rather than citing the green run.
+(3DUNDERWORLD-SLS-GPU_CPU: `GPUBucketsObj::add2Bucket`, 110-entry buckets.)
+
 **Fresh device allocations are NOT zero on ROCm**, where CUDA's allocator often hands back
 zeroed pages. A kernel writing only a sub-region and implicitly relying on a zero start
 passes on CUDA and reads garbage on ROCm. Fingerprint: a zero-tolerance test that PASSES in
@@ -83,7 +96,33 @@ thread-index compare in the device IR (`--cuda-device-only -S -emit-llvm`);
 a fix. Fix the source: initialise the locals (zero is the identity of a sum). When the
 kernels are generated, a vendored copy of the generator's output can predate the
 generator's own fix, so check that the vendored code really carries a fix its changelog
-claims. (symforce, colmap)
+claims. The same mechanism with a different symptom, a counter that advances by `warpSize`
+times the real count, is in faults-wavefront.md ("A leader-only write broadcast by shuffle
+must be initialised on every lane"). (symforce, colmap)
+
+**Type punning through a word pointer lets clang drop the stores it reads.** Code that copies
+a struct lane by lane as `uint` words (`reinterpret_cast<const uint*>(&s)[lane]`) is undefined
+behavior that nvcc does not exploit; with type-based alias analysis clang may treat the float
+stores into the struct as dead, so the copy writes zeros or garbage (in PhysX a midphase emitted
+an all-zero transform, and every sphere and capsule fell through meshes). It is the alias-analysis
+cousin of the `noundef` entries (previous entry; faults-wavefront.md, the warp-aggregated atomic).
+Signs: the result changes when a `printf` is added to the kernel, so read device buffers back on
+the host instead of printing on the device. Test with `-fno-strict-aliasing` and `-Xclang
+-no-enable-noundef-analysis` on the HIP sources; where a codebase uses either pattern widely, add
+both to the HIP compile (HIP sources only) rather than patching every site. (PhysX)
+
+**Host code reading a `__device__` variable through a pointer gets HIP's host shadow, not
+the value.** CUDA code often keeps lookup tables as `__device__ static constexpr` arrays so that
+both sides can use them, and reaches them through a `__host__ __device__ constexpr` helper that
+returns `table.data()`. Under nvcc the host side reads the real values. Under HIP, a `__device__`
+variable's host-side symbol is a shadow that only the runtime registration uses, so once the host
+takes its address it reads zeros (or garbage at -O2) where nvcc reads the table. Reading
+`table[i]` directly with a constant index can still constant-fold and look right, which hides
+the problem in small tests. Nothing faults: in cuCollections the HyperLogLog++ host finalizer
+silently skipped bias correction (Spark-parity test 79 vs. 81). Fix on HIP: drop `__device__` and
+keep a plain `static constexpr` array, which clang makes usable from device code as well (verified
+on both sides). nvcc rejects that spelling in device code, so keep `__device__` on the CUDA branch.
+(cuCollections)
 
 ## Handle and object lifetime
 
@@ -170,26 +209,82 @@ SIGSEGV/SIGABRT still gives the stack. (plvs)
 
 ## Copies and stream ordering
 
-**`cudaMemcpy*Async` from a soon-freed pageable host buffer.** CUDA stages pageable async
-copies synchronously, so a test that copies from a local `std::vector` and lets it go out of
-scope still works. ROCm's is genuinely asynchronous, so the freed and reused buffer is read
-after the copy is enqueued. The corruption appears only in bytes the kernel does not
-overwrite, and the failing set varies run to run. This is a use-after-free that is latent UB
-on CUDA, not an allocator defect -- confirm by keeping the source alive and watching the
-failures vanish, or without touching the source at all by re-running under
-`AMD_SERIALIZE_COPY=3`, which makes a copy-lifetime bug pass and leaves a genuine numeric
-residual untouched. That one switch is also the cheapest way to tell the two apart when a
-suite mixes them: run it per failure cluster before admitting anything into a documented
-residual family. Expect more than one instance per project: the idiom appears wherever a
-test builds a staging buffer per loop iteration, and the giveaway is that only the side fed
-from the short-lived buffer is wrong, often carrying values the computation could not produce
-at all. (CV-CUDA: InterpolationVarShapeWrap, and independently TestOpColorTwist's planar
-upload, whose per-iteration deinterleave result feeds one async copy per channel.)
+**`cudaMemcpy*Async` lifetime and ordering: a pageable 1D source is safe, a pageable 2D or
+3D source is not on HIP.** CUDA code that copies from a local `std::vector` with
+`cudaMemcpy2DAsync` and lets it go out of scope works on CUDA in practice and copies garbage
+on ROCm, where the freed and reused buffer is read after the call has returned. The
+corruption appears only in bytes the kernel does not overwrite, and the failing set varies
+run to run. This is a use-after-free in the application, not an allocator defect: CUDA does
+not document that a pageable H2D async copy reads its source before the call returns; HIP's
+header claims it for 1D and 2D, and the measurements below show the claim holds only for 1D.
+NVIDIA's "API synchronization behavior" page
+(https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html, Memcpy, Asynchronous)
+says only that a transfer with pageable host memory "might be synchronous with respect to
+host" and that the driver "may" synchronize with the stream and stage the copy into pinned
+memory; the "returns once the pageable buffer has been copied to the staging memory"
+guarantee is in the Synchronous section, for `cudaMemcpy`. That CUDA stages pageable H2D
+copies, 2D included, before return is observed (CV-CUDA, below), not documented, and has
+not been probed here. HIP's `hip_runtime_api.h` says "If host or dst are not pinned, the
+memory copy will be performed synchronously" for `hipMemcpyAsync` and `hipMemcpy2DAsync`;
+a 1D copy of at most 64 KiB is staged rather than synchronous, a larger 1D copy blocks in
+the call, and a 2D copy is neither; for 1D the source can be reused or freed right after the
+call, and for 2D it cannot. Measured with a pageable `std::vector` source overwritten (and
+freed) right after the call, with and without a 0.5 s `wall_clock64()` spin kernel ahead of
+the copy on the stream, at 234 B, 64 KiB and 512 KiB, tight and padded device pitch (HIP
+7.16.26385, gfx942 and gfx1100):
 
-**The same staging difference hides a cross-stream race with no free involved.** An upload
+- 1D `hipMemcpyAsync` H2D of at most 64 KiB is staged at call time and returns while the
+  stream is still busy; a larger one blocks until the stream drains. The device always sees
+  the original bytes, so a 1D source may be freed or reused at once.
+- `hipMemcpy2DAsync` and `hipMemcpy3DAsync` H2D (both arches) return in under 0.1 ms at
+  every size, even on an idle stream, and read the source later: the device sees the
+  overwrite, or freed-heap bytes when the buffer was deleted.
+
+So a pageable 2D or 3D source must stay alive and unchanged until the stream (or an event
+recorded after the copy) is synchronized. On HIP that is measured; on CUDA reading the
+source before return is not guaranteed either, so do not rely on it there unless NVIDIA
+documents it. CV-CUDA is this case: `TestInterpolationVarShapeWrap.cpp` frees a
+per-iteration pageable `dstVec` after `cudaMemcpy2DAsync`, and on ROCm 7.2.1 garbage
+appeared in the row padding the kernel never writes; keeping `dstVec` alive until the stream
+sync fixed it with no sync change. Confirm a suspected instance the same way, by keeping the
+source alive and watching the failures vanish, or without touching the source at all by
+re-running under `AMD_SERIALIZE_COPY=3`, which makes a copy-lifetime bug pass and leaves a
+genuine numeric residual untouched. That one switch is also the cheapest way to tell the two
+apart when a suite mixes them: run it per failure cluster before admitting anything into a
+documented residual family. Expect more than one instance per project: the idiom appears
+wherever a test builds a staging buffer per loop iteration, and the giveaway is that only
+the side fed from the short-lived buffer is wrong, often carrying values the computation
+could not produce at all. Other copy variants (D2H, `hipMemcpyToSymbolAsync`, arrays) are
+unmeasured; probe before relying on them.
+
+The other hazards, on both platforms: (1) a PINNED or registered source (`hipHostMalloc`,
+`hipHostRegister`, a pinned-vector class) freed or overwritten before the stream reaches the
+copy, because that copy really is asynchronous; and (2) cross-stream ordering, where a
+kernel on another stream (or the legacy null stream against a non-blocking stream, below)
+reads the destination before the copy lands. Fix those with a stream or event sync before
+the buffer is reused, or an event wait on the consuming stream. To probe a runtime, queue a
+long spin kernel on the stream that waits on `wall_clock64()` (constant rate; `clock64()`
+wraps at 20 bits on gfx11, see platform-limits.md, and a 2e8-tick `clock64()` spin hung for
+over 4.5 minutes on gfx1100), issue the copy (for 2D or 3D, `hipMemcpy2DAsync` or
+`hipMemcpy3DAsync` the same way), overwrite the source at once, then sync and compare; time
+the call to see whether it staged, blocked or deferred. (GPUMD: `main_replica` Ewald
+`find_k_and_G`, and the probe above; CV-CUDA: InterpolationVarShapeWrap, and independently
+TestOpColorTwist's planar upload, whose per-iteration deinterleave result feeds one async
+copy per channel.)
+
+**Do not add a sync after a 1D pageable upload "for HIP".** It is a cost with no benefit,
+because the source of a pageable 1D `hipMemcpyAsync` has been read by the time the call
+returns (previous entry; HIP 7.16.26385). In GPUMD's `gpumd_replica`, where one thread
+interleaves the streams of all replicas on a GPU, a per-call sync after the 1D Ewald
+k-vector uploads made an 8-replica run about 21% slower on gfx1100 (four runs each) and
+2.5x slower on gfx942 (one run each), and was removed. A sync that orders the upload
+against a consumer on another stream (next entry) is a different thing and stays. (GPUMD)
+
+**A pageable async upload also hides a cross-stream race with no free involved.** An upload
 by `cudaMemcpy*Async` from pageable memory on one stream, then a consumer kernel on ANOTHER
 stream with no event or stream sync between them. On CUDA the copy has effectively landed
-before the launch; on ROCm the first kernel batch can read a partly written array.
+before the launch (observed, not documented); on ROCm the first kernel batch can read a
+partly written array, whether or not the source bytes were staged at call time.
 Fingerprint: an intermittent wrong result confined to the first launch's outputs, while a
 sibling code path that ends its setup with a device sync stays bitwise stable. Detect it by
 running the same call 20 times and comparing bitwise with the first; one
@@ -252,8 +347,65 @@ Bisect with a sync on each side: only the one AFTER the copy fixes it. (TornadoV
 `NativeCommandQueue.mapOnDeviceMemoryNDRegion`, deterministic on Windows gfx1151, passing
 on Linux gfx950/gfx1201.)
 
+**A "last block reduces" kernel needs `__threadfence()`, and MI300X is where its absence shows.**
+A common CUDA pattern computes per-block partial results, writes them to global memory, bumps a
+completion counter with `atomicInc`/`atomicAdd`, and lets whichever block sees the final count
+read every partial and finish the reduction. CUDA's memory model requires a device-scope fence
+between the partial-sum stores and the counter, which is what CUDA's own threadFenceReduction
+sample does. Code that leaves the fences out usually works on an
+NVIDIA GPU, whose single L2 makes other blocks' stores visible in time. MI300X (gfx942) is
+built from eight XCDs, each with its own L2, and a plain store from a block on one XCD is not
+guaranteed to be visible to a block on another without a release/acquire: the last block reads
+stale partials. The result is wrong or run-to-run nondeterministic, with no fault. Add
+`__threadfence()` after the partial stores (before the atomic) and again in the last block before
+it reads the partials; it is correct on CUDA too and costs one fence per block. Grep for
+`atomicInc`, a `gridDim.x - 1` comparison against an atomic's return value, and "last block"
+comments. Without the fences, llm.c's `layernorm_backward_kernel10` failed the project's
+determinism check on every run on gfx942; with them, every test configuration passed. (llm.c)
+
+**A GPU-written host flag can arrive before an earlier small device-to-host copy.** CUDA code
+often reads results back without synchronizing: async device-to-host copies on a stream, then a
+tiny kernel (or a stream write-value) that sets a flag in mapped host memory, and the host spins
+on the flag and reads the copied data. CUDA's stream order makes the copied bytes land first.
+HIP (ROCm 10.2, gfx1201) runs copies of 16 KiB or less that touch host memory as a copy kernel
+whose writes are released only at device scope, so they can still be in the GPU L2 when the
+flag reaches host memory: the host reads stale data, rarely with a kernel-written flag (about 1
+in 10,000) and almost always with `hipStreamWriteValue32`. Host-memory coherence flags make no
+difference. Symptoms are timing-dependent wrong results that vanish with any
+`hipStreamSynchronize`, with `AMD_SERIALIZE_COPY`, or with `GPU_FORCE_BLIT_COPY_SIZE=0` (which
+forces SDMA); unoptimized device code tends to expose it. Fix: `__threadfence_system()` in the
+signalling kernel before the flag store, or record an event between the copies and the signal.
+Find candidates by searching for host spin loops on `volatile` pinned memory and for
+`cuStreamWriteValue`. (PhysX)
+
 **`hipFree` is synchronizing** (`hipFreeAsync` is not), so an explicit
 `hipDeviceSynchronize()` before it is redundant. (anari-visionaray)
+
+**Device-side `new[]`/`delete[]` per thread is worth replacing, but it is NOT a known
+correctness fault: do not go hunting one.** GooFit's kernels did `new fptype[10]` and
+`delete[]` per thread, and a wrong fitted parameter on gfx90a was once blamed on it. That
+did not hold up: restoring the original `new`/`delete[]` and rebuilding on gfx1100 with
+ROCm 7.2.3 gave 24/24 tests passing and a fitted parameter identical to the fixed version,
+digit for digit, and the gfx90a observation turned out to follow the ROCm version, not the
+allocation (diagnosis.md, "Rule out a stale tree and the toolchain version"). What remains
+true is the ordinary reason to avoid it: device-side dynamic allocation serializes on a
+global heap whose default size is modest, and can return nullptr under realistic thread
+counts. Replacing it with a fixed-size automatic array bounded by the constant the code
+already has (GooFit: `new fptype[10]` -> `fptype[MAX_NUM_OBSERVABLES]`, which is also 10) is
+arch-unified, correct on CUDA too, and needs no guard; upstream GooFit made the identical
+change to its own `CompositePdf` (#384) on those grounds. Treat it as hygiene worth doing in
+passing, not as a bug to chase when your numbers are wrong. (GooFit)
+
+**A copy kind that disagrees with the pointers is `hipErrorInvalidValue`.** HIP checks the explicit kind: `hipMemcpyAsync(dst, src, n, hipMemcpyDeviceToHost, s)` with a pageable `malloc` source returns `invalid argument` (gfx942, ROCm 7.16). `hipMemcpyDefault` lets HIP pick the direction from the pointers and copies correctly. Tests that stand in host buffers for device addresses hit this first; check whether upstream ever runs them on a real GPU (a project whose CI uses a simulated host-memory backend may never have). CUDA documents a mismatched `cudaMemcpyKind` as undefined, so do not claim the HIP failure diverges from CUDA without a CUDA run; describe only what HIP did. Do not fix this by mapping `cudaMemcpy{HostToDevice,DeviceToHost,DeviceToDevice}` to `hipMemcpyDefault` in a compat header: the shim must honour the caller's kind, as CUDA's API contract says, and the tests stay as upstream wrote them. If upstream runs them only on a simulated backend, record them as simulated-backend tests and run them in that build (e.g. `-DRUNTIME_ENVIRONMENT=simu`), where they pass; on the GPU they are expected failures. (unified-cache-management: cache2 `DumpThenLoad*` integration tests; a remap tried there was dropped.)
+
+**`hipMemcpyToSymbol` rejects `hipMemcpyDefault`.** CUDA documents `cudaMemcpyDefault` as
+accepted for `cudaMemcpyToSymbol`/`cudaMemcpyToSymbolAsync`; HIP 7.17 (ROCm 10.2) returns
+`hipErrorInvalidMemcpyDirection` for it on `hipMemcpyToSymbol`, `hipMemcpyToSymbolAsync` and
+`hipMemcpyFromSymbol`, while the explicit directions work. The call compiles, so a port that
+only builds never sees it, and an error-check macro turns it into an abort at first use. Grep for
+`MemcpyToSymbol`/`MemcpyFromSymbol` with `Default` and change the kind at the call site to the
+real direction, which is behavior-preserving on CUDA; do not remap `cudaMemcpyDefault` in a
+compat header, because other copies rely on it. (autoware_universe)
 
 ## Host callbacks and fork
 
@@ -354,7 +506,9 @@ drop that metadata when the atomic sits in a helper inlined into the kernel, and
 the backend emits a CAS retry loop that works. So one program can pass at `-O3` and come out
 entirely empty at device `-O0`, and a standalone probe can contradict the application.
 Device `-O0` is not exotic: a CMake HIP build configured with no `CMAKE_BUILD_TYPE` (what
-many READMEs give) has empty `CMAKE_HIP_FLAGS` and compiles device code at `-O0`, so
+many READMEs give) has empty `CMAKE_HIP_FLAGS` and compiles device code at `-O0`
+(build-cmake-link.md, "An unset CMake build type runs every HIP kernel unoptimized", has the
+performance side and the fix), so
 validate the README recipe as written, not with `-DCMAKE_BUILD_TYPE=Release` added.
 Disassemble the APPLICATION's code object (`llvm-objdump --offloading <exe>`, then
 `llvm-objdump -d` on the gfx bundle): a native `global_atomic_or` or `flat_atomic_or` means
